@@ -529,3 +529,15 @@ describe('C9 local reminders and finite ICS interoperability',()=>{
     expect(again.records[0].reminderMinutes).toBeUndefined()
   })
 })
+
+describe('C9 long-lead reminder completeness',()=>{
+  it('finds a one-week reminder within the next 14 days for a later event',()=>{
+    const origin=fromLocalDateTime('2026-10-16T12:00')
+    const later=record({id:'18-days-later',start:fromLocalDateTime('2026-11-03T12:00'),
+      end:fromLocalDateTime('2026-11-03T13:00'),reminderMinutes:10080})
+    const result=reminderItems({schemaVersion:1,records:[later]},origin)
+    expect(result).toHaveLength(1)
+    expect(result[0].status).toBe('upcoming')
+    expect(result[0].dueAt).toBe(fromLocalDateTime('2026-10-27T12:00'))
+  })
+})

@@ -28,7 +28,9 @@ export function reminderItems(state:CalendarState,nowIso:string,actions:Reminder
   if(!Number.isFinite(now)||!Number.isInteger(lookAheadDays)||lookAheadDays<1||lookAheadDays>31)
     throw new Error('Invalid reminder planning range')
   const from=localDate(new Date(now-86400000))
-  const to=addDays(localDate(new Date(now+lookAheadDays*86400000)),1)
+  // A seven-day lead may become due inside the review window for an event
+  // scheduled one further week ahead. Expand source occurrence lookup only.
+  const to=addDays(localDate(new Date(now+lookAheadDays*86400000)),8)
   const personal=state.records.filter(r=>r.source==='personal'&&validReminderLead(r.reminderMinutes))
   const parents=new Map(personal.map(r=>[r.id,r]))
   const result:ReminderItem[]=[]
