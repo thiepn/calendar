@@ -51,3 +51,42 @@ export function saveWholeEvent(state:CalendarState,record:CalendarRecord):Calend
     return r
   })}
 }
+
+/**
+ * Stage an independent future series without committing it yet.
+ * Subsequent editing can change only the new series while past history remains unchanged.
+ */
+export function splitSeriesAt(state:CalendarState,parentId:string,date:LocalDate,newId:string):CalendarState {
+  day(date)
+  const parent=state.records.find(r=>r.id===parentId)
+  if(!parent?.repeat||parent.source!=='personal')throw new Error('Only personal recurring events can be split')
+  if(!newId||state.records.some(r=>r.id===newId))throw new Error('The future series must have a new ID')
+  if(state.records.some(r=>r.recurrenceParentId===parentId&&r.recurrenceDate!>=date))
+    throw new Error('Restore or remove edited future occurrences before splitting the series')
+  const instance=occurrencesBetween([parent],date,date).find(x=>x.date===date)
+  if(!instance)throw new Error('That date is not an active occurrence in the series')
+  const before=addDays(date,-1)
+  const oldParent:CalendarRecord={...parent,repeat:{...parent.repeat,until:before},
+    excludedDates:parent.excludedDates?.filter(d=>d<date),updatedAt:new Date().toISOString()}
+  const next:CalendarRecord={...parent,id:newId,start:instance.start,end:instance.end,
+    startDate:instance.allDay?instance.startDate:undefined,
+    endDateExclusive:instance.allDay?instance.endDateExclusive:undefined,
+    excludedDates:parent.excludedDates?.filter(d=>d>=date),updatedAt:new Date().toISOString()}
+  return {schemaVersion:1,records:state.records.map(r=>r.id===parentId?oldParent:r).concat(next)}
+}
+
+/** End future repetitions, preserving already-edited future occurrences as standalone events. */
+export function endSeriesAt(state:CalendarState,parentId:string,date:LocalDate):CalendarState {
+  day(date)
+  const parent=state.records.find(r=>r.id===parentId)
+  if(!parent?.repeat||parent.source!=='personal')throw new Error('Only a personal series can be ended')
+  if(!occurrencesBetween([parent],date,date).some(x=>x.date===date))throw new Error('Not an active series occurrence')
+  const cutoff:CalendarRecord={...parent,repeat:{...parent.repeat,until:date},
+    excludedDates:parent.excludedDates?.filter(d=>d<=date),updatedAt:new Date().toISOString()}
+  return {schemaVersion:1,records:state.records.map(r=>{
+    if(r.id===parentId)return cutoff
+    if(r.recurrenceParentId===parentId&&r.recurrenceDate!>date)
+      return {...r,recurrenceParentId:undefined,recurrenceDate:undefined,updatedAt:new Date().toISOString()}
+    return r
+  })}
+}

@@ -4,7 +4,8 @@ import {addDays,daysBetween,fromLocalDateTime} from './dates'
 import {occurrencesBetween,excludeOccurrence,conflictsOnDay} from './occurrences'
 import {previewIcs,mergeIcs,exportIcs} from './ics'
 import {validateState} from './storage'
-import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent} from './series'
+import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent,splitSeriesAt,endSeriesAt} from './series'
+import {layoutTimedDay,slotRange} from './timeline'
 import {findFreeSlots} from './availability'
 const record=(patch:Partial<CalendarRecord>={}):CalendarRecord=>({
   id:'test',title:'Study',description:'',location:'',source:'personal',
@@ -109,5 +110,69 @@ describe('Find time against canonical visible and hidden calendar sources',()=>{
     const slots=findFreeSlots([allDay],opts)
     expect(slots.map(x=>x.date)).toEqual(['2090-10-18','2090-10-18','2090-10-18'])
     expect(findFreeSlots([allDay],{...opts,days:1})).toEqual([])
+  })
+})
+
+describe('Graphical local timeline',()=>{
+  it('assigns separate lanes to actual overlapping events, not adjacent events',()=>{
+    const make=(id:string,start:string,end:string)=>record({id,
+      start:fromLocalDateTime('2026-10-19T'+start),end:fromLocalDateTime('2026-10-19T'+end)})
+    const events=occurrencesBetween([
+      make('a','09:00','11:00'),make('b','09:30','10:30'),
+      make('c','10:30','11:30'),make('d','12:00','13:00')
+    ],'2026-10-19','2026-10-19')
+    const blocks=layoutTimedDay(events,'2026-10-19')
+    expect(blocks.map(b=>b.lanes)).toEqual([2,2,2,1])
+    expect(blocks[0].lane).not.toBe(blocks[1].lane)
+    expect(blocks[3].overlaps).toBe(false)
+    expect(blocks[0].startMinute).toBe(540)
+    expect(blocks[0].endMinute).toBe(660)
+  })
+  it('clips crossing-midnight events into each day without dropping source identity',()=>{
+    const r=record({start:fromLocalDateTime('2026-10-19T23:30'),end:fromLocalDateTime('2026-10-20T01:00')})
+    const before=layoutTimedDay(occurrencesBetween([r],'2026-10-19','2026-10-19'),'2026-10-19')
+    const after=layoutTimedDay(occurrencesBetween([r],'2026-10-20','2026-10-20'),'2026-10-20')
+    expect(before).toHaveLength(1)
+    expect(before[0].startMinute).toBe(1410)
+    expect(before[0].endMinute).toBe(1440)
+    expect(after[0].startMinute).toBe(0)
+    expect(after[0].endMinute).toBe(60)
+    expect(after[0].occurrence.recordId).toBe('test')
+  })
+  it('makes actual local editable half-hour times and validates gaps',()=>{
+    const range=slotRange('2026-10-19',570,60)
+    expect(new Date(range.start).getHours()).toBe(9)
+    expect(new Date(range.start).getMinutes()).toBe(30)
+    expect(Date.parse(range.end)-Date.parse(range.start)).toBe(3600000)
+    expect(()=>slotRange('2026-10-19',571,60)).toThrow()
+    expect(()=>slotRange('2026-10-19',570,17)).toThrow()
+  })
+})
+describe('Future-only recurring series changes',()=>{
+  it('splits a weekly series on a selected occurrence and retains history',()=>{
+    const original=record({repeat:{frequency:'weekly',interval:2,weekdays:[1,3]}})
+    const state:CalendarState={schemaVersion:1,records:[original]}
+    const dates=occurrencesBetween([original],'2026-10-12','2026-11-12').map(x=>x.date)
+    const pivot=dates[2]
+    const split=splitSeriesAt(state,original.id,pivot,'new-series')
+    expect(validateState(split).records).toHaveLength(2)
+    const projected=occurrencesBetween(split.records,'2026-10-12','2026-11-12').map(x=>x.date).sort()
+    expect(projected).toEqual(dates)
+    expect(split.records[0].id).toBe('test')
+    expect(split.records[1].id).toBe('new-series')
+    expect(split.records[0].repeat?.until).toBe(addDays(pivot,-1))
+  })
+  it('preserves detached overrides when stopping recurrence, rejects unsafe splits',()=>{
+    const base=record({repeat:{frequency:'daily',interval:1}})
+    const begin:CalendarState={schemaVersion:1,records:[base]}
+    const instance=occurrencesBetween(begin.records,'2026-10-16','2026-10-16')[0]
+    const overridden=replaceOccurrence(begin,'test','2026-10-16',{
+      ...shiftOccurrence(base,instance,'2026-10-18'),id:'detached'
+    })
+    expect(()=>splitSeriesAt(overridden,'test','2026-10-15','new')).toThrow('future occurrences')
+    const ended=endSeriesAt(overridden,'test','2026-10-14')
+    expect(ended.records[1].recurrenceParentId).toBeUndefined()
+    expect(validateState(ended).records).toHaveLength(2)
+    expect(occurrencesBetween(ended.records,'2026-10-15','2026-10-15')).toHaveLength(0)
   })
 })
