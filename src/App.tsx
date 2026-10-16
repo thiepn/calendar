@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useRef,useState,type ChangeEvent} from 'react'
-import {CalendarDays,ChevronLeft,ChevronRight,Plus,Upload,Download,Search,Database,ExternalLink,AlertTriangle,Trash2,Pencil,X,RotateCcw,Menu,Clock3} from 'lucide-react'
+import {CalendarDays,ChevronLeft,ChevronRight,Bell,Plus,Upload,Download,Search,Database,ExternalLink,AlertTriangle,Trash2,Pencil,X,RotateCcw,Menu,Clock3} from 'lucide-react'
 import type {CalendarOccurrence,CalendarRecord,CalendarState,LocalDate} from './types'
 import {addDays,addMonths,dateLabel,dateSeries,friendlyRange,localDate,monday,monthGridStart,localDateTime,localInstantOptions,offsetLabel} from './core/dates'
 import {dayOccurrences,excludeOccurrence,occurrencesBetween} from './core/occurrences'
@@ -11,6 +11,8 @@ import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
 import {EventEditor} from './components/EventEditor'
 import {AllDayDialog} from './components/AllDayDialog'
 import {RestoreDialog} from './components/RestoreDialog'
+import {ReminderCenter} from './components/ReminderCenter'
+import {reminderItems,readReminderActions,saveReminderActions,actionForReminder,deliverableReminders,REMINDER_ACTIONS_KEY,REMINDER_DELIVERED_KEY,type ReminderItem,type ReminderActions} from './core/reminders'
 import {applyAllDayChange,type AllDayProposal} from './core/all-day'
 import {CalendarViews,type Mode} from './components/CalendarViews'
 
@@ -24,6 +26,13 @@ function download(name:string,contents:string,type:string){
 const initial=loadState()
 export default function App(){
   const [calendar,setCalendar]=useState<CalendarState>(initial.state)
+  const [remindersOpen,setRemindersOpen]=useState(false)
+  const [reminderActions,setReminderActions]=useState<ReminderActions>(()=>{try{return readReminderActions()}catch{return {}}})
+  const [reminderNow,setReminderNow]=useState(()=>new Date().toISOString())
+  const [notifyEnabled,setNotifyEnabled]=useState(()=>{try{return localStorage.getItem('thiepn.calendar.foreground-notify.v1')==='yes'}catch{return false}})
+  const [notifyPermission,setNotifyPermission]=useState<'unsupported'|'default'|'denied'|'granted'>(()=>{
+    return typeof Notification==='undefined'?'unsupported':Notification.permission
+  })
   const [unreadable,setUnreadable]=useState(Boolean(initial.error))
   const [recovery,setRecovery]=useState<RecoverySnapshot|null>(()=>{try{return readRecovery()}catch{return null}})
   const [restoreCandidate,setRestoreCandidate]=useState<{state:CalendarState;origin:string}|null>(null)
@@ -71,7 +80,57 @@ export default function App(){
     }catch(error){setNotice('Not saved: '+String(error));return false}
   }
   useEffect(()=>{
+    const timer=window.setInterval(()=>setReminderNow(new Date().toISOString()),30000)
+    const visibility=()=>{if(document.visibilityState==='visible')setReminderNow(new Date().toISOString())}
+    document.addEventListener('visibilitychange',visibility)
+    return ()=>{window.clearInterval(timer);document.removeEventListener('visibilitychange',visibility)}
+  },[])
+  const reminders=useMemo(()=>reminderItems(calendar,reminderNow,reminderActions),[calendar,reminderNow,reminderActions])
+  const dueReminderCount=reminders.filter(x=>x.status==='due').length
+  function updateReminderAction(item:ReminderItem,kind:'dismiss'|'snooze',minutes=15){
+    try{
+      // Re-read right before changing independent reminder preferences, so other-tab changes are retained.
+      const latest=readReminderActions()
+      const raw=kind==='dismiss'?{kind:'dismiss' as const}:
+        {kind:'snooze' as const,until:new Date(Date.now()+minutes*60000).toISOString()}
+      const next={...latest,[item.key]:actionForReminder(item.key,raw,new Date().toISOString())}
+      saveReminderActions(next);setReminderActions(next)
+      setReminderNow(new Date().toISOString())
+    }catch(error){setNotice('Reminder preference not saved: '+String(error))}
+  }
+  async function enableForegroundNotifications(){
+    if(typeof Notification==='undefined'){setNotifyPermission('unsupported');return}
+    try{
+      const permission=await Notification.requestPermission()
+      setNotifyPermission(permission)
+      if(permission==='granted'){localStorage.setItem('thiepn.calendar.foreground-notify.v1','yes');setNotifyEnabled(true)}
+      else setNotice('Desktop notifications not enabled; the local reminder center remains available')
+    }catch(error){setNotice('Desktop notification request failed: '+String(error))}
+  }
+  function disableForegroundNotifications(){
+    try{localStorage.removeItem('thiepn.calendar.foreground-notify.v1');setNotifyEnabled(false)}
+    catch(error){setNotice('Notification preference could not be saved: '+String(error))}
+  }
+  useEffect(()=>{
+    if(!notifyEnabled||notifyPermission!=='granted'||typeof Notification==='undefined'||document.visibilityState!=='visible')return
+    try{
+      const raw=localStorage.getItem(REMINDER_DELIVERED_KEY)
+      const delivered=new Set<string>(raw?JSON.parse(raw) as string[]:[])
+      const pending=deliverableReminders(reminders,reminderNow,delivered)
+      if(!pending.length)return
+      const next=new Set(delivered)
+      for(const item of pending){
+        const identity=item.key+'@'+item.dueAt
+        next.add(identity)
+        new Notification('THIEPN Calendar · '+item.occurrence.title,{
+          body:'Local reminder · '+new Date(item.occurrence.start).toLocaleString(),tag:identity})
+      }
+      localStorage.setItem(REMINDER_DELIVERED_KEY,JSON.stringify(Array.from(next).slice(-250)))
+    }catch(error){setNotice('Foreground notification unavailable: '+String(error))}
+  },[notifyEnabled,notifyPermission,reminders,reminderNow])
+  useEffect(()=>{
     const sync=(e:StorageEvent)=>{
+      if(e.key===REMINDER_ACTIONS_KEY){try{setReminderActions(readReminderActions())}catch{}}
       if(e.key===STORAGE_KEY||e.key===null){const read=loadState();if(read.error){setNotice(read.error);setUnreadable(true)}
         else{setCalendar(read.state);setUnreadable(false)}
         try{setRecovery(readRecovery())}catch{setRecovery(null)}}
@@ -83,7 +142,7 @@ export default function App(){
       const target=e.target as HTMLElement
       if(['INPUT','TEXTAREA','SELECT'].includes(target.tagName)||target.isContentEditable)return
       if(e.ctrlKey||e.metaKey||e.altKey)return
-      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setFinderOpen(false);setAdjustment(null);setAllDayAdjustment(null)}
+      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setFinderOpen(false);setRemindersOpen(false);setAdjustment(null);setAllDayAdjustment(null)}
       if(e.key==='n'){e.preventDefault();create(selected)}
       if(e.key==='t'){e.preventDefault();setSelected(localDate())}
       if(e.key==='/'){e.preventDefault();searchInput.current?.focus()}
@@ -328,6 +387,8 @@ export default function App(){
         <div className="topbar-heading"><span className="eyebrow">MY WORKSPACE</span><h1>Calendar</h1></div>
         <div className="topbar-actions">
           <div className="search-field"><Search size={16}/><input ref={searchInput} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search events" aria-label="Search calendar events"/>{query&&<button aria-label="Clear search" onClick={()=>setQuery('')}><X size={14}/></button>}</div>
+          <button className="secondary compact reminder-launch" aria-label={'Local reminders'+(dueReminderCount?' ('+dueReminderCount+' due)':'')} onClick={()=>setRemindersOpen(true)}>
+            <Bell size={15}/><span className="desktop-text">Reminders</span>{dueReminderCount>0&&<span className="reminder-count">{dueReminderCount}</span>}</button>
           <button className="secondary compact" onClick={()=>setFinderOpen(true)}><Clock3 size={15}/><span className="desktop-text">Find time</span></button>
           <button className="secondary compact" onClick={()=>importInput.current?.click()}><Upload size={15}/><span className="desktop-text">Import ICS</span></button>
           <button className="icon-button" title="Export personal events as finite ICS snapshot" aria-label="Export personal events" onClick={()=>{
@@ -387,6 +448,12 @@ export default function App(){
       scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)}}/>}
     {restoreCandidate&&<RestoreDialog current={calendar} candidate={restoreCandidate.state} origin={restoreCandidate.origin} unreadableCurrent={unreadable}
       onClose={()=>setRestoreCandidate(null)} onConfirm={confirmRestore}/>}
+    {remindersOpen&&<ReminderCenter items={reminders} onClose={()=>setRemindersOpen(false)}
+      onOpen={item=>{setRemindersOpen(false);setMode('day');open(item.occurrence)}}
+      onDismiss={item=>updateReminderAction(item,'dismiss')}
+      onSnooze={(item,minutes)=>updateReminderAction(item,'snooze',minutes)}
+      onEnableNotifications={enableForegroundNotifications} onDisableNotifications={disableForegroundNotifications}
+      foregroundEnabled={notifyEnabled&&notifyPermission==='granted'} permission={notifyPermission}/>}
     {finderOpen&&<div className="modal-backdrop" onMouseDown={ev=>{if(ev.target===ev.currentTarget)setFinderOpen(false)}}>
       <section className="finder-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Find an available time">
         <header className="editor-head"><div className="heading-inline"><Clock3 size={20}/><h2>Find time</h2></div><button className="icon-button" aria-label="Close time finder" onClick={()=>setFinderOpen(false)}><X size={19}/></button></header>
