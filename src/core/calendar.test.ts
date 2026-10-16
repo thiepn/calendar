@@ -10,6 +10,8 @@ import {validateState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCa
 import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent,splitSeriesAt,endSeriesAt} from './series'
 import {layoutTimedDay,slotRange,dayAxis,slotAt} from './timeline'
 import {findFreeSlots} from './availability'
+import {reminderItems,reminderKey,actionForReminder,deliverableReminders} from './reminders'
+import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 const record=(patch:Partial<CalendarRecord>={}):CalendarRecord=>({
   id:'test',title:'Study',description:'',location:'',source:'personal',
   start:fromLocalDateTime('2026-10-12T10:00'),end:fromLocalDateTime('2026-10-12T11:00'),
@@ -439,5 +441,91 @@ describe('C8 corrupt-source repair requires byte-exact local rescue',()=>{
       if(previous)Object.defineProperty(globalThis,'localStorage',{configurable:true,value:previous})
       else Reflect.deleteProperty(globalThis,'localStorage')
     }
+  })
+})
+
+
+describe('C9 local reminders and finite ICS interoperability',()=>{
+  it('keeps personal reminders source-owned, due at the actual occurrence instant',()=>{
+    const personal=record({id:'rem',start:fromLocalDateTime('2026-10-16T10:00'),
+      end:fromLocalDateTime('2026-10-16T11:00'),reminderMinutes:15})
+    const imported=record({id:'imported',source:'ics',sourceCalendar:'External',sourceKey:'E|uid',
+      start:personal.start,end:personal.end})
+    const state:CalendarState={schemaVersion:1,records:[personal,imported]}
+    const now=fromLocalDateTime('2026-10-16T09:50')
+    const items=reminderItems(state,now)
+    expect(items).toHaveLength(1)
+    expect(items[0].occurrence.recordId).toBe('rem')
+    expect(items[0].status).toBe('due')
+    expect(items[0].dueAt).toBe(fromLocalDateTime('2026-10-16T09:45'))
+    expect(items[0].key).toBe(reminderKey(items[0].occurrence,15))
+    const later=new Date(Date.parse(now)+15*60000).toISOString()
+    const snooze=actionForReminder(items[0].key,{kind:'snooze',until:later},now)
+    const upcoming=reminderItems(state,now,{[items[0].key]:snooze})
+    expect(upcoming).toHaveLength(1)
+    expect(upcoming[0].status).toBe('upcoming')
+    expect(deliverableReminders(upcoming,now,new Set())).toHaveLength(0)
+    const dismissed=reminderItems(state,now,{[items[0].key]:{kind:'dismiss'}})
+    expect(dismissed).toHaveLength(0)
+    expect(()=>actionForReminder(items[0].key,{kind:'snooze',until:now},now)).toThrow('Invalid')
+  })
+  it('computes repeated personal recurrence and excluded dates, not imported pseudo-reminders',()=>{
+    const repeat=record({id:'recurring',start:fromLocalDateTime('2026-10-16T10:00'),end:fromLocalDateTime('2026-10-16T11:00'),
+      repeat:{frequency:'daily',interval:1},reminderMinutes:60,excludedDates:['2026-10-17']})
+    const a=reminderItems({schemaVersion:1,records:[repeat]},fromLocalDateTime('2026-10-16T09:10'),{},4)
+    expect(a.some(x=>x.occurrence.date==='2026-10-16')).toBe(true)
+    expect(a.some(x=>x.occurrence.date==='2026-10-17')).toBe(false)
+    expect(a.some(x=>x.occurrence.date==='2026-10-18')).toBe(true)
+    expect(()=>validateState({schemaVersion:1,records:[record({id:'bad-ics-reminder',source:'ics',reminderMinutes:15})]})).toThrow('Invalid personal reminder')
+    expect(()=>validateState({schemaVersion:1,records:[record({reminderMinutes:7})]})).toThrow('Invalid personal reminder')
+  })
+  it('imports finite source-owned all-day weekly RRULE, EXDATE and an explicitly moved exception',()=>{
+    const lines=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:Seminar',
+      // Deliberately put detached override BEFORE the master to prove order-independent identity.
+      'BEGIN:VEVENT','UID:seminar-1','RECURRENCE-ID;VALUE=DATE:20261026','SUMMARY:Moved seminar',
+      'DTSTART;VALUE=DATE:20261027','DTEND;VALUE=DATE:20261028','END:VEVENT',
+      'BEGIN:VEVENT','UID:seminar-1','SUMMARY:Seminar',
+      'DTSTART;VALUE=DATE:20261019','DTEND;VALUE=DATE:20261020',
+      'RRULE:FREQ=WEEKLY;COUNT=4;BYDAY=MO','EXDATE;VALUE=DATE:20261102','END:VEVENT',
+      'END:VCALENDAR'].join('\r\n')
+    const parsed=previewIcs(lines)
+    expect(parsed.records).toHaveLength(3)
+    expect(parsed.records.map(x=>x.startDate)).toEqual(['2026-10-19','2026-10-27','2026-11-09'])
+    expect(parsed.records[1].title).toBe('Moved seminar')
+    expect(parsed.records[1].sourceKey).toBe('Seminar|seminar-1|20261026')
+    expect(parsed.records.every(x=>x.source==='ics'&&x.repeat===undefined)).toBe(true)
+    expect(parsed.warnings.some(x=>x.includes('materialized'))).toBe(true)
+    const first=mergeIcs({schemaVersion:1,records:[record({id:'personal'})]},parsed)
+    expect(first.added).toBe(3)
+    const again=mergeIcs(first.state,previewIcs(lines))
+    expect(again.duplicates).toBe(3)
+    expect(again.state.records[0].id).toBe('personal')
+    expect(again.state.records.slice(1).map(x=>x.id)).toEqual(first.state.records.slice(1).map(x=>x.id))
+  })
+  it('bounds finite imported ICS and does not misrepresent timed or infinite rules',()=>{
+    expect(()=>parseFiniteAllDayRule('FREQ=DAILY','2026-10-19')).toThrow('Finite')
+    expect(()=>parseFiniteAllDayRule('FREQ=DAILY;COUNT=151','2026-10-19')).toThrow('COUNT')
+    expect(()=>parseFiniteAllDayRule('FREQ=MONTHLY;COUNT=100','2026-10-19')).not.toThrow()
+    expect(()=>expandFiniteAllDay('2026-10-19',parseFiniteAllDayRule('FREQ=MONTHLY;COUNT=100','2026-10-19'))).toThrow('730')
+    expect(expandFiniteAllDay('2026-10-19',parseFiniteAllDayRule('FREQ=DAILY;COUNT=3','2026-10-19'),['2026-10-20']))
+      .toEqual(['2026-10-19','2026-10-21'])
+    const input=['BEGIN:VCALENDAR','BEGIN:VEVENT','UID:timed','SUMMARY:External timed',
+      'DTSTART:20261019T100000Z','DTEND:20261019T110000Z',
+      'RRULE:FREQ=WEEKLY;COUNT=4','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const parsed=previewIcs(input)
+    expect(parsed.records).toHaveLength(0)
+    expect(parsed.warnings).toContain('External timed: Timed ICS RRULE requires external source expansion; only finite all-day recurrence is supported')
+  })
+  it('exports the chosen reminder as a standard DISPLAY VALARM without changing read-only ICS',()=>{
+    const mine=record({id:'alarm',reminderMinutes:30})
+    const ics=record({id:'ics',source:'ics',sourceCalendar:'Teacher',sourceKey:'Teacher|1'})
+    const text=exportIcs({schemaVersion:1,records:[mine,ics]},'2026-10-12','2026-10-12')
+    expect(text).toContain('BEGIN:VALARM')
+    expect(text).toContain('TRIGGER:-PT30M')
+    expect(text).not.toContain('Teacher')
+    const again=previewIcs(text)
+    expect(again.records).toHaveLength(1)
+    expect(again.records[0].source).toBe('ics')
+    expect(again.records[0].reminderMinutes).toBeUndefined()
   })
 })
