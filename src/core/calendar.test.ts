@@ -5,6 +5,7 @@ import {occurrencesBetween,excludeOccurrence,conflictsOnDay} from './occurrences
 import {previewIcs,mergeIcs,exportIcs} from './ics'
 import {validateState} from './storage'
 import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent} from './series'
+import {findFreeSlots} from './availability'
 const record=(patch:Partial<CalendarRecord>={}):CalendarRecord=>({
   id:'test',title:'Study',description:'',location:'',source:'personal',
   start:fromLocalDateTime('2026-10-12T10:00'),end:fromLocalDateTime('2026-10-12T11:00'),
@@ -87,5 +88,26 @@ describe('Recurring edits and source refresh',()=>{
     expect(second.state.records[1].title).toBe('Lecture moved')
     const third=mergeIcs(second.state,previewIcs(input('Lecture moved')),'replace')
     expect(third.removed).toBe(1);expect(third.added).toBe(1)
+  })
+})
+
+describe('Find time against canonical visible and hidden calendar sources',()=>{
+  it('avoids conflicts, including recurring events and read-only imports',()=>{
+    const repeating=record({start:fromLocalDateTime('2090-10-16T09:00'),end:fromLocalDateTime('2090-10-16T10:00'),
+      repeat:{frequency:'daily',interval:1}})
+    const external=record({id:'ics-1',source:'ics',start:fromLocalDateTime('2090-10-16T10:00'),
+      end:fromLocalDateTime('2090-10-16T11:00')})
+    const free=findFreeSlots([repeating,external],{from:'2090-10-16',days:1,durationMinutes:60,
+      startHour:8,endHour:13,blockAllDay:true,now:new Date('2090-10-01T00:00:00Z')})
+    expect(free.map(x=>new Date(x.start).getHours())).toEqual([8,11,12])
+  })
+  it('considers multi-day all-day events and safely handles a fully busy day',()=>{
+    const allDay=record({allDay:true,startDate:'2090-10-16',endDateExclusive:'2090-10-18',
+      start:fromLocalDateTime('2090-10-16T00:00'),end:fromLocalDateTime('2090-10-18T00:00')})
+    const opts={from:'2090-10-16',days:3,durationMinutes:60,startHour:8,endHour:11,
+      blockAllDay:true,now:new Date('2090-10-01T00:00:00Z')}
+    const slots=findFreeSlots([allDay],opts)
+    expect(slots.map(x=>x.date)).toEqual(['2090-10-18','2090-10-18','2090-10-18'])
+    expect(findFreeSlots([allDay],{...opts,days:1})).toEqual([])
   })
 })

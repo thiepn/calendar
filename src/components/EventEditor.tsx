@@ -3,14 +3,14 @@ import {X,CalendarPlus} from 'lucide-react'
 import type {CalendarRecord,Frequency,LocalDate,RepeatRule} from '../types'
 import {addDays,fromLocalDateTime,localDateTime} from '../core/dates'
 const weekdays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
-type Props={date:LocalDate;event?:CalendarRecord;scope?:'instance';onSave:(record:CalendarRecord)=>void;onClose:()=>void}
-export function EventEditor({date,event,scope,onSave,onClose}:Props){
+type Props={date:LocalDate;event?:CalendarRecord;initialRange?:{start:string;end:string};scope?:'instance';onSave:(record:CalendarRecord)=>void;onClose:()=>void}
+export function EventEditor({date,event,initialRange,scope,onSave,onClose}:Props){
   const [title,setTitle]=useState(event?.title??'')
   const [description,setDescription]=useState(event?.description??'')
   const [location,setLocation]=useState(event?.location??'')
   const [allDay,setAllDay]=useState(event?.allDay??false)
-  const [start,setStart]=useState(event ? event.allDay?event.startDate!:localDateTime(event.start) : date+'T09:00')
-  const [end,setEnd]=useState(event ? event.allDay?addDays(event.endDateExclusive!,-1):localDateTime(event.end) : date+'T10:00')
+  const [start,setStart]=useState(event ? event.allDay?event.startDate!:localDateTime(event.start) : initialRange?localDateTime(initialRange.start):date+'T09:00')
+  const [end,setEnd]=useState(event ? event.allDay?addDays(event.endDateExclusive!,-1):localDateTime(event.end) : initialRange?localDateTime(initialRange.end):date+'T10:00')
   const [frequency,setFrequency]=useState<'none'|Frequency>(event?.repeat?.frequency??'none')
   const [interval,setInterval]=useState(event?.repeat?.interval??1)
   const [until,setUntil]=useState(event?.repeat?.until??'')

@@ -1,9 +1,10 @@
 import {useEffect,useMemo,useRef,useState,type ChangeEvent} from 'react'
-import {CalendarDays,ChevronLeft,ChevronRight,Plus,Upload,Download,Search,Database,ExternalLink,AlertTriangle,Trash2,Pencil,X,RotateCcw,Menu} from 'lucide-react'
+import {CalendarDays,ChevronLeft,ChevronRight,Plus,Upload,Download,Search,Database,ExternalLink,AlertTriangle,Trash2,Pencil,X,RotateCcw,Menu,Clock3} from 'lucide-react'
 import type {CalendarOccurrence,CalendarRecord,CalendarState,LocalDate} from './types'
 import {addDays,addMonths,dateLabel,dateSeries,friendlyRange,localDate,monday,monthGridStart} from './core/dates'
 import {dayOccurrences,excludeOccurrence} from './core/occurrences'
 import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence} from './core/series'
+import {findFreeSlots,type FreeSlot} from './core/availability'
 import {exportBackup,importBackup,loadState,saveState,STORAGE_KEY} from './core/storage'
 import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
 import {EventEditor} from './components/EventEditor'
@@ -28,6 +29,12 @@ export default function App(){
   const [editInstance,setEditInstance]=useState<{parentId:string;date:LocalDate}|null>(null)
   const [moveDate,setMoveDate]=useState<LocalDate>(localDate())
   const [importMode,setImportMode]=useState<'update'|'replace'>('update')
+  const [finderOpen,setFinderOpen]=useState(false)
+  const [finderDuration,setFinderDuration]=useState(60)
+  const [finderDays,setFinderDays]=useState(7)
+  const [finderWindow,setFinderWindow]=useState<'daytime'|'evening'>('daytime')
+  const [finderBlockAllDay,setFinderBlockAllDay]=useState(true)
+  const [newEventRange,setNewEventRange]=useState<{start:string;end:string}|null>(null)
   const [editorDate,setEditorDate]=useState<LocalDate|null>(null)
   const [active,setActive]=useState<CalendarOccurrence|null>(null)
   const [pending,setPending]=useState<IcsPreview|null>(null)
@@ -51,7 +58,7 @@ export default function App(){
     const key=(e:KeyboardEvent)=>{
       const target=e.target as HTMLElement
       if(['INPUT','TEXTAREA','SELECT'].includes(target.tagName)||target.isContentEditable)return
-      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false)}
+      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setFinderOpen(false)}
       if(e.key==='n'){e.preventDefault();setEditorDate(selected);setEditing(null)}
       if(e.key==='t'){e.preventDefault();setSelected(localDate())}
       if(e.key==='/'){e.preventDefault();searchInput.current?.focus()}
@@ -72,8 +79,18 @@ export default function App(){
   },{})
   const personalCount=calendar.records.filter(x=>x.source==='personal').length
   const activeRecord=active?calendar.records.find(x=>x.id===active.recordId):undefined
+  const freeSlots=useMemo(()=>finderOpen?findFreeSlots(calendar.records,{
+    from:selected<localDate()?localDate():selected,days:finderDays,durationMinutes:finderDuration,
+    startHour:finderWindow==='daytime'?8:17,endHour:finderWindow==='daytime'?19:23,
+    blockAllDay:finderBlockAllDay,maxResults:18
+  }):[],[finderOpen,calendar,selected,finderDays,finderDuration,finderWindow,finderBlockAllDay])
 
-  function create(date:LocalDate){setActive(null);setEditing(null);setEditInstance(null);setEditorDate(date)}
+  function create(date:LocalDate){setActive(null);setEditing(null);setEditInstance(null);setNewEventRange(null);setEditorDate(date)}
+  function startSlot(slot:FreeSlot){
+    setActive(null);setEditing(null);setEditInstance(null)
+    setNewEventRange({start:slot.start,end:slot.end});setEditorDate(slot.date)
+    setSelected(slot.date);setFinderOpen(false)
+  }
   function open(item:CalendarOccurrence){setActive(item);setSelected(item.date);setMoveDate(item.startDate)}
   function edit(item:CalendarOccurrence,scope:'series'|'instance'='series'){
     const record=calendar.records.find(x=>x.id===item.recordId)
@@ -92,7 +109,7 @@ export default function App(){
         calendar.records.some(r=>r.id===record.id)?saveWholeEvent(calendar,record):
         {schemaVersion:1 as const,records:[...calendar.records,record]}
       if(commit(next,'Event saved locally')){
-        setEditorDate(null);setEditing(null);setEditInstance(null)
+        setEditorDate(null);setEditing(null);setEditInstance(null);setNewEventRange(null)
       }
     }catch(error){setNotice('Not saved: '+String(error))}
   }
@@ -180,6 +197,7 @@ export default function App(){
         <div className="topbar-heading"><span className="eyebrow">MY WORKSPACE</span><h1>Calendar</h1></div>
         <div className="topbar-actions">
           <div className="search-field"><Search size={16}/><input ref={searchInput} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search events" aria-label="Search calendar events"/>{query&&<button aria-label="Clear search" onClick={()=>setQuery('')}><X size={14}/></button>}</div>
+          <button className="secondary compact" onClick={()=>setFinderOpen(true)}><Clock3 size={15}/><span className="desktop-text">Find time</span></button>
           <button className="secondary compact" onClick={()=>importInput.current?.click()}><Upload size={15}/><span className="desktop-text">Import ICS</span></button>
           <button className="icon-button" title="Export personal events as finite ICS snapshot" aria-label="Export personal events" onClick={()=>{
             try{download('thiepn-calendar-snapshot.ics',exportIcs(calendar,addDays(selected,-30),addDays(selected,365)),'text/calendar');setNotice('Exported a finite 395-day personal event snapshot, not continuous sync')}
@@ -212,7 +230,25 @@ export default function App(){
     </div>
     <input ref={importInput} type="file" accept=".ics,text/calendar" hidden onChange={readIcs}/>
     <input ref={restoreInput} type="file" accept=".json,application/json" hidden onChange={readBackup}/>
-    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate} date={editorDate} event={editing??undefined} scope={editInstance?'instance':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setEditInstance(null)}}/>}
+    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate+(newEventRange?.start??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} scope={editInstance?'instance':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setEditInstance(null);setNewEventRange(null)}}/>}
+    {finderOpen&&<div className="modal-backdrop" onMouseDown={ev=>{if(ev.target===ev.currentTarget)setFinderOpen(false)}}>
+      <section className="finder-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Find an available time">
+        <header className="editor-head"><div className="heading-inline"><Clock3 size={20}/><h2>Find time</h2></div><button className="icon-button" aria-label="Close time finder" onClick={()=>setFinderOpen(false)}><X size={19}/></button></header>
+        <p className="fine-print">Find a free time from {dateLabel(selected<localDate()?localDate():selected)} onward. All saved calendars are checked, including hidden imported events. A slot is only booked after you save a new personal event.</p>
+        <div className="finder-options">
+          <label>Duration<select value={finderDuration} onChange={ev=>setFinderDuration(Number(ev.target.value))}><option value={30}>30 minutes</option><option value={60}>60 minutes</option><option value={90}>90 minutes</option><option value={120}>120 minutes</option></select></label>
+          <label>Look ahead<select value={finderDays} onChange={ev=>setFinderDays(Number(ev.target.value))}><option value={7}>7 days</option><option value={14}>14 days</option></select></label>
+          <label>Hours<select value={finderWindow} onChange={ev=>setFinderWindow(ev.target.value as 'daytime'|'evening')}><option value="daytime">08:00–19:00</option><option value="evening">17:00–23:00</option></select></label>
+        </div>
+        <label className="finder-checkbox"><input type="checkbox" checked={finderBlockAllDay} onChange={ev=>setFinderBlockAllDay(ev.target.checked)}/> Treat all-day entries as unavailable</label>
+        <h3>Available start times <small>({freeSlots.length} shown)</small></h3>
+        <div className="finder-results">{freeSlots.map(slot=><button key={slot.start} type="button" className="finder-slot" onClick={()=>startSlot(slot)}>
+          <span><strong>{dateLabel(slot.date,{weekday:'short',month:'short',day:'numeric'})}</strong><small>{new Date(slot.start).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})} – {new Date(slot.end).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small></span>
+          <span className="finder-plan">Plan event <ChevronRight size={14}/></span>
+        </button>)}
+        {!freeSlots.length&&<p className="empty-note">No available slots in this window. Try a shorter duration, evening hours or more days.</p>}</div>
+        <p className="fine-print">Suggestions are calculated locally and may change if another tab updates your calendar. The event editor checks current storage on save.</p>
+      </section></div>}
     {active&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setActive(null)}}>
       <section className="details dialog-surface" role="dialog" aria-modal="true" aria-label="Event details">
         <header className="editor-head"><span className="eyebrow">{active.source==='ics'?'IMPORTED SNAPSHOT — READ ONLY':'PERSONAL EVENT'}</span><button className="icon-button" aria-label="Close event" onClick={()=>setActive(null)}><X size={19}/></button></header>

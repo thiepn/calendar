@@ -15,3 +15,20 @@
 .import-options legend { font-weight:700; font-size:.83rem; padding:0 6px; }
 .import-options label { display:flex; align-items:baseline; gap:8px; font-size:.9rem; }
 .import-options input { accent-color:var(--accent, #334e76); }
+
+/* C3: actual available time suggestions sourced from every local calendar. */
+.finder-dialog { width:min(620px,100%); }
+.finder-dialog h3 { font-size:14px; margin:22px 0 10px; color:#2c4537; }
+.finder-dialog h3 small { color:#88968b; font-weight:400; }
+.finder-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:18px 0; }
+.finder-options label { display:grid; gap:7px; font-weight:600; font-size:12px; color:#627068; }
+.finder-options select { width:100%; min-width:0; padding:10px 7px; background:#fff; border:1px solid #d9dfd8; border-radius:4px; }
+.finder-checkbox { display:flex; align-items:center; gap:7px; font-size:12px; color:#4e6556; }
+.finder-results { display:grid; gap:5px; max-height:350px; overflow-y:auto; }
+.finder-slot { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; text-align:left; border:1px solid #e3e9e2; background:#f9fbf8; color:#30473a; padding:12px; border-radius:4px; }
+.finder-slot:hover,.finder-slot:focus-visible { background:#eaf4ed; border-color:#91b39b; }
+.finder-slot>span:first-child { display:grid; gap:5px; }
+.finder-slot strong { font-size:13px; }
+.finder-slot small { color:#71877a; font-size:12px; }
+.finder-plan { font-size:11px; white-space:nowrap; display:inline-flex; align-items:center; gap:4px; color:#31644b; }
+@media(max-width:520px){.finder-options{grid-template-columns:1fr}.finder-dialog{padding:17px}.finder-results{max-height:40dvh}}
