@@ -4,7 +4,7 @@ import {occurrencesBetween} from './occurrences'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {finiteTimedDates,timedWallTemplate,wallValueOn} from './ics-timed'
 
-export interface IcsPreview {records:CalendarRecord[];warnings:string[];name:string}
+export interface IcsPreview {records:CalendarRecord[];warnings:string[];name:string;skippedEvents:number}
 type Property={name:string;params:Record<string,string>;value:string}
 function hash(text:string):string {let h=2166136261;for(const ch of text){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return (h>>>0).toString(16)}
 function property(line:string):Property|null {
@@ -75,6 +75,7 @@ export function previewIcs(text:string):IcsPreview {
   if(!lines.some(x=>x.toUpperCase()==='BEGIN:VCALENDAR'))throw new Error('This is not an iCalendar file')
   const records:CalendarRecord[]=[]
   const warnings:string[]=[]
+  let skippedEvents=0
   let name='Imported calendar'
   let event:Property[]|null=null
   const items:Property[][]=[]
@@ -251,13 +252,19 @@ export function previewIcs(text:string):IcsPreview {
       records.push({id:'ics-'+hash(sourceKey),source:'ics',sourceCalendar:name,sourceKey,
         title,description,location,start:start.iso,end:end.iso,allDay:Boolean(start.date),
         startDate:start.date,endDateExclusive:end.date,updatedAt:new Date().toISOString()})
-    }catch(error){warnings.push(title+': '+(error instanceof Error?error.message:String(error)))}
+    }catch(error){skippedEvents++;warnings.push(title+': '+(error instanceof Error?error.message:String(error)))}
   }
-  return {records,warnings,name}
+  return {records,warnings,name,skippedEvents}
 }
 export function mergeIcs(state:CalendarState,preview:IcsPreview,mode:'update'|'replace'='update'):
   {state:CalendarState;added:number;updated:number;duplicates:number;removed:number}{
   const old=state.records.filter(x=>x.source==='ics'&&x.sourceCalendar===preview.name)
+  // An unsupported master/instance can leave the preview incomplete. A source-wide
+  // replace must never interpret missing parsed records as explicit source deletion.
+  // Use non-destructive "Update matching UIDs" until the source exports a complete snapshot.
+  if(mode==='replace'&&preview.skippedEvents>0)
+    throw new Error('Cannot replace an incomplete ICS snapshot ('+preview.skippedEvents+
+      ' unsupported or invalid event(s)). Use Update matching UIDs; existing imported copies remain intact.')
   const prior=new Map(old.map(x=>[x.sourceKey,x]))
   const next=mode==='replace'?state.records.filter(x=>x.source!=='ics'||x.sourceCalendar!==preview.name):[...state.records]
   const used=new Set(next.map(x=>x.id))
