@@ -625,7 +625,7 @@ export default function App(){
       <p><strong>{pending.name}</strong> · {pending.records.length} supported events</p>
       {pending.skippedEvents>0&&<p className="incomplete-ics-notice" role="status">
         {pending.skippedEvents} source event{pending.skippedEvents===1?'':'s'} could not be read. Update matching UIDs retains earlier read-only copies; full replacement is blocked to prevent deletion of omitted records.
-      </p>
+      </p>}
       <div className="import-preview">{pending.records.slice(0,7).map(r=><div key={r.id}><span>{r.title}</span><small>{r.startDate??new Date(r.start).toLocaleString()}</small></div>)}{pending.records.length>7&&<p>+{pending.records.length-7} additional entries</p>}</div>
       {pending.warnings.length>0&&<div className="import-warnings"><b>{pending.warnings.length} skipped or warned events</b>{pending.warnings.slice(0,12).map((w,i)=><p key={i}>{w}</p>)}</div>}
       <fieldset className="import-options"><legend>How to handle this calendar</legend>
