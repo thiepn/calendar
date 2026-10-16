@@ -13,7 +13,7 @@ type Props={days:LocalDate[];selected:LocalDate;records:CalendarRecord[];
   onAllDaySlot:(from:LocalDate,through:LocalDate)=>void;
   onAllDayAdjust:(item:CalendarOccurrence,from:LocalDate,through:LocalDate)=>void}
 type Preview={date:LocalDate;minute:number;length:number;kind:'create'|'move'|'resize';label:string}
-type Gesture={pointerId:number;kind:'create'|'move'|'resize'|'day-create'|'day-move';fromY:number;fromX:number;scrollTop:number;date:LocalDate;
+type Gesture={pointerId:number;kind:'create'|'move'|'resize'|'day-create'|'day-move'|'day-resize';fromY:number;fromX:number;scrollTop:number;date:LocalDate;
   minute:number;length:number;item?:CalendarOccurrence;moved:boolean;preview:Preview|null;dayPreview?:{from:LocalDate;through:LocalDate}}
 const durations=[30,60,90,120] as const
 const snap=(value:number)=>Math.round(value/30)*30
@@ -47,6 +47,11 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
       const bounds=columns[i].getBoundingClientRect()
       if(clientX>=bounds.left&&clientX<bounds.right)return days[i]??null
     }
+    const first=columns[0]?.getBoundingClientRect()
+    const last=columns[columns.length-1]?.getBoundingClientRect()
+    if(!first||!last)return null
+    if(clientX<first.left)return addDays(days[0],-Math.max(1,Math.ceil((first.left-clientX)/Math.max(first.width,40))))
+    if(clientX>=last.right)return addDays(days[days.length-1],Math.max(1,Math.ceil((clientX-last.right+1)/Math.max(last.width,40))))
     return null
   }
   function begin(event:PointerEvent<HTMLElement>,kind:Gesture['kind'],date:LocalDate,
@@ -67,20 +72,20 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
       const rect=scroller.getBoundingClientRect()
       if(event.clientX>rect.right-25)scroller.scrollLeft+=17
       if(event.clientX<rect.left+25)scroller.scrollLeft-=17
-      if(active.kind!=='day-create'&&active.kind!=='day-move'){
+      if(active.kind!=='day-create'&&active.kind!=='day-move'&&active.kind!=='day-resize'){
         if(event.clientY>rect.bottom-30)scroller.scrollTop+=13
         if(event.clientY<rect.top+95)scroller.scrollTop-=13
       }
     }
     const dy=event.clientY-active.fromY+((scroller?.scrollTop??0)-active.scrollTop)
-    const selectedDate=active.kind==='move'||active.kind==='day-create'||active.kind==='day-move'
+    const selectedDate=active.kind==='move'||active.kind==='day-create'||active.kind==='day-move'||active.kind==='day-resize'
       ?dateAtX(event.clientX)??active.date:active.date
     if(Math.abs(dy)<10&&Math.abs(event.clientX-active.fromX)<14&&!active.moved)return
     active.moved=true
-    if(active.kind==='day-create'||active.kind==='day-move'){
-      const from=active.kind==='day-create'?(active.date<selectedDate?active.date:selectedDate):
+    if(active.kind==='day-create'||active.kind==='day-move'||active.kind==='day-resize'){
+      const from=active.kind==='day-create'?(active.date<selectedDate?active.date:selectedDate):active.kind==='day-resize'?active.item!.startDate:
         addDays(active.item!.startDate,daysBetween(active.date,selectedDate))
-      const through=active.kind==='day-create'?(active.date>selectedDate?active.date:selectedDate):
+      const through=active.kind==='day-create'?(active.date>selectedDate?active.date:selectedDate):active.kind==='day-resize'?(selectedDate<from?from:selectedDate):
         addDays(active.item!.endDateExclusive,daysBetween(active.date,selectedDate)-1)
       active.dayPreview={from,through}
       setDayPreview({from,through})
@@ -90,12 +95,13 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
     let minute=active.minute
     let length=active.length
     if(active.kind==='create'){
-      const endpoint=clamp(active.minute+30+delta,0,1440)
-      minute=clamp(Math.min(active.minute,endpoint-30),0,1410)
+      const max=dayAxis(active.date).minutes
+      const endpoint=clamp(active.minute+30+delta,0,max)
+      minute=clamp(Math.min(active.minute,endpoint-30),0,max-30)
       length=clamp(Math.abs(endpoint-active.minute),30,240)
-      length=Math.min(length,1440-minute)
+      length=Math.min(length,max-minute)
     }else if(active.kind==='move'){
-      minute=clamp(active.minute+delta,0,1439)
+      minute=clamp(active.minute+delta,0,dayAxis(selectedDate).minutes-1)
     }else{
       length=clamp(active.length+delta,15,1440)
     }
@@ -125,6 +131,14 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
     }else if(active.item&&(active.kind==='move'||active.kind==='resize')){
       onAdjust(active.item,active.kind,result.date,result.minute,result.length)
     }
+  }
+  function keyAllDay(event:KeyboardEvent<HTMLButtonElement>,item:CalendarOccurrence){
+    if(item.source!=='personal'||!event.altKey||!['ArrowLeft','ArrowRight'].includes(event.key))return
+    event.preventDefault();event.stopPropagation()
+    const delta=event.key==='ArrowRight'?1:-1
+    const from=event.shiftKey?item.startDate:addDays(item.startDate,delta)
+    const through=addDays(item.endDateExclusive,delta-1)
+    if(through>=from)onAllDayAdjust(item,from,through)
   }
   function keyNudge(event:KeyboardEvent<HTMLButtonElement>,item:CalendarOccurrence){
     if(item.source!=='personal'||!event.altKey||!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return
@@ -171,10 +185,18 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
                 <button type="button" className="timeline-all-day-create" aria-label={'Plan all-day event on '+date}
                   onPointerDown={e=>begin(e,'day-create',date,0,0)}
                   onClick={()=>{if(suppressClick.current){suppressClick.current=false;return}onAllDaySlot(date,date)}}><Plus size={12} aria-hidden="true"/> All day</button>
-                {events.map(item=><button key={item.key} className={'timeline-all-day-event '+(item.source==='ics'?'imported':'')}
-                  type="button" onPointerDown={e=>{if(item.source==='personal')begin(e,'day-move',date,0,0,item)}}
-                  onClick={()=>{if(suppressClick.current){suppressClick.current=false;return}onOpen(item)}}
-                  title={item.source==='ics'?'Read-only imported event':'Drag across days to move; select for date editor'}>{item.title}</button>)}
+                {events.map(item=><div className="timeline-day-event-wrap" key={item.key}>
+                  <button type="button" className={'timeline-all-day-event '+(item.source==='ics'?'imported':'')}
+                    onPointerDown={e=>{if(item.source==='personal')begin(e,'day-move',date,0,0,item)}}
+                    onKeyDown={e=>keyAllDay(e,item)}
+                    onClick={()=>{if(suppressClick.current){suppressClick.current=false;return}onOpen(item)}}
+                    title={item.source==='ics'?'Read-only imported event':'Drag to move; Alt+arrows move; Alt+Shift+arrows resize'}>{item.title}</button>
+                  {item.source==='personal'&&date===days.filter(d=>d>=item.startDate&&d<item.endDateExclusive).at(-1)&&
+                    <button type="button" className="timeline-all-day-resize" aria-label={'Resize all-day '+item.title}
+                      onPointerDown={e=>{e.stopPropagation();begin(e,'day-resize',date,0,0,item)}}
+                      onKeyDown={e=>keyAllDay(e,item)}
+                      onClick={()=>{if(suppressClick.current){suppressClick.current=false;return}onOpen(item)}}><GripHorizontal size={12}/></button>}
+                </div>)}
                 {dayPreview&&date>=dayPreview.from&&date<=dayPreview.through&&<span className="timeline-all-day-preview">{dayPreview.from} → {dayPreview.through}</span>}
               </div>
             })}
