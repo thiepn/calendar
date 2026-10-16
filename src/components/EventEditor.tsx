@@ -65,7 +65,7 @@ export function EventEditor({date,event,scope,onSave,onClose}:Props){
             <option value="none">Does not repeat</option><option value="daily">Daily</option>
             <option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
           {frequency!=='none'&&<label>Every (interval)<input type="number" min={1} max={30} required value={interval} onChange={e=>setInterval(Number(e.target.value))}/></label>}
-        </div>
+        </div>}
         {!scope&&frequency==='weekly'&&<fieldset className="weekday-fields"><legend>On weekdays (none = start weekday)</legend>
           {weekdays.map((w,i)=><label key={w}><input type="checkbox" checked={weekdaysSet.includes(i)} onChange={e=>setWeekdaysSet(old=>e.target.checked?[...old,i]:old.filter(x=>x!==i))}/>{w}</label>)}
         </fieldset>}
