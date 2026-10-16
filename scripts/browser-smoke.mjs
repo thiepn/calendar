@@ -555,6 +555,39 @@ async function exerciseC8MobileNavigation(){
   await context.close()
 }
 
+
+async function exerciseC8UnreadableOriginalRescue(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const damaged='{"schemaVersion":1,"records":'
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',value),damaged)
+  await page.reload({waitUntil:'networkidle'})
+  await page.locator('.recovery-danger').waitFor()
+  const valid={schemaVersion:1,records:[]}
+  await page.locator('input[accept=".json,application/json"]').setInputFiles({
+    name:'repair.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(valid))})
+  const dialog=page.getByRole('dialog',{name:'Review calendar restoration'})
+  await dialog.waitFor()
+  assert.match(await dialog.innerText(),/Current record counts unknown/)
+  assert.match(await dialog.innerText(),/raw rescue snapshot/)
+  await dialog.getByLabel(/I understand that restoring replaces/).check()
+  await dialog.getByRole('button',{name:'Restore this version'}).click()
+  const data=await page.evaluate(()=>({
+    active:localStorage.getItem('thiepn.calendar.local.v1'),
+    rescued:localStorage.getItem('thiepn.calendar.raw-rescue.v1')
+  }))
+  assert.equal(data.rescued,damaged)
+  assert.deepEqual(JSON.parse(data.active),valid)
+  await page.getByRole('button',{name:/Manage sources/}).click()
+  await page.getByRole('dialog',{name:'Calendar data management'})
+    .getByRole('button',{name:'Download retained raw rescue snapshot'}).waitFor()
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_C8_CORRUPT_RAW_RESCUE_REPAIR_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -570,6 +603,7 @@ try{
   await exerciseC7HeldEdgeScrolling()
   await exerciseC8RecoverySearchAndAgenda()
   await exerciseC8MobileNavigation()
+  await exerciseC8UnreadableOriginalRescue()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
