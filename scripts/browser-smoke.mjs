@@ -225,6 +225,7 @@ async function exerciseC6Desktop(){
   page.on('pageerror',e=>errors.push(e.message))
   await page.goto(url,{waitUntil:'networkidle'})
   const allDayCols=page.locator('.timeline-all-day-col')
+  await allDayCols.nth(0).locator('.timeline-all-day-create').scrollIntoViewIfNeeded()
   const a=await allDayCols.nth(0).locator('.timeline-all-day-create').boundingBox()
   const b=await allDayCols.nth(2).locator('.timeline-all-day-create').boundingBox()
   assert.ok(a&&b,'Graphical all-day row must expose selectable day columns')
