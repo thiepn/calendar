@@ -680,6 +680,121 @@ async function exerciseC9MobileDuplicate(){
   await context.close()
 }
 
+
+async function exerciseC10TimezoneImportAndSettings(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const ics=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C10 Timetable',
+    'BEGIN:VEVENT','UID:c10-utc-clock','SUMMARY:C10 Lab',
+    'DTSTART;TZID=Europe/Berlin:20261019T100000','DTEND;TZID=Europe/Berlin:20261019T110000',
+    'RRULE:FREQ=WEEKLY;COUNT=3','END:VEVENT','END:VCALENDAR'].join('\r\n')
+  await page.locator('input[accept=".ics,text/calendar"]').setInputFiles({name:'lab.ics',mimeType:'text/calendar',buffer:Buffer.from(ics)})
+  const review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  assert.match(await review.getByLabel('Import change preview').innerText(),/3 new/)
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const imported=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.deepEqual(imported.map(x=>x.start),[
+    '2026-10-19T08:00:00.000Z','2026-10-26T09:00:00.000Z','2026-11-02T09:00:00.000Z'])
+  assert.ok(imported.every(x=>x.source==='ics'&&x.repeat===undefined))
+  await page.locator('input[accept=".ics,text/calendar"]').setInputFiles({name:'lab.ics',mimeType:'text/calendar',buffer:Buffer.from(ics.replace('SUMMARY:C10 Lab','SUMMARY:C10 Lab updated'))})
+  const second=page.getByRole('dialog',{name:'ICS import review'})
+  await second.waitFor()
+  assert.match(await second.getByLabel('Import change preview').innerText(),/3 updated/)
+  await second.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const refreshed=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.deepEqual(refreshed.map(x=>x.id),imported.map(x=>x.id))
+  console.log('BROWSER_C10_TZID_DST_UID_UPDATE_PASS')
+
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const panel=page.getByRole('dialog',{name:'Local reminders'})
+  await panel.getByLabel('Default reminder on new events').selectOption('30')
+  await panel.getByLabel('Foreground alert quiet hours').selectOption('22-07')
+  await panel.getByRole('button',{name:'Close',exact:true}).click()
+  await page.getByRole('button',{name:'New event'}).click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  assert.equal(await editor.getByLabel('Local reminder').inputValue(),'30')
+  await editor.getByRole('button',{name:'Cancel'}).click()
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const reopened=page.getByRole('dialog',{name:'Local reminders'})
+  assert.equal(await reopened.getByLabel('Default reminder on new events').inputValue(),'30')
+  assert.equal(await reopened.getByLabel('Foreground alert quiet hours').inputValue(),'22-07')
+  await reopened.getByRole('button',{name:'Close',exact:true}).click()
+  console.log('BROWSER_C10_REMINDER_DEFAULT_QUIET_SETTINGS_PASS')
+  assert.equal(errors.length,0,errors.join(';'))
+  await context.close()
+}
+async function exerciseC10ReversibleDismissal(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.getByRole('button',{name:'New event'}).click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  const times=await page.evaluate(()=>{
+    const fmt=(d)=>{const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes())}
+    return [fmt(new Date(Date.now()+10*60000)),fmt(new Date(Date.now()+70*60000))]
+  })
+  await editor.getByLabel('Starts').fill(times[0]);await editor.getByLabel('Ends').fill(times[1])
+  await editor.getByLabel('Event name').fill('C10 undo reminder')
+  await editor.getByLabel('Local reminder').selectOption('15')
+  await editor.getByRole('button',{name:'Create event'}).click()
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const panel=page.getByRole('dialog',{name:'Local reminders'})
+  await panel.getByRole('button',{name:'Dismiss C10 undo reminder'}).click()
+  await panel.locator('.dismissed-reminders summary').click()
+  await panel.getByRole('button',{name:'Restore reminder C10 undo reminder'}).click()
+  await panel.getByRole('button',{name:'Dismiss C10 undo reminder'}).waitFor()
+  assert.equal(await page.evaluate(()=>Object.keys(JSON.parse(localStorage.getItem('thiepn.calendar.reminder-actions.v1'))).length),0)
+  console.log('BROWSER_C10_UNDO_DISMISSED_REMINDER_PASS')
+  assert.equal(errors.length,0,errors.join(';'))
+  await context.close()
+}
+async function exerciseC10OfflineShell(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    serviceWorkers:'allow',timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const manifest=await page.evaluate(async()=>{
+    const r=await fetch('/manifest.webmanifest')
+    return r.json()
+  })
+  assert.equal(manifest.name,'THIEPN Calendar')
+  assert.equal(manifest.display,'standalone')
+  const registration=await page.evaluate(async()=>{
+    const reg=await Promise.race([navigator.serviceWorker.ready,
+      new Promise((_,reject)=>setTimeout(()=>reject(new Error('SW registration timeout')),8000))])
+    return {scope:reg.scope,active:reg.active?.state}
+  })
+  assert.match(registration.scope,/127\.0\.0\.1:4173/)
+  await page.reload({waitUntil:'networkidle'})
+  assert.ok(await page.evaluate(()=>navigator.serviceWorker.controller!==null),'Calendar must be controlled after registration')
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.locator('.timeline-slot').nth(18).click()
+  const form=page.getByRole('dialog',{name:'New event'})
+  await form.getByLabel('Event name').fill('C10 offline personal')
+  await form.getByRole('button',{name:'Create event'}).click()
+  await page.locator('.timeline-block').filter({hasText:'C10 offline personal'}).waitFor()
+  await context.setOffline(true)
+  await page.reload({waitUntil:'load'})
+  await page.locator('.timeline-block').filter({hasText:'C10 offline personal'}).waitFor()
+  const stats=await page.evaluate(async()=>{
+    const cache=await caches.keys()
+    return {cache,records:JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.length,
+      scope:navigator.serviceWorker.controller?.scriptURL}
+  })
+  assert.ok(stats.cache.some(x=>x.startsWith('thiepn-calendar-shell-')))
+  assert.equal(stats.records,1)
+  assert.ok(stats.scope?.endsWith('/sw.js'))
+  console.log('BROWSER_C10_MOBILE_OFFLINE_PWA_RELOAD_PASS')
+  assert.equal(errors.length,0,errors.join(';'))
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -698,6 +813,9 @@ try{
   await exerciseC8UnreadableOriginalRescue()
   await exerciseC9RemindersAndIcs()
   await exerciseC9MobileDuplicate()
+  await exerciseC10TimezoneImportAndSettings()
+  await exerciseC10ReversibleDismissal()
+  await exerciseC10OfflineShell()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
