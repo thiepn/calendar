@@ -10,6 +10,11 @@ export function validateRecord(value:unknown):CalendarRecord {
   if(typeof r.description!=='string'||r.description.length>4000||typeof r.location!=='string'||r.location.length>500)throw new Error('Invalid event details')
   if(typeof r.allDay!=='boolean'||!['personal','ics'].includes(r.source))throw new Error('Invalid event source')
   if(r.allDay){day(r.startDate!);day(r.endDateExclusive!);if(r.endDateExclusive!<=r.startDate!)throw new Error('Invalid all-day dates')}
+  if(r.recurrenceParentId!==undefined||r.recurrenceDate!==undefined){
+    if(r.source!=='personal'||r.repeat||!r.recurrenceParentId||!r.recurrenceDate)throw new Error('Invalid detached occurrence')
+    day(r.recurrenceDate)
+    if(r.recurrenceParentId===r.id)throw new Error('A recurring event cannot override itself')
+  }
   if(r.repeat){
     if(r.source!=='personal'||!['daily','weekly','monthly'].includes(r.repeat.frequency)||!Number.isInteger(r.repeat.interval)||r.repeat.interval<1||r.repeat.interval>30)throw new Error('Invalid recurrence rule')
     if(r.repeat.until)day(r.repeat.until)
@@ -24,6 +29,16 @@ export function validateState(raw:unknown):CalendarState {
   if(records.length>20000)throw new Error('Too many calendar records')
   const ids=new Set<string>()
   records.forEach(r=>{validateRecord(r);if(ids.has(r.id))throw new Error('Duplicate event ID');ids.add(r.id)})
+  const parents=new Map(records.map(r=>[r.id,r]))
+  const overrides=new Set<string>()
+  records.forEach(r=>{
+    if(!r.recurrenceParentId)return
+    const parent=parents.get(r.recurrenceParentId)
+    if(!parent||parent.source!=='personal'||!parent.repeat||!parent.excludedDates?.includes(r.recurrenceDate!))throw new Error('Detached event has no excluded recurring parent')
+    const key=r.recurrenceParentId+'@'+r.recurrenceDate
+    if(overrides.has(key))throw new Error('Duplicate recurring occurrence replacement')
+    overrides.add(key)
+  })
   return {schemaVersion:1,records}
 }
 export function loadState():{state:CalendarState,error?:string} {

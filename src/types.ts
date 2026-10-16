@@ -20,6 +20,9 @@ export interface CalendarRecord {
   source: Source
   sourceCalendar?: string
   sourceKey?: string
+  /** An independently editable personal replacement for a recurring instance. */
+  recurrenceParentId?: string
+  recurrenceDate?: LocalDate
   repeat?: RepeatRule
   excludedDates?: LocalDate[]
   updatedAt: string

@@ -106,18 +106,31 @@ export function previewIcs(text:string):IcsPreview {
   }
   return {records,warnings,name}
 }
-export function mergeIcs(state:CalendarState,preview:IcsPreview):{state:CalendarState;added:number;duplicates:number}{
-  const existing=new Set(state.records.filter(x=>x.source==='ics').map(x=>x.sourceKey))
-  const next=[...state.records]
-  let added=0,duplicates=0
-  for(const r of preview.records) {
-    if(existing.has(r.sourceKey)){duplicates++;continue}
-    // A hash collision must never overwrite an unrelated saved record.
-    if(next.some(x=>x.id===r.id)){duplicates++;continue}
-    existing.add(r.sourceKey);next.push(r);added++
+export function mergeIcs(state:CalendarState,preview:IcsPreview,mode:'update'|'replace'='update'):
+  {state:CalendarState;added:number;updated:number;duplicates:number;removed:number}{
+  const old=state.records.filter(x=>x.source==='ics'&&x.sourceCalendar===preview.name)
+  const prior=new Map(state.records.filter(x=>x.source==='ics').map(x=>[x.sourceKey,x]))
+  const next=mode==='replace'?state.records.filter(x=>x.source!=='ics'||x.sourceCalendar!==preview.name):[...state.records]
+  const used=new Set(next.map(x=>x.id))
+  let added=0,updated=0,duplicates=0
+  for(const record of preview.records){
+    const existing=mode==='update'?prior.get(record.sourceKey):undefined
+    if(existing){
+      if(existing.sourceCalendar!==preview.name){duplicates++;continue}
+      const keys=['title','description','location','start','end','allDay','startDate','endDateExclusive'] as const
+      if(keys.every(k=>existing[k]===record[k])){duplicates++;continue}
+      const index=next.findIndex(x=>x.id===existing.id)
+      if(index<0)throw new Error('Imported source changed while previewing')
+      next[index]={...record,id:existing.id};updated++
+    }else{
+      if(used.has(record.id)){duplicates++;continue}
+      used.add(record.id);next.push(record);added++
+    }
   }
-  return {state:{schemaVersion:1,records:next},added,duplicates}
+  return {state:{schemaVersion:1,records:next},added,updated,duplicates,
+    removed:mode==='replace'?old.length:0}
 }
+
 function textValue(value:string){return value.replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;')}
 function utcValue(iso:string){const d=new Date(iso);const p=(n:number)=>String(n).padStart(2,'0');return ''+d.getUTCFullYear()+p(d.getUTCMonth()+1)+p(d.getUTCDate())+'T'+p(d.getUTCHours())+p(d.getUTCMinutes())+p(d.getUTCSeconds())+'Z'}
 function fold(line:string):string {

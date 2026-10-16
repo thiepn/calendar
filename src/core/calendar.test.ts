@@ -4,6 +4,7 @@ import {addDays,daysBetween,fromLocalDateTime} from './dates'
 import {occurrencesBetween,excludeOccurrence,conflictsOnDay} from './occurrences'
 import {previewIcs,mergeIcs,exportIcs} from './ics'
 import {validateState} from './storage'
+import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent} from './series'
 const record=(patch:Partial<CalendarRecord>={}):CalendarRecord=>({
   id:'test',title:'Study',description:'',location:'',source:'personal',
   start:fromLocalDateTime('2026-10-12T10:00'),end:fromLocalDateTime('2026-10-12T11:00'),
@@ -49,5 +50,42 @@ describe('Calendar domain',()=>{
     expect(exportIcs(state,'2026-10-12','2026-10-14').match(/BEGIN:VEVENT/g)).toHaveLength(3)
     expect(()=>validateState({schemaVersion:0,records:[]})).toThrow()
     expect(()=>validateState({schemaVersion:1,records:[record(),record()]})).toThrow('Duplicate')
+  })
+})
+
+describe('Recurring edits and source refresh',()=>{
+  it('replaces one repeating instance, moves it, then restores its original date',()=>{
+    const repeating=record({repeat:{frequency:'weekly',interval:1,weekdays:[1,3]}})
+    const state:CalendarState={schemaVersion:1,records:[repeating]}
+    const monday=occurrencesBetween(state.records,'2026-10-12','2026-10-12')[0]
+    const moved=shiftOccurrence(repeating,monday,'2026-10-15')
+    const next=replaceOccurrence(state,repeating.id,'2026-10-12',{...moved,id:'exception-1'})
+    expect(validateState(next).records).toHaveLength(2)
+    const all=occurrencesBetween(next.records,'2026-10-12','2026-10-20')
+    expect(all.map(x=>x.date)).toEqual(['2026-10-14','2026-10-15','2026-10-19'])
+    expect(next.records.find(r=>r.id==='exception-1')?.recurrenceDate).toBe('2026-10-12')
+    const restored=restoreOccurrence(next,'exception-1')
+    expect(occurrencesBetween(restored.records,'2026-10-12','2026-10-20').map(x=>x.date)).toEqual(['2026-10-12','2026-10-14','2026-10-19'])
+  })
+  it('rejects duplicate exceptions and broken recurring links',()=>{
+    const initial:CalendarState={schemaVersion:1,records:[record({repeat:{frequency:'daily',interval:1}})]}
+    const instance=occurrencesBetween(initial.records,'2026-10-13','2026-10-13')[0]
+    const exception=replaceOccurrence(initial,'test','2026-10-13',{...shiftOccurrence(initial.records[0],instance,'2026-10-15'),id:'override'})
+    expect(()=>replaceOccurrence(exception,'test','2026-10-13',{...exception.records[1],id:'other'})).toThrow()
+    expect(()=>validateState({...exception,records:exception.records.filter(r=>r.id!=='test')})).toThrow('parent')
+    const single=saveWholeEvent(exception,record({repeat:undefined}))
+    expect(validateState(single).records[1].recurrenceParentId).toBeUndefined()
+  })
+  it('updates imported UID snapshots without mutating unrelated personal data',()=>{
+    const before:CalendarState={schemaVersion:1,records:[record()]}
+    const input=(title:string)=>['BEGIN:VCALENDAR','X-WR-CALNAME:University','BEGIN:VEVENT','UID:lect-1',
+      'SUMMARY:'+title,'DTSTART;VALUE=DATE:20261012','DTEND;VALUE=DATE:20261013','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const first=mergeIcs(before,previewIcs(input('Lecture')))
+    const second=mergeIcs(first.state,previewIcs(input('Lecture moved')))
+    expect(second.updated).toBe(1);expect(second.added).toBe(0)
+    expect(second.state.records[0].source).toBe('personal')
+    expect(second.state.records[1].title).toBe('Lecture moved')
+    const third=mergeIcs(second.state,previewIcs(input('Lecture moved')),'replace')
+    expect(third.removed).toBe(1);expect(third.added).toBe(1)
   })
 })
