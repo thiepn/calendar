@@ -1,22 +1,38 @@
-import {useEffect,useRef,useState} from 'react'
-import {AlertTriangle,Plus} from 'lucide-react'
+import {useEffect,useRef,useState,type PointerEvent,type KeyboardEvent} from 'react'
+import {AlertTriangle,GripHorizontal,Plus} from 'lucide-react'
 import type {CalendarRecord,CalendarOccurrence,LocalDate} from '../types'
 import {dateLabel,displayTime,localDate} from '../core/dates'
 import {dayOccurrences} from '../core/occurrences'
 import {layoutTimedDay,slotRange,TIMELINE_HOUR_HEIGHT,SLOT_MINUTES} from '../core/timeline'
+import {nudgeTimed,type TimedAction} from '../core/reschedule'
 
 type Props={days:LocalDate[];selected:LocalDate;records:CalendarRecord[];
   onSelect:(date:LocalDate)=>void;onOpen:(item:CalendarOccurrence)=>void;
-  onSlot:(date:LocalDate,start:string,end:string)=>void}
+  onSlot:(date:LocalDate,start:string,end:string)=>void;
+  onAdjust:(item:CalendarOccurrence,action:TimedAction,date:LocalDate,minute:number,length:number)=>void}
+type Preview={date:LocalDate;minute:number;length:number;kind:'create'|'move'|'resize';label:string}
+type Gesture={pointerId:number;kind:'create'|'move'|'resize';fromY:number;fromX:number;date:LocalDate;
+  minute:number;length:number;item?:CalendarOccurrence;moved:boolean;preview:Preview|null}
 const durations=[30,60,90,120] as const
-const label=(minute:number)=>String(Math.floor(minute/60)).padStart(2,'0')+':'+String(minute%60).padStart(2,'0')
+const snap=(value:number)=>Math.round(value/30)*30
+const clamp=(value:number,min:number,max:number)=>Math.max(min,Math.min(max,value))
+const clock=(minute:number)=>String(Math.floor(minute/60)).padStart(2,'0')+':'+String(minute%60).padStart(2,'0')
+const eventLength=(event:CalendarOccurrence)=>Math.round((Date.parse(event.end)-Date.parse(event.start))/60000)
+const eventMinute=(event:CalendarOccurrence)=>{
+  const d=new Date(event.start)
+  return d.getHours()*60+d.getMinutes()
+}
 function slot(date:LocalDate,minute:number,duration:number){
   try{return slotRange(date,minute,duration)}catch{return null}
 }
-/** Explicit half-hour buttons work with mouse, touch and keyboard without drag-only controls. */
-export function TimelineView({days,selected,records,onSelect,onOpen,onSlot}:Props){
+/** Pointer gestures are staged here, never mutate sources. App confirms canonical changes. */
+export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdjust}:Props){
   const scroll=useRef<HTMLDivElement>(null)
+  const gesture=useRef<Gesture|null>(null)
+  const suppressClick=useRef(false)
+  const [preview,setPreview]=useState<Preview|null>(null)
   const [duration,setDuration]=useState<number>(60)
+  const [touchDrag,setTouchDrag]=useState(false)
   const week=days.length>1
   useEffect(()=>{if(scroll.current)scroll.current.scrollTop=7*TIMELINE_HOUR_HEIGHT},[week])
   useEffect(()=>{
@@ -24,12 +40,90 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot}:Prop
     const index=days.indexOf(selected)
     if(index>=0)scroll.current.scrollLeft=Math.max(0,index*172)
   },[selected,week,days])
+  function dateAtX(clientX:number):LocalDate|null {
+    const columns=scroll.current?.querySelectorAll<HTMLElement>('.timeline-day')
+    if(!columns)return null
+    for(let i=0;i<columns.length;i++){
+      const bounds=columns[i].getBoundingClientRect()
+      if(clientX>=bounds.left&&clientX<bounds.right)return days[i]??null
+    }
+    return null
+  }
+  function begin(event:PointerEvent<HTMLElement>,kind:Gesture['kind'],date:LocalDate,
+    minute:number,length:number,item?:CalendarOccurrence){
+    if(event.button!==0||(event.pointerType==='touch'&&!touchDrag))return
+    suppressClick.current=false
+    gesture.current={pointerId:event.pointerId,kind,fromY:event.clientY,fromX:event.clientX,
+      date,minute,length,item,moved:false,preview:null}
+    event.currentTarget.setPointerCapture(event.pointerId)
+    if(event.pointerType==='mouse')event.preventDefault()
+    event.stopPropagation()
+  }
+  function movePointer(event:PointerEvent<HTMLElement>){
+    const active=gesture.current
+    if(!active||active.pointerId!==event.pointerId)return
+    const dy=event.clientY-active.fromY
+    const selectedDate=active.kind==='move'?dateAtX(event.clientX)??active.date:active.date
+    if(Math.abs(dy)<10&&Math.abs(event.clientX-active.fromX)<14&&!active.moved)return
+    active.moved=true
+    const delta=snap(dy/TIMELINE_HOUR_HEIGHT*60)
+    let minute=active.minute
+    let length=active.length
+    if(active.kind==='create'){
+      const endpoint=clamp(active.minute+30+delta,0,1440)
+      minute=clamp(Math.min(active.minute,endpoint-30),0,1410)
+      length=clamp(Math.abs(endpoint-active.minute),30,240)
+      length=Math.min(length,1440-minute)
+    }else if(active.kind==='move'){
+      minute=clamp(active.minute+delta,0,1439)
+    }else{
+      length=clamp(active.length+delta,15,1440)
+    }
+    const visual:Preview={date:selectedDate,minute,length,kind:active.kind,
+      label:active.kind==='create'?'New event':active.item?.title??'Event'}
+    active.preview=visual
+    setPreview(visual)
+  }
+  function endPointer(event:PointerEvent<HTMLElement>){
+    const active=gesture.current
+    if(!active||active.pointerId!==event.pointerId)return
+    gesture.current=null
+    setPreview(null)
+    if(!active.moved||!active.preview)return
+    suppressClick.current=true
+    const result=active.preview
+    if(active.kind==='create'){
+      const range=slot(result.date,result.minute,result.length)
+      if(range)onSlot(result.date,range.start,range.end)
+    }else if(active.item){
+      onAdjust(active.item,active.kind,result.date,result.minute,result.length)
+    }
+  }
+  function keyNudge(event:KeyboardEvent<HTMLButtonElement>,item:CalendarOccurrence){
+    if(item.source!=='personal'||!event.altKey||!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key))return
+    const action=event.key==='ArrowUp'?(event.shiftKey?'shorter':'earlier'):
+      event.key==='ArrowDown'?(event.shiftKey?'longer':'later'):
+      event.key==='ArrowLeft'?'previous-day':'next-day'
+    event.preventDefault();event.stopPropagation()
+    try{
+      const update=nudgeTimed(item,item.date,action)
+      onAdjust(item,update.kind,update.date,update.minute,update.length)
+    }catch{
+      // Invalid movements are declined; users can enter an exact value in the details editor.
+    }
+  }
   const height=24*TIMELINE_HOUR_HEIGHT
-  return <section className="timeline-view" aria-label={week?'Graphical weekly schedule':'Graphical daily schedule'}>
-    <div className="timeline-tools"><p>Select a time to plan an event. Overlapping events appear side by side; imported events are read-only.</p>
-      <label>Slot length <select aria-label="New event duration" value={duration} onChange={e=>setDuration(Number(e.target.value))}>
-        {durations.map(value=><option value={value} key={value}>{value} min</option>)}
-      </select></label>
+  return <section className={'timeline-view '+(touchDrag?'timeline-touch-drag':'')} aria-label={week?'Graphical weekly schedule':'Graphical daily schedule'}
+    onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={()=>{gesture.current=null;setPreview(null)}}>
+    <div className="timeline-tools">
+      <p>Drag empty space to create; drag personal blocks to move, or their lower handles to resize. All changes require confirmation.</p>
+      <div className="timeline-controls">
+        <label>Slot length <select aria-label="New event duration" value={duration} onChange={event=>setDuration(Number(event.target.value))}>
+          {durations.map(value=><option value={value} key={value}>{value} min</option>)}
+        </select></label>
+        <label className="timeline-touch-toggle"><input type="checkbox" checked={touchDrag} onChange={event=>setTouchDrag(event.target.checked)}/>
+          Touch drag mode</label>
+      </div>
     </div>
     <div className="timeline-scroll" ref={scroll} aria-label="Scroll calendar hours and days" tabIndex={0}>
       <div className={'timeline-page '+(week?'timeline-week':'timeline-single')} style={{minWidth:week?(60+days.length*172)+'px':'100%'}}>
@@ -55,7 +149,7 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot}:Prop
         </div>
         <div className="timeline-main">
           <div className="timeline-hour-labels" aria-hidden="true" style={{height}}>
-            {Array.from({length:24},(_,i)=><span key={i} style={{top:i*TIMELINE_HOUR_HEIGHT}}>{label(i*60)}</span>)}
+            {Array.from({length:24},(_,i)=><span key={i} style={{top:i*TIMELINE_HOUR_HEIGHT}}>{clock(i*60)}</span>)}
           </div>
           {days.map(date=>{
             const blocks=layoutTimedDay(dayOccurrences(records,date),date)
@@ -66,30 +160,54 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot}:Prop
                 return <button key={minute} type="button" className="timeline-slot"
                   style={{top:minute/60*TIMELINE_HOUR_HEIGHT,height:SLOT_MINUTES/60*TIMELINE_HOUR_HEIGHT}}
                   disabled={!available}
-                  aria-label={available?'Plan '+duration+' minute event on '+dateLabel(date,{weekday:'long',month:'short',day:'numeric'})+' at '+label(minute):'Unavailable local time '+label(minute)}
-                  title={available?'New event · '+label(minute):'This local time does not exist'}
-                  onClick={()=>{if(available)onSlot(date,available.start,available.end)}}><Plus size={13} aria-hidden="true"/></button>
+                  aria-label={available?'Plan '+duration+' minute event on '+dateLabel(date,{weekday:'long',month:'short',day:'numeric'})+' at '+clock(minute):'Unavailable local time '+clock(minute)}
+                  title={available?'New event · '+clock(minute):'Invalid daylight-saving local time'}
+                  onPointerDown={event=>{if(available)begin(event,'create',date,minute,duration)}}
+                  onClick={()=>{if(suppressClick.current){suppressClick.current=false;return}if(available)onSlot(date,available.start,available.end)}}
+                  ><Plus size={13} aria-hidden="true"/></button>
               })}
               {blocks.map(block=>{
                 const {occurrence,lane,lanes,overlaps,startMinute,endMinute}=block
                 const width=100/lanes
-                return <button key={occurrence.key} type="button"
-                  className={'timeline-block '+(occurrence.source==='ics'?'imported ':'')+(overlaps?'overlap':'')}
+                const editable=occurrence.source==='personal'
+                return <div key={occurrence.key} className="timeline-event-frame"
                   style={{top:startMinute/60*TIMELINE_HOUR_HEIGHT+1,
                     height:Math.max(19,Math.min(1440,endMinute)-startMinute)/60*TIMELINE_HOUR_HEIGHT-2,
-                    left:'calc('+(lane*width)+'% + 3px)',width:'calc('+width+'% - 6px)'}}
-                  aria-label={occurrence.title+', '+displayTime(occurrence.start)+' to '+displayTime(occurrence.end)+(overlaps?', overlapping event':'')}
-                  onClick={()=>onOpen(occurrence)}>
-                  <strong>{occurrence.title}</strong>
-                  <span>{displayTime(occurrence.start)} – {displayTime(occurrence.end)}</span>
-                  {overlaps&&<AlertTriangle size={12} aria-label="Overlap" />}
-                </button>
+                    left:'calc('+(lane*width)+'% + 3px)',width:'calc('+width+'% - 6px)'}}>
+                  <button type="button"
+                    className={'timeline-block '+(occurrence.source==='ics'?'imported ':'')+(overlaps?'overlap':'')}
+                    aria-label={occurrence.title+', '+displayTime(occurrence.start)+' to '+displayTime(occurrence.end)+(overlaps?', overlapping event':'')}
+                    title={editable?'Drag to move · Alt+arrows to move · Alt+Shift+vertical arrows to resize':'Imported snapshot — read only'}
+                    onPointerDown={event=>{if(editable)begin(event,'move',date,eventMinute(occurrence),eventLength(occurrence),occurrence)}}
+                    onKeyDown={event=>keyNudge(event,occurrence)}
+                    onClick={()=>{if(suppressClick.current){suppressClick.current=false;return}onOpen(occurrence)}}>
+                    <strong>{occurrence.title}</strong>
+                    <span>{displayTime(occurrence.start)} – {displayTime(occurrence.end)}</span>
+                    {overlaps&&<AlertTriangle size={12} aria-label="Overlap" />}
+                  </button>
+                  {editable&&<button type="button" className="timeline-resize-handle"
+                    aria-label={'Resize '+occurrence.title}
+                    title="Drag to resize · Alt+Shift+Up/Down"
+                    onPointerDown={event=>{event.stopPropagation();begin(event,'resize',date,eventMinute(occurrence),eventLength(occurrence),occurrence)}}
+                    onKeyDown={event=>keyNudge(event,occurrence)}
+                    onClick={()=>{if(suppressClick.current){suppressClick.current=false;return}onOpen(occurrence)}}>
+                    <GripHorizontal size={12} aria-hidden="true"/></button>}
+                </div>
               })}
+              {preview?.date===date&&<div className="timeline-gesture-preview"
+                style={{top:preview.minute/60*TIMELINE_HOUR_HEIGHT,
+                  height:Math.max(30,preview.length)/60*TIMELINE_HOUR_HEIGHT}}>
+                <strong>{preview.label}</strong><span>{clock(preview.minute)} · {preview.length} min</span>
+              </div>}
             </div>
           })}
         </div>
       </div>
     </div>
-    <div className="timeline-footer">Local device time zone: {Intl.DateTimeFormat().resolvedOptions().timeZone}. Select an event to edit it. Week columns scroll horizontally on narrow screens.</div>
+    <div className="timeline-footer">
+      Keyboard: focus a personal event, Alt+↑/↓ moves 30 min; Alt+←/→ moves one day; Alt+Shift+↑/↓ resizes 30 min.
+      Touch drag mode disables native panning on event surfaces; switch it off to scroll normally.
+      Times are in {Intl.DateTimeFormat().resolvedOptions().timeZone}. Spring gaps and duplicated autumn clock times cannot be selected by dragging.
+    </div>
   </section>
 }

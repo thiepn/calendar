@@ -5,7 +5,8 @@ import {dayOccurrences,conflictsOnDay} from '../core/occurrences'
 import {TimelineView} from './TimelineView'
 type Mode='month'|'week'|'day'|'agenda'
 type Props={mode:Mode;days:LocalDate[];selected:LocalDate;records:CalendarRecord[];
-  onSelect:(date:LocalDate)=>void;onOpen:(event:CalendarOccurrence)=>void;onCreate:(date:LocalDate)=>void;onCreateAt:(date:LocalDate,start:string,end:string)=>void}
+  onSelect:(date:LocalDate)=>void;onOpen:(event:CalendarOccurrence)=>void;onCreate:(date:LocalDate)=>void;onCreateAt:(date:LocalDate,start:string,end:string)=>void;
+  onAdjust:(item:CalendarOccurrence,action:'move'|'resize',date:LocalDate,minute:number,length:number)=>void}
 const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 function belongs(event:CalendarOccurrence,date:LocalDate) {
   return event.allDay ? event.startDate<=date&&event.endDateExclusive>date :
@@ -26,7 +27,7 @@ function Events({date,records,onOpen,limit=30}:Pick<Props,'records'|'onOpen'>&{d
     {all.length>limit&&<span className="more-events">+{all.length-limit} more</span>}
   </div>
 }
-export function CalendarViews({mode,days,selected,records,onSelect,onOpen,onCreate,onCreateAt}:Props){
+export function CalendarViews({mode,days,selected,records,onSelect,onOpen,onCreate,onCreateAt,onAdjust}:Props){
   if(mode==='month')return <section className="month-view" aria-label="Month grid">
     <div className="weekday-head">{dayNames.map(name=><span key={name}>{name}</span>)}</div>
     <div className="month-grid">
@@ -39,7 +40,7 @@ export function CalendarViews({mode,days,selected,records,onSelect,onOpen,onCrea
       </div>)}
     </div>
   </section>
-  if(mode==='week'||mode==='day')return <TimelineView key={mode} days={days} selected={selected} records={records} onSelect={onSelect} onOpen={onOpen} onSlot={onCreateAt}/>
+  if(mode==='week'||mode==='day')return <TimelineView key={mode} days={days} selected={selected} records={records} onSelect={onSelect} onOpen={onOpen} onSlot={onCreateAt} onAdjust={onAdjust}/>
   return <section className="agenda-view" aria-label="Upcoming agenda">{days.map(d=>{
     const n=dayOccurrences(records,d).length
     return <div className={'agenda-row '+(d===selected?'selected':'')} key={d}>
