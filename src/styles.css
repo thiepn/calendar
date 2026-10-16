@@ -72,3 +72,31 @@
 .timeline-footer{padding:9px 12px;border-top:1px solid #e5e9e4;color:#758578;font-size:10px;line-height:1.6}
 @media(max-width:740px){.timeline-tools{flex-direction:column;align-items:stretch;gap:8px}.timeline-tools label{justify-content:space-between}.timeline-scroll{height:min(69dvh,680px);scrollbar-gutter:auto}.timeline-week .timeline-day-head{min-height:44px}.timeline-day-head strong{font-size:16px}.timeline-block{padding:3px 4px;border-radius:2px}.timeline-block strong{font-size:10px}.timeline-block span{font-size:9px}.timeline-single{min-width:0}}
 @media(prefers-reduced-motion:reduce){.timeline-scroll{scroll-behavior:auto}}
+
+/* C5 pointer gestures are visually provisional and never write directly. */
+.timeline-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.timeline-touch-toggle{display:flex!important;align-items:center;gap:5px}
+.timeline-touch-toggle input{accent-color:#2d7651}
+.timeline-event-frame{position:absolute;z-index:3;min-width:0}
+.timeline-event-frame:hover,.timeline-event-frame:focus-within{z-index:5}
+.timeline-event-frame .timeline-block{position:absolute;inset:0;width:100%;height:100%;left:0;top:0;cursor:grab;z-index:1;padding-bottom:13px}
+.timeline-event-frame .timeline-block:active{cursor:grabbing}
+.timeline-event-frame .timeline-block.imported{cursor:default}
+.timeline-resize-handle{position:absolute;bottom:0;left:0;right:0;width:100%;height:15px;border:0;border-top:1px solid #2d765150;background:#bddfc9;z-index:2;color:#2e6b4d;display:flex;justify-content:center;align-items:center;cursor:ns-resize}
+.timeline-resize-handle:hover,.timeline-resize-handle:focus-visible{background:#8fccab;outline:1px solid #276b43}
+.timeline-gesture-preview{position:absolute;z-index:6;pointer-events:none;left:4px;right:4px;border:2px dashed #167346;background:#b7ecc7bb;color:#165639;padding:6px;display:grid;align-content:start;gap:5px;font-size:11px;overflow:hidden}
+.timeline-gesture-preview span{font-size:10px}
+.timeline-touch-drag .timeline-slot,.timeline-touch-drag .timeline-block,.timeline-touch-drag .timeline-resize-handle{touch-action:none}
+.adjust-dialog h3{font-family:Georgia,serif;font-size:19px;font-weight:500;margin:5px 0 12px}
+.adjust-fields{margin:18px 0;gap:14px}
+.adjust-fields label{font-size:12px;display:grid;gap:7px;color:#5b6f60;font-weight:650}
+.adjust-fields input{padding:10px;border:1px solid #d8dfd7;border-radius:4px;min-width:0;width:100%;color:#2d4236;background:#fff}
+.adjust-new-time{font-size:12px;color:#2e6d4c;font-weight:600}
+.adjust-conflicts{border:1px solid #ddb976;background:#fff9ed;padding:13px;margin:12px 0;border-radius:4px;font-size:12px}
+.adjust-conflicts strong{display:flex;gap:8px;align-items:center;color:#876225}
+.adjust-conflicts p{color:#755b36;line-height:1.5}
+.adjust-conflicts ul{margin:8px 0;padding-left:19px}
+.adjust-conflicts li{margin:4px 0}
+.adjust-conflicts label{display:flex;align-items:center;gap:7px;font-weight:650;color:#59462d;margin-top:13px}
+.adjust-dialog .primary:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:740px){.timeline-tools{gap:10px}.timeline-controls{justify-content:space-between}.timeline-resize-handle{height:18px}.adjust-fields{grid-template-columns:1fr}}

@@ -5,6 +5,7 @@ import {addDays,addMonths,dateLabel,dateSeries,friendlyRange,localDate,monday,mo
 import {dayOccurrences,excludeOccurrence} from './core/occurrences'
 import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,splitSeriesAt,endSeriesAt} from './core/series'
 import {findFreeSlots,type FreeSlot} from './core/availability'
+import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
 import {exportBackup,importBackup,loadState,saveState,STORAGE_KEY} from './core/storage'
 import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
 import {EventEditor} from './components/EventEditor'
@@ -29,6 +30,8 @@ export default function App(){
   const [editInstance,setEditInstance]=useState<{parentId:string;date:LocalDate}|null>(null)
   const [editFuture,setEditFuture]=useState<{parentId:string;date:LocalDate;newId:string}|null>(null)
   const [moveDate,setMoveDate]=useState<LocalDate>(localDate())
+  const [adjustment,setAdjustment]=useState<{item:CalendarOccurrence;action:TimedAction;date:LocalDate;minute:number;length:number}|null>(null)
+  const [adjustAck,setAdjustAck]=useState(false)
   const [importMode,setImportMode]=useState<'update'|'replace'>('update')
   const [finderOpen,setFinderOpen]=useState(false)
   const [finderDuration,setFinderDuration]=useState(60)
@@ -64,7 +67,7 @@ export default function App(){
     const key=(e:KeyboardEvent)=>{
       const target=e.target as HTMLElement
       if(['INPUT','TEXTAREA','SELECT'].includes(target.tagName)||target.isContentEditable)return
-      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setFinderOpen(false)}
+      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setFinderOpen(false);setAdjustment(null)}
       if(e.key==='n'){e.preventDefault();setEditorDate(selected);setEditing(null)}
       if(e.key==='t'){e.preventDefault();setSelected(localDate())}
       if(e.key==='/'){e.preventDefault();searchInput.current?.focus()}
@@ -85,6 +88,12 @@ export default function App(){
   },{})
   const personalCount=calendar.records.filter(x=>x.source==='personal').length
   const activeRecord=active?calendar.records.find(x=>x.id===active.recordId):undefined
+  const adjustmentReview=useMemo(()=>{
+    if(!adjustment)return {proposal:null,error:''}
+    try{return {proposal:proposeTimedChange(calendar,adjustment.item,adjustment.action,adjustment.date,
+      adjustment.minute,adjustment.length),error:''}}
+    catch(error){return {proposal:null,error:error instanceof Error?error.message:String(error)}}
+  },[calendar,adjustment])
   const freeSlots=useMemo(()=>finderOpen?findFreeSlots(calendar.records,{
     from:selected<localDate()?localDate():selected,days:finderDays,durationMinutes:finderDuration,
     startHour:finderWindow==='daytime'?8:17,endHour:finderWindow==='daytime'?19:23,
@@ -98,6 +107,21 @@ export default function App(){
     setSelected(slot.date);setFinderOpen(false)
   }
   function open(item:CalendarOccurrence){setActive(item);setSelected(item.date);setMoveDate(item.startDate)}
+  function requestAdjustment(item:CalendarOccurrence,action:TimedAction,date:LocalDate,minute:number,length:number){
+    if(item.source!=='personal'||item.allDay)return
+    setActive(null);setAdjustAck(false)
+    setAdjustment({item,action,date,minute,length})
+  }
+  function confirmAdjustment(){
+    if(!adjustmentReview.proposal||!adjustment)return
+    if(adjustmentReview.proposal.conflicts.length&&!adjustAck)return
+    try{
+      const next=applyTimedChange(calendar,adjustmentReview.proposal,()=>crypto.randomUUID())
+      if(commit(next,'Timed event change saved locally')){
+        setAdjustment(null);setAdjustAck(false);setSelected(adjustment.date)
+      }
+    }catch(error){setNotice('Reschedule rejected: '+String(error))}
+  }
   function edit(item:CalendarOccurrence,scope:'series'|'instance'|'future'='series'){
     const record=calendar.records.find(x=>x.id===item.recordId)
     if(!record||record.source!=='personal')return
@@ -236,7 +260,8 @@ export default function App(){
         </div>
         {notice&&<div className={'notice '+(/failed|rejected|not saved|could not/i.test(notice)?'notice-error':'')} role="status">{notice}<button onClick={()=>setNotice('')} aria-label="Dismiss message"><X size={14}/></button></div>}
         <div className="content-grid">
-          <div className="calendar-surface"><CalendarViews mode={mode} days={days} selected={selected} records={visible} onSelect={setSelected} onOpen={open} onCreate={create} onCreateAt={(date,start,end)=>startSlot({date,start,end})}/></div>
+          <div className="calendar-surface"><CalendarViews mode={mode} days={days} selected={selected} records={visible} onSelect={setSelected} onOpen={open} onCreate={create} onCreateAt={(date,start,end)=>startSlot({date,start,end})}
+              onAdjust={requestAdjustment}/></div>
           <aside className="inspector">
             <div className="inspector-heading"><span className="eyebrow">SELECTED DAY</span><h3>{dateLabel(selected,{weekday:'long',month:'short',day:'numeric'})}</h3>
               <p>{selectedEvents.length} visible commitment{selectedEvents.length===1?'':'s'}</p></div>
@@ -270,6 +295,43 @@ export default function App(){
         {!freeSlots.length&&<p className="empty-note">No available slots in this window. Try a shorter duration, evening hours or more days.</p>}</div>
         <p className="fine-print">Suggestions are calculated locally, can become outdated and are rechecked against saved calendar changes when you save. This is not a multi-user booking system.</p>
       </section></div>}
+    {adjustment&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setAdjustment(null)}}>
+      <section className="adjust-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Confirm time adjustment">
+        <header className="editor-head"><h2>Review {adjustment.action==='move'?'move':'resize'}</h2>
+          <button className="icon-button" aria-label="Cancel adjustment" onClick={()=>setAdjustment(null)}><X size={19}/></button></header>
+        <h3>{adjustment.item.title}</h3>
+        <p className="fine-print">Original: {new Date(adjustment.item.start).toLocaleString()} – {new Date(adjustment.item.end).toLocaleString()}</p>
+        <div className="editor-grid adjust-fields">
+          <label>Proposed start
+            <input type="datetime-local" value={adjustment.date+'T'+String(Math.floor(adjustment.minute/60)).padStart(2,'0')+':'+String(adjustment.minute%60).padStart(2,'0')}
+              onChange={event=>{
+                const value=event.target.value
+                if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value))return
+                const hour=Number(value.slice(11,13)),minute=Number(value.slice(14,16))
+                setAdjustAck(false)
+                setAdjustment(prev=>prev?{...prev,date:value.slice(0,10),minute:hour*60+minute}:prev)
+              }}/></label>
+          <label>Duration (minutes)
+            <input type="number" min={15} max={1440} step={15} value={adjustment.length}
+              onChange={event=>{setAdjustAck(false);setAdjustment(prev=>prev?{...prev,length:Number(event.target.value)}:prev)}}/></label>
+        </div>
+        {adjustmentReview.error&&<p role="alert" className="error">{adjustmentReview.error}</p>}
+        {adjustmentReview.proposal&&<>
+          <p className="adjust-new-time">Proposed: {new Date(adjustmentReview.proposal.start).toLocaleString()} – {new Date(adjustmentReview.proposal.end).toLocaleString()}</p>
+          {calendar.records.find(r=>r.id===adjustment.item.recordId)?.repeat&&
+            <p className="readonly-note">This adjusts only the selected occurrence. Other dates in the recurring series remain unchanged.</p>}
+          {adjustmentReview.proposal.conflicts.length>0&&<div className="adjust-conflicts" role="alert">
+            <strong><AlertTriangle size={16}/> {adjustmentReview.proposal.conflicts.length} overlapping saved commitment(s)</strong>
+            <p>Including imported and hidden sources; no event is silently moved or deleted.</p>
+            <ul>{adjustmentReview.proposal.conflicts.slice(0,8).map(item=><li key={item.key}>{item.title} ({item.source==='ics'?'imported, read-only':'personal'})</li>)}</ul>
+            <label><input type="checkbox" checked={adjustAck} onChange={event=>setAdjustAck(event.target.checked)}/> Save despite these overlaps</label>
+          </div>}
+        </>}
+        <footer className="editor-actions"><button className="secondary" type="button" onClick={()=>setAdjustment(null)}>Cancel</button>
+          <button className="primary" type="button" onClick={confirmAdjustment}
+            disabled={!adjustmentReview.proposal||(adjustmentReview.proposal.conflicts.length>0&&!adjustAck)}>Confirm change</button></footer>
+      </section>
+    </div>}
     {active&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setActive(null)}}>
       <section className="details dialog-surface" role="dialog" aria-modal="true" aria-label="Event details">
         <header className="editor-head"><span className="eyebrow">{active.source==='ics'?'IMPORTED SNAPSHOT — READ ONLY':'PERSONAL EVENT'}</span><button className="icon-button" aria-label="Close event" onClick={()=>setActive(null)}><X size={19}/></button></header>
@@ -287,7 +349,12 @@ export default function App(){
           {active.source==='personal'&&activeRecord?.repeat&&<button className="secondary" onClick={()=>edit(active,'instance')}><Pencil size={15}/> Edit this occurrence</button>}
           {active.source==='personal'&&activeRecord?.repeat&&<button className="secondary" onClick={()=>edit(active,'future')}><Pencil size={15}/> Edit this and future</button>}
           {active.source==='personal'&&activeRecord?.repeat&&<button className="secondary" onClick={()=>stopAfter(active)}><RotateCcw size={15}/> End after this date</button>}
-          {active.source==='personal'&&<button className="secondary" onClick={()=>edit(active)}><Pencil size={15}/> {activeRecord?.repeat?'Edit whole series':'Edit event'}</button>}
+          {active.source==='personal'&&!active.allDay&&<button className="secondary" onClick={()=>{
+            const date=new Date(active.start)
+            requestAdjustment(active,'move',localDate(date),date.getHours()*60+date.getMinutes(),
+              Math.round((Date.parse(active.end)-Date.parse(active.start))/60000))
+          }}><Clock3 size={15}/> Adjust time & duration</button>}
+          {active.source==='personal'&&<button className="secondary" onClick={()=>edit(active)}><Pencil size={15}/> {activeRecord?.repeat?'Edit whole series':'Edit event'}</button>
           <button className="danger" onClick={()=>remove(active.recordId)}><Trash2 size={15}/> {active.source==='ics'?'Remove copy':activeRecord?.repeat?'Delete series':'Delete'}</button>
         </footer>
       </section>
