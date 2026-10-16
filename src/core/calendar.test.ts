@@ -94,7 +94,9 @@ describe('Recurring edits and source refresh',()=>{
     expect(second.state.records[0].source).toBe('personal')
     expect(second.state.records[1].title).toBe('Lecture moved')
     const third=mergeIcs(second.state,previewIcs(input('Lecture moved')),'replace')
-    expect(third.removed).toBe(1);expect(third.added).toBe(1)
+    expect(third.removed).toBe(0);expect(third.added).toBe(0)
+    expect(third.duplicates).toBe(1)
+    expect(third.state.records[1].id).toBe(second.state.records[1].id)
   })
 })
 
@@ -612,5 +614,21 @@ describe('C10 reversible local reminder settings',()=>{
     expect(inQuietHours(fromLocalDateTime('2026-10-17T06:30'),'22-07')).toBe(true)
     expect(inQuietHours(fromLocalDateTime('2026-10-17T12:30'),'22-07')).toBe(false)
     expect(inQuietHours(fromLocalDateTime('2026-10-17T12:30'),'off')).toBe(false)
+  })
+})
+
+describe('C10 source-key preserving ICS replace',()=>{
+  it('removes only absent source-owned UIDs and retains matching IDs',()=>{
+    const input=(uids:string[])=>['BEGIN:VCALENDAR','X-WR-CALNAME:Courses',...uids.flatMap(uid=>[
+      'BEGIN:VEVENT','UID:'+uid,'SUMMARY:'+uid,'DTSTART:20261111T100000Z',
+      'DTEND:20261111T110000Z','END:VEVENT']),'END:VCALENDAR'].join('\r\n')
+    const initial=mergeIcs({schemaVersion:1,records:[record({id:'private'})]},previewIcs(input(['a','b']))).state
+    const updated=mergeIcs(initial,previewIcs(input(['b','c'])),'replace')
+    expect(updated.removed).toBe(1)
+    expect(updated.added).toBe(1)
+    expect(updated.duplicates).toBe(1)
+    expect(updated.state.records.find(r=>r.title==='b')?.id).toBe(initial.records.find(r=>r.title==='b')?.id)
+    expect(updated.state.records.some(r=>r.title==='a')).toBe(false)
+    expect(updated.state.records.find(r=>r.id==='private')).toEqual(initial.records[0])
   })
 })

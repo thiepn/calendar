@@ -251,26 +251,35 @@ export function previewIcs(text:string):IcsPreview {
 export function mergeIcs(state:CalendarState,preview:IcsPreview,mode:'update'|'replace'='update'):
   {state:CalendarState;added:number;updated:number;duplicates:number;removed:number}{
   const old=state.records.filter(x=>x.source==='ics'&&x.sourceCalendar===preview.name)
-  const prior=new Map(state.records.filter(x=>x.source==='ics').map(x=>[x.sourceKey,x]))
+  const prior=new Map(old.map(x=>[x.sourceKey,x]))
   const next=mode==='replace'?state.records.filter(x=>x.source!=='ics'||x.sourceCalendar!==preview.name):[...state.records]
   const used=new Set(next.map(x=>x.id))
+  const seenKeys=new Set<string>()
   let added=0,updated=0,duplicates=0
   for(const record of preview.records){
-    const existing=mode==='update'?prior.get(record.sourceKey):undefined
+    if(record.source!=='ics'||record.sourceCalendar!==preview.name||!record.sourceKey)
+      throw new Error('Imported snapshot source authority mismatch')
+    if(seenKeys.has(record.sourceKey))throw new Error('Duplicate UID/recurrence instance in imported snapshot')
+    seenKeys.add(record.sourceKey)
+    const existing=prior.get(record.sourceKey)
     if(existing){
-      if(existing.sourceCalendar!==preview.name){duplicates++;continue}
       const keys=['title','description','location','start','end','allDay','startDate','endDateExclusive'] as const
-      if(keys.every(k=>existing[k]===record[k])){duplicates++;continue}
-      const index=next.findIndex(x=>x.id===existing.id)
-      if(index<0)throw new Error('Imported source changed while previewing')
-      next[index]={...record,id:existing.id};updated++
+      const same=keys.every(k=>existing[k]===record[k])
+      if(same)duplicates++;else updated++
+      const chosen=same?existing:{...record,id:existing.id}
+      if(mode==='replace'){if(used.has(existing.id))throw new Error('Imported source ID collision');used.add(existing.id);next.push(chosen)}
+      else{
+        const index=next.findIndex(x=>x.id===existing.id)
+        if(index<0)throw new Error('Imported source changed while previewing')
+        next[index]=chosen
+      }
     }else{
-      if(used.has(record.id)){duplicates++;continue}
+      if(used.has(record.id))throw new Error('Imported UID collides with existing record ID')
       used.add(record.id);next.push(record);added++
     }
   }
   return {state:{schemaVersion:1,records:next},added,updated,duplicates,
-    removed:mode==='replace'?old.length:0}
+    removed:mode==='replace'?old.filter(x=>!seenKeys.has(x.sourceKey!)).length:0}
 }
 
 function textValue(value:string){return value.replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;')}
