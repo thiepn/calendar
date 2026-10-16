@@ -92,7 +92,7 @@ async function exerciseGesturesDesktop(){
   const first=page.locator('.timeline-day').first()
   await first.locator('.timeline-slot').nth(18).click()
   await page.getByRole('dialog',{name:'New event'}).getByLabel('Event name').fill('Pointer base')
-  await page.getByRole('button',{name:'Create event'}).click()
+  await page.getByRole('dialog',{name:'New event'}).getByRole('button',{name:'Create event'}).click()
   const base=page.locator('.timeline-block').filter({hasText:'Pointer base'}).first()
   await base.waitFor()
 
