@@ -3,7 +3,7 @@ import {AlertTriangle,GripHorizontal,Plus} from 'lucide-react'
 import type {CalendarRecord,CalendarOccurrence,LocalDate} from '../types'
 import {addDays,daysBetween,dateLabel,displayTime,localDate} from '../core/dates'
 import {dayOccurrences} from '../core/occurrences'
-import {layoutTimedDay,slotRange,TIMELINE_HOUR_HEIGHT,SLOT_MINUTES} from '../core/timeline'
+import {layoutTimedDay,dayAxis,slotAt,TIMELINE_HOUR_HEIGHT,SLOT_MINUTES} from '../core/timeline'
 import {nudgeTimed,type TimedAction} from '../core/reschedule'
 
 type Props={days:LocalDate[];selected:LocalDate;records:CalendarRecord[];
@@ -20,12 +20,9 @@ const snap=(value:number)=>Math.round(value/30)*30
 const clamp=(value:number,min:number,max:number)=>Math.max(min,Math.min(max,value))
 const clock=(minute:number)=>String(Math.floor(minute/60)).padStart(2,'0')+':'+String(minute%60).padStart(2,'0')
 const eventLength=(event:CalendarOccurrence)=>Math.round((Date.parse(event.end)-Date.parse(event.start))/60000)
-const eventMinute=(event:CalendarOccurrence)=>{
-  const d=new Date(event.start)
-  return d.getHours()*60+d.getMinutes()
-}
+const eventMinute=(event:CalendarOccurrence,date:LocalDate)=>Math.max(0,Math.round((Date.parse(event.start)-dayAxis(date).start)/60000))
 function slot(date:LocalDate,minute:number,duration:number){
-  try{return slotRange(date,minute,duration)}catch{return null}
+  try{return slotAt(dayAxis(date),minute,duration)}catch{return null}
 }
 /** Pointer gestures are staged here, never mutate sources. App confirms canonical changes. */
 export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdjust,onAllDaySlot,onAllDayAdjust}:Props){
@@ -142,7 +139,8 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
       // Invalid movements are declined; users can enter an exact value in the details editor.
     }
   }
-  const height=24*TIMELINE_HOUR_HEIGHT
+  const axes=days.map(dayAxis)
+  const height=Math.max(...axes.map(a=>a.minutes))/60*TIMELINE_HOUR_HEIGHT
   return <section className={'timeline-view '+(touchDrag?'timeline-touch-drag':'')} aria-label={week?'Graphical weekly schedule':'Graphical daily schedule'}
     onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={()=>{gesture.current=null;setPreview(null);setDayPreview(null)}}>
     <div className="timeline-tools">
@@ -184,19 +182,21 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
         </div>
         <div className="timeline-main">
           <div className="timeline-hour-labels" aria-hidden="true" style={{height}}>
-            {Array.from({length:24},(_,i)=><span key={i} style={{top:i*TIMELINE_HOUR_HEIGHT}}>{clock(i*60)}</span>)}
+            {axes[0].hours.map(h=><span key={h.minute} style={{top:h.minute/60*TIMELINE_HOUR_HEIGHT}}>{h.label}{h.repeated?' '+h.offset:''}</span>)}
           </div>
           {days.map(date=>{
+            const axis=dayAxis(date)
             const blocks=layoutTimedDay(dayOccurrences(records,date),date)
-            return <div key={date} className={'timeline-day '+(date===localDate()?'is-today':'')} style={{height}}>
-              {Array.from({length:1440/SLOT_MINUTES},(_,index)=>{
-                const minute=index*SLOT_MINUTES
+            return <div key={date} className={'timeline-day '+(date===localDate()?'is-today':'')} style={{height:axis.minutes/60*TIMELINE_HOUR_HEIGHT}}>
+              {axis.hours.filter(h=>h.repeated).map(h=><span key={h.minute} className="timeline-dst-marker"
+                style={{top:h.minute/60*TIMELINE_HOUR_HEIGHT}}>{h.label} {h.offset}</span>)}
+              {axis.slots.map(({minute,label,offset,repeated})=>{
                 const available=slot(date,minute,duration)
                 return <button key={minute} type="button" className="timeline-slot"
                   style={{top:minute/60*TIMELINE_HOUR_HEIGHT,height:SLOT_MINUTES/60*TIMELINE_HOUR_HEIGHT}}
                   disabled={!available}
-                  aria-label={available?'Plan '+duration+' minute event on '+dateLabel(date,{weekday:'long',month:'short',day:'numeric'})+' at '+clock(minute):'Unavailable local time '+clock(minute)}
-                  title={available?'New event · '+clock(minute):'Invalid daylight-saving local time'}
+                  aria-label={available?'Plan '+duration+' minute event on '+dateLabel(date,{weekday:'long',month:'short',day:'numeric'})+' at '+label+(repeated?' '+offset:''):'Unavailable local time '+label}
+                  title={available?'New event · '+label+(repeated?' '+offset:''):'Invalid local time'}
                   onPointerDown={event=>{if(available)begin(event,'create',date,minute,duration)}}
                   onClick={()=>{if(suppressClick.current){suppressClick.current=false;return}if(available)onSlot(date,available.start,available.end)}}
                   ><Plus size={13} aria-hidden="true"/></button>
@@ -207,13 +207,13 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
                 const editable=occurrence.source==='personal'
                 return <div key={occurrence.key} className="timeline-event-frame"
                   style={{top:startMinute/60*TIMELINE_HOUR_HEIGHT+1,
-                    height:Math.max(19,Math.min(1440,endMinute)-startMinute)/60*TIMELINE_HOUR_HEIGHT-2,
-                    left:'calc('+(lane*width)+'% + 3px)',width:'calc('+width+'% - 6px)'}}>
+                    height:Math.max(19,Math.min(axis.minutes,endMinute)-startMinute)/60*TIMELINE_HOUR_HEIGHT-2,
+                    left:'calc(34px + (100% - 38px) * '+(lane/lanes)+')',width:'calc((100% - 38px) * '+(width/100)+' - 4px)'}}>
                   <button type="button"
                     className={'timeline-block '+(occurrence.source==='ics'?'imported ':'')+(overlaps?'overlap':'')}
                     aria-label={occurrence.title+', '+displayTime(occurrence.start)+' to '+displayTime(occurrence.end)+(overlaps?', overlapping event':'')}
                     title={editable?'Drag to move · Alt+arrows to move · Alt+Shift+vertical arrows to resize':'Imported snapshot — read only'}
-                    onPointerDown={event=>{if(editable)begin(event,'move',date,eventMinute(occurrence),eventLength(occurrence),occurrence)}}
+                    onPointerDown={event=>{if(editable)begin(event,'move',date,eventMinute(occurrence,date),eventLength(occurrence),occurrence)}}
                     onKeyDown={event=>keyNudge(event,occurrence)}
                     onClick={()=>{if(suppressClick.current){suppressClick.current=false;return}onOpen(occurrence)}}>
                     <strong>{occurrence.title}</strong>
@@ -223,7 +223,7 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
                   {editable&&<button type="button" className="timeline-resize-handle"
                     aria-label={'Resize '+occurrence.title}
                     title="Drag to resize · Alt+Shift+Up/Down"
-                    onPointerDown={event=>{event.stopPropagation();begin(event,'resize',date,eventMinute(occurrence),eventLength(occurrence),occurrence)}}
+                    onPointerDown={event=>{event.stopPropagation();begin(event,'resize',date,eventMinute(occurrence,date),eventLength(occurrence),occurrence)}}
                     onKeyDown={event=>keyNudge(event,occurrence)}
                     onClick={()=>{if(suppressClick.current){suppressClick.current=false;return}onOpen(occurrence)}}>
                     <GripHorizontal size={12} aria-hidden="true"/></button>}
@@ -242,7 +242,7 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
     <div className="timeline-footer">
       Keyboard: focus a personal event, Alt+↑/↓ moves 30 min; Alt+←/→ moves one day; Alt+Shift+↑/↓ resizes 30 min.
       Touch drag mode disables native panning on selectable event surfaces; switch it off to scroll normally. Drag toward the timeline edges to scroll.
-      Times are in {Intl.DateTimeFormat().resolvedOptions().timeZone}. Spring gaps and duplicated autumn clock times cannot be selected by dragging.
+      Times are in {Intl.DateTimeFormat().resolvedOptions().timeZone}. Spring gaps are omitted; the repeated autumn hour has separate labelled ISO-backed rows.
     </div>
   </section>
 }
