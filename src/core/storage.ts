@@ -2,6 +2,7 @@ import type {CalendarRecord,CalendarState} from '../types'
 import {day} from './dates'
 const KEY='thiepn.calendar.local.v1'
 const RECOVERY_KEY='thiepn.calendar.recovery.v1'
+const RAW_RESCUE_KEY='thiepn.calendar.raw-rescue.v1'
 const empty=():CalendarState=>({schemaVersion:1,records:[]})
 export function validateRecord(value:unknown):CalendarRecord {
   if(!value || typeof value!=='object') throw new Error('Invalid event record')
@@ -72,6 +73,21 @@ export function readRecovery():RecoverySnapshot|null {
   return {...value,state:validateState(value.state)}
 }
 export function rawCalendarBackup():string|null{return localStorage.getItem(KEY)}
+export function rescuedUnparsedCalendar():string|null{return localStorage.getItem(RAW_RESCUE_KEY)}
+/** Only for an explicitly reviewed valid backup replacing unreadable local bytes.
+ * Copy the exact original bytes to a separate rescue key BEFORE writing the new state. */
+export function restoreUnreadableCalendar(backup:CalendarState,expectedRaw:string):void {
+  const next=JSON.stringify(validateState(backup))
+  const current=localStorage.getItem(KEY)
+  if(current===null||current!==expectedRaw)throw new Error('Unreadable original changed before repair')
+  try{validateState(JSON.parse(current))}
+  catch{
+    localStorage.setItem(RAW_RESCUE_KEY,current)
+    localStorage.setItem(KEY,next)
+    return
+  }
+  throw new Error('Current calendar is valid. Use ordinary guarded restore instead.')
+}
 export const RECOVERY_STORAGE_KEY=RECOVERY_KEY
 export function importBackup(text:string):CalendarState {return validateState(JSON.parse(text))}
 export function exportBackup(state:CalendarState):string {return JSON.stringify(validateState(state),null,2)}

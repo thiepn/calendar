@@ -6,7 +6,7 @@ import {draftTimedRange,reviewDraft} from './draft'
 import {proposeAllDayChange,applyAllDayChange} from './all-day'
 import {occurrencesBetween,excludeOccurrence,conflictsOnDay} from './occurrences'
 import {previewIcs,mergeIcs,exportIcs} from './ics'
-import {validateState,saveState,readRecovery,rawCalendarBackup,RECOVERY_STORAGE_KEY,STORAGE_KEY} from './storage'
+import {validateState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCalendar,restoreUnreadableCalendar,RECOVERY_STORAGE_KEY,STORAGE_KEY} from './storage'
 import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent,splitSeriesAt,endSeriesAt} from './series'
 import {layoutTimedDay,slotRange,dayAxis,slotAt} from './timeline'
 import {findFreeSlots} from './availability'
@@ -415,5 +415,29 @@ describe('C8 recoverable local writes and recurrence integrity',()=>{
     const personal=record({id:'series',repeat:{frequency:'daily',interval:2}})
     const next=saveWholeEvent({schemaVersion:1,records:[personal,ics]},{...personal,title:'Updated title'})
     expect(next.records[1]).toEqual(ics)
+  })
+})
+
+describe('C8 corrupt-source repair requires byte-exact local rescue',()=>{
+  it('preserves unreadable bytes before accepting a checked valid backup',()=>{
+    const map=new Map<string,string>()
+    const previous=globalThis.localStorage
+    const mock={getItem:(key:string)=>map.get(key)??null,
+      setItem:(key:string,value:string)=>{map.set(key,value)},removeItem:(key:string)=>{map.delete(key)},
+      clear:()=>map.clear(),key:(i:number)=>Array.from(map.keys())[i]??null,get length(){return map.size}}
+    Object.defineProperty(globalThis,'localStorage',{configurable:true,value:mock})
+    try{
+      map.set(STORAGE_KEY,'{"incomplete":')
+      const valid:CalendarState={schemaVersion:1,records:[record({id:'repaired'})]}
+      expect(()=>restoreUnreadableCalendar(valid,'different raw')).toThrow('changed')
+      expect(rawCalendarBackup()).toBe('{"incomplete":')
+      restoreUnreadableCalendar(valid,'{"incomplete":')
+      expect(rescuedUnparsedCalendar()).toBe('{"incomplete":')
+      expect(JSON.parse(rawCalendarBackup()!).records[0].id).toBe('repaired')
+      expect(()=>restoreUnreadableCalendar(valid,rawCalendarBackup()!)).toThrow('valid')
+    }finally{
+      if(previous)Object.defineProperty(globalThis,'localStorage',{configurable:true,value:previous})
+      else Reflect.deleteProperty(globalThis,'localStorage')
+    }
   })
 })

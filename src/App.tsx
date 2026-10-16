@@ -6,7 +6,7 @@ import {dayOccurrences,excludeOccurrence,occurrencesBetween} from './core/occurr
 import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,splitSeriesAt,endSeriesAt} from './core/series'
 import {findFreeSlots,type FreeSlot} from './core/availability'
 import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
-import {exportBackup,importBackup,loadState,saveState,readRecovery,rawCalendarBackup,STORAGE_KEY,type RecoverySnapshot} from './core/storage'
+import {exportBackup,importBackup,loadState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCalendar,restoreUnreadableCalendar,STORAGE_KEY,type RecoverySnapshot} from './core/storage'
 import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
 import {EventEditor} from './components/EventEditor'
 import {AllDayDialog} from './components/AllDayDialog'
@@ -263,7 +263,19 @@ export default function App(){
   }
   function confirmRestore(){
     if(!restoreCandidate)return
-    if(commit(restoreCandidate.state,'Calendar restored from '+restoreCandidate.origin)){
+    let saved=false
+    if(unreadable){
+      try{
+        const raw=rawCalendarBackup()
+        if(raw===null)throw new Error('Original unreadable bytes are no longer available')
+        restoreUnreadableCalendar(restoreCandidate.state,raw)
+        setCalendar(restoreCandidate.state);setUnreadable(false)
+        setNotice('Calendar repaired; exact original unreadable bytes are retained locally in a raw rescue snapshot. Download this rescue copy from Sources & data.')
+        saved=true
+      }catch(error){setNotice('Repair not applied: '+String(error))}
+    }else saved=commit(restoreCandidate.state,'Calendar restored from '+restoreCandidate.origin)
+    if(saved){
+      try{setRecovery(readRecovery())}catch{setRecovery(null)}
       setRestoreCandidate(null);setActive(null);setEditorDate(null);setPending(null)
       setQuery('');setFilter('all');setSelected(localDate())
     }
@@ -506,6 +518,10 @@ export default function App(){
           <button className="secondary" disabled={!recovery} onClick={proposeRecovery}><RotateCcw size={16}/> Review previous-version checkpoint</button>
           {recovery&&<p className="fine-print">Checkpoint: {new Date(recovery.savedAt).toLocaleString()} — {recovery.label}. Stores one prior complete version on this device.</p>}
           {unreadable&&<button className="danger" onClick={downloadUnreadable}><Download size={16}/> Download unreadable original bytes</button>}
+          {rescuedUnparsedCalendar()!==null&&<button className="secondary" onClick={()=>{
+            const raw=rescuedUnparsedCalendar()
+            if(raw!==null)download('thiepn-calendar-unreadable-rescue.txt',raw,'text/plain')
+          }}><Download size={16}/> Download retained raw rescue snapshot</button>}
         </div><div className="readonly-note"><AlertTriangle size={16}/> No Account, Google or Folio sync is connected. Keep a backup before clearing browser data.</div>
         <a target="_blank" rel="noopener noreferrer" href="https://github.com/thiepn/folio" className="external-inline">Open source-owned Folio <ExternalLink size={14}/></a>
       </section></div>}
