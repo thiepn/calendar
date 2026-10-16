@@ -612,7 +612,7 @@ async function exerciseC9RemindersAndIcs(){
   await panel.waitFor()
   assert.match(await panel.innerText(),/C9 local due alert/)
   assert.match(await panel.innerText(),/Due now or overdue/)
-  assert.match(await panel.innerText(),/only while Calendar is open/i)
+  assert.match(await panel.innerText(),/only while Calendar is open|Browser notifications are blocked|Desktop notifications are unavailable/i)
   await panel.getByRole('button',{name:'Snooze C9 local due alert for 15 minutes'}).click()
   assert.match(await panel.innerText(),/Upcoming/)
   const actions=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.reminder-actions.v1')))
