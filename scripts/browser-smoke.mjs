@@ -427,6 +427,34 @@ async function exerciseC7AllDayResize(){
   await context.close()
 }
 
+
+async function exerciseC7HeldEdgeScrolling(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage()
+  const errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  const scroller=page.locator('.timeline-scroll')
+  const start=page.locator('.timeline-slot').nth(18)
+  await start.scrollIntoViewIfNeeded()
+  const first=await start.boundingBox(),bounds=await scroller.boundingBox()
+  assert.ok(first&&bounds)
+  await page.mouse.move(first.x+first.width*.5,first.y+first.height*.5)
+  await page.mouse.down()
+  await page.mouse.move(first.x+first.width*.5,bounds.y+bounds.height-7,{steps:8})
+  const before=await scroller.evaluate(el=>el.scrollTop)
+  await sleep(510)
+  const after=await scroller.evaluate(el=>el.scrollTop)
+  assert.ok(after>=before+20,'Holding a captured pointer near the bottom edge should auto-scroll without more mouse motion: '+before+' -> '+after)
+  await page.mouse.up()
+  await page.getByRole('dialog',{name:'New event'}).waitFor()
+  await page.getByRole('dialog',{name:'New event'}).getByRole('button',{name:'Cancel'}).click()
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_C7_HELD_EDGE_AUTOSCROLL_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -439,6 +467,7 @@ try{
   await exerciseC6Mobile()
   await exerciseC7DstAndRange()
   await exerciseC7AllDayResize()
+  await exerciseC7HeldEdgeScrolling()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
