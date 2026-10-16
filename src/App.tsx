@@ -44,9 +44,14 @@ export default function App(){
   const restoreInput=useRef<HTMLInputElement>(null)
   const searchInput=useRef<HTMLInputElement>(null)
 
-  function commit(next:CalendarState,success='Saved on this device') {
-    try{saveState(next);setCalendar(next);setNotice(success);return true}
-    catch(error){setNotice('Not saved: '+String(error));return false}
+  function commit(next:CalendarState,success='Saved on this device',confirmedRestore=false) {
+    try{
+      // The read is immediately before the write: never knowingly overwrite another tab's changes.
+      const current=loadState()
+      if(!confirmedRestore&&(current.error||JSON.stringify(current.state)!==JSON.stringify(calendar)))
+        throw new Error('Saved calendar changed in another tab or cannot be read. Review the latest events before retrying.')
+      saveState(next);setCalendar(next);setNotice(success);return true
+    }catch(error){setNotice('Not saved: '+String(error));return false}
   }
   useEffect(()=>{
     const sync=(e:StorageEvent)=>{
@@ -158,7 +163,7 @@ export default function App(){
     const f=e.target.files?.[0];e.target.value='';if(!f)return
     try{
       const next=importBackup(await f.text())
-      if(window.confirm('Restore this backup and replace all current device-local Calendar data?'))commit(next,'Backup restored')
+      if(window.confirm('Restore this backup and replace all current device-local Calendar data?'))commit(next,'Backup restored',true)
     }catch(error){setNotice('Backup rejected: '+String(error))}
   }
   function applyImport(){
@@ -247,7 +252,7 @@ export default function App(){
           <span className="finder-plan">Plan event <ChevronRight size={14}/></span>
         </button>)}
         {!freeSlots.length&&<p className="empty-note">No available slots in this window. Try a shorter duration, evening hours or more days.</p>}</div>
-        <p className="fine-print">Suggestions are calculated locally and may change if another tab updates your calendar. The event editor checks current storage on save.</p>
+        <p className="fine-print">Suggestions are calculated locally, can become outdated and are rechecked against saved calendar changes when you save. This is not a multi-user booking system.</p>
       </section></div>}
     {active&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setActive(null)}}>
       <section className="details dialog-surface" role="dialog" aria-modal="true" aria-label="Event details">

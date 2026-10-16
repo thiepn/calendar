@@ -1,5 +1,5 @@
 import type { CalendarRecord, LocalDate } from '../types'
-import { addDays, day, fromLocalDateTime, localDate } from './dates'
+import { addDays, day, fromLocalDateTime } from './dates'
 import { dayOccurrences } from './occurrences'
 
 export interface FreeSlot { date:LocalDate; start:string; end:string }
