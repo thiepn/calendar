@@ -110,7 +110,7 @@ export function previewIcs(text:string):IcsPreview {
     try{
       if(get('STATUS')?.value.toUpperCase()==='CANCELLED')continue
       if(get('RRULE')||get('RDATE')||get('EXDATE')){
-        if(!get('RRULE')||get('RDATE'))throw new Error('Unsupported recurrence rule/RDATE; no partial series imported')
+        if(!get('RRULE')&&!get('RDATE'))throw new Error('Unsupported EXDATE without a recurring master; no partial series imported')
         const uid=get('UID')?.value
         if(!uid)throw new Error('Finite recurring event requires UID')
         const rawStart=get('DTSTART'),rawEnd=get('DTEND')
@@ -126,11 +126,37 @@ export function previewIcs(text:string):IcsPreview {
           const startIso=start.iso,endIso=rawEnd?parseInstant(rawEnd).iso:''
           const duration=Date.parse(endIso)-Date.parse(startIso)
           if(duration<=0||duration>7*86400000)throw new Error('Invalid timed recurrence duration')
-          const plan=finiteTimedDates(get('RRULE')!.value,template.anchor)
+          const plan=get('RRULE')?finiteTimedDates(get('RRULE')!.value,template.anchor):
+            {dates:[template.anchor],untilInstant:undefined}
           const candidates=plan.dates.map(date=>{
             const original=parseInstant({...rawStart,value:wallValueOn(date,template)})
             return {date,original}
           }).filter(item=>!plan.untilInstant||item.original.iso<=plan.untilInstant)
+          // Explicit RDATE values are additional source-owned instants, not
+          // subject to RRULE UNTIL. Reject PERIOD, mixed clocks and out-of-range values.
+          const known=new Set(candidates.map(c=>c.original.iso))
+          for(const prop of props.filter(p=>p.name==='RDATE')){
+            if(prop.params.VALUE==='DATE'||prop.params.VALUE==='PERIOD'||
+               (prop.params.TZID??'')!==(rawStart.params.TZID??''))
+              throw new Error('Timed RDATE must match the master clock system')
+            for(const value of prop.value.split(',')){
+              if(value.includes('/'))throw new Error('RDATE PERIOD is not supported')
+              const instanceTemplate=timedWallTemplate(value)
+              if(instanceTemplate.suffix!==template.suffix)
+                throw new Error('Timed RDATE must match the master clock system')
+              const original=parseInstant({...prop,value})
+              const date=instanceTemplate.anchor
+              if(Date.parse(original.iso)<Date.parse(startIso)||daysBetween(template.anchor,date)>730||
+                 daysBetween(template.anchor,date)<0)
+                throw new Error('Timed RDATE exceeds supported 730-day forward window')
+              if(!known.has(original.iso)){
+                known.add(original.iso)
+                candidates.push({date,original})
+              }
+            }
+          }
+          candidates.sort((a,b)=>a.original.iso.localeCompare(b.original.iso))
+          if(candidates.length>150)throw new Error('Too many timed RDATE/RRULE instances')
           if(!candidates.length)throw new Error('Timed recurrence has no qualifying instances')
           if(records.length+candidates.length>5000)throw new Error('ICS expansion exceeds maximum snapshot size')
           const generated:CalendarRecord[]=[]
@@ -178,24 +204,43 @@ export function previewIcs(text:string):IcsPreview {
           records.push(...generated)
           coveredUids.add(uid)
           warnings.push(title+': finite timed RRULE materialized into '+generated.length+
-            ' read-only instance(s); source timezone and UID remain authoritative')
+            ' read-only RRULE/RDATE instance(s); source timezone and UID remain authoritative')
           continue
         }
         const end=rawEnd?parseInstant(rawEnd):{date:addDays(start.date,1),iso:new Date(addDays(start.date,1)+'T00:00:00').toISOString()}
         if(!end.date||end.date<=start.date)throw new Error('Invalid finite all-day range')
         const duration=daysBetween(start.date,end.date)
-        const rules=parseFiniteAllDayRule(get('RRULE')!.value,start.date)
+        const rules=get('RRULE')?parseFiniteAllDayRule(get('RRULE')!.value,start.date):null
+        const fromRule=rules?expandFiniteAllDay(start.date,rules):[start.date]
+        const eligible=new Set(fromRule)
+        // Date-only RDATE adds finite explicit days without changing the original
+        // UTC-vs-local DTSTART meaning, UID, or source read-only authority.
+        for(const prop of props.filter(p=>p.name==='RDATE')){
+          if(prop.params.TZID||(prop.params.VALUE&&prop.params.VALUE!=='DATE'))
+            throw new Error('All-day RDATE must be DATE-only without TZID')
+          for(const value of prop.value.split(',')){
+            const instance=dateOnly(value)
+            if(instance<start.date||daysBetween(start.date,instance)>730)
+              throw new Error('All-day RDATE exceeds supported 730-day forward window')
+            eligible.add(instance)
+          }
+        }
+        if(eligible.size>150)throw new Error('Too many all-day RDATE/RRULE instances')
         const exdateValues=props.filter(p=>p.name==='EXDATE')
         const excluded:string[]=[]
         for(const ex of exdateValues){
           if(ex.params.VALUE&&ex.params.VALUE!=='DATE')throw new Error('Unsupported EXDATE timezone; recurrence not imported')
           for(const v of ex.value.split(','))excluded.push(dateOnly(v))
         }
-        const expanded=expandFiniteAllDay(start.date,rules,excluded)
+        const expanded=Array.from(eligible).filter(d=>!excluded.includes(d)).sort()
         if(records.length+expanded.length>5000)throw new Error('ICS expansion exceeds maximum snapshot size')
         const recurOverrides=new Map<string,Property[]>()
         for(const [key,replacement] of replacements){
-          if(key.startsWith(uid+'|'))recurOverrides.set(key,replacement)
+          if(!key.startsWith(uid+'|'))continue
+          const originalDate=dateOnly(key.slice(uid.length+1))
+          if(!eligible.has(originalDate))
+            throw new Error('All-day RECURRENCE-ID override outside the supported source series')
+          recurOverrides.set(key,replacement)
         }
         const generated:CalendarRecord[]=[]
         const dates=new Set<string>()
@@ -230,7 +275,7 @@ export function previewIcs(text:string):IcsPreview {
         }
         records.push(...generated)
         coveredUids.add(uid)
-        warnings.push(title+': finite all-day RRULE materialized into '+expanded.length+' read-only instance(s); source owns recurrence')
+        warnings.push(title+': finite all-day RRULE/RDATE materialized into '+generated.length+' read-only instance(s); source owns recurrence')
         continue
       }
       if(get('RECURRENCE-ID')&&coveredUids.has(get('UID')?.value??''))continue
