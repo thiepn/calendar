@@ -1,0 +1,211 @@
+import {useEffect,useMemo,useRef,useState,type ChangeEvent} from 'react'
+import {CalendarDays,ChevronLeft,ChevronRight,Plus,Upload,Download,Search,Database,ExternalLink,AlertTriangle,Trash2,Pencil,X,RotateCcw,Menu} from 'lucide-react'
+import type {CalendarOccurrence,CalendarRecord,CalendarState,LocalDate} from './types'
+import {addDays,addMonths,dateLabel,dateSeries,friendlyRange,localDate,monday,monthGridStart} from './core/dates'
+import {dayOccurrences,excludeOccurrence} from './core/occurrences'
+import {exportBackup,importBackup,loadState,saveState,STORAGE_KEY} from './core/storage'
+import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
+import {EventEditor} from './components/EventEditor'
+import {CalendarViews,type Mode} from './components/CalendarViews'
+
+type Filter='all'|'personal'|'ics'
+function download(name:string,contents:string,type:string){
+  const link=document.createElement('a')
+  const url=URL.createObjectURL(new Blob([contents],{type}))
+  link.href=url;link.download=name;document.body.append(link);link.click();link.remove()
+  window.setTimeout(()=>URL.revokeObjectURL(url),1000)
+}
+const initial=loadState()
+export default function App(){
+  const [calendar,setCalendar]=useState<CalendarState>(initial.state)
+  const [notice,setNotice]=useState(initial.error??'')
+  const [selected,setSelected]=useState<LocalDate>(localDate())
+  const [mode,setMode]=useState<Mode>('week')
+  const [filter,setFilter]=useState<Filter>('all')
+  const [query,setQuery]=useState('')
+  const [editing,setEditing]=useState<CalendarRecord|null>(null)
+  const [editorDate,setEditorDate]=useState<LocalDate|null>(null)
+  const [active,setActive]=useState<CalendarOccurrence|null>(null)
+  const [pending,setPending]=useState<IcsPreview|null>(null)
+  const [sourcePanel,setSourcePanel]=useState(false)
+  const [mobileNav,setMobileNav]=useState(false)
+  const importInput=useRef<HTMLInputElement>(null)
+  const restoreInput=useRef<HTMLInputElement>(null)
+  const searchInput=useRef<HTMLInputElement>(null)
+
+  function commit(next:CalendarState,success='Saved on this device') {
+    try{saveState(next);setCalendar(next);setNotice(success);return true}
+    catch(error){setNotice('Not saved: '+String(error));return false}
+  }
+  useEffect(()=>{
+    const sync=(e:StorageEvent)=>{
+      if(e.key===STORAGE_KEY||e.key===null){const read=loadState();if(read.error)setNotice(read.error);else setCalendar(read.state)}
+    }
+    window.addEventListener('storage',sync);return ()=>window.removeEventListener('storage',sync)
+  },[])
+  useEffect(()=>{
+    const key=(e:KeyboardEvent)=>{
+      const target=e.target as HTMLElement
+      if(['INPUT','TEXTAREA','SELECT'].includes(target.tagName)||target.isContentEditable)return
+      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false)}
+      if(e.key==='n'){e.preventDefault();setEditorDate(selected);setEditing(null)}
+      if(e.key==='t'){e.preventDefault();setSelected(localDate())}
+      if(e.key==='/'){e.preventDefault();searchInput.current?.focus()}
+    }
+    window.addEventListener('keydown',key);return ()=>window.removeEventListener('keydown',key)
+  },[selected])
+  const visible=useMemo(()=>calendar.records.filter(x=>(filter==='all'||x.source===filter)&&
+    (!query.trim()||[x.title,x.description,x.location,x.sourceCalendar??''].some(s=>s.toLowerCase().includes(query.toLowerCase().trim())))),[calendar,filter,query])
+  const days=useMemo(()=>{
+    const start=mode==='month'?monthGridStart(selected):mode==='week'?monday(selected):selected
+    return dateSeries(start,addDays(start,mode==='month'?41:mode==='week'?6:mode==='agenda'?13:0))
+  },[mode,selected])
+  const title=mode==='month'?dateLabel(selected,{month:'long',year:'numeric'}):
+    friendlyRange(days[0],days[days.length-1])
+  const selectedEvents=dayOccurrences(visible,selected)
+  const sources=calendar.records.filter(x=>x.source==='ics').reduce<Record<string,number>>((a,x)=>{
+    const key=x.sourceCalendar??'Imported';a[key]=(a[key]??0)+1;return a
+  },{})
+  const personalCount=calendar.records.filter(x=>x.source==='personal').length
+
+  function create(date:LocalDate){setActive(null);setEditing(null);setEditorDate(date)}
+  function open(item:CalendarOccurrence){setActive(item);setSelected(item.date)}
+  function edit(item:CalendarOccurrence){
+    const record=calendar.records.find(x=>x.id===item.recordId)
+    if(!record||record.source!=='personal')return
+    setEditing(record);setEditorDate(item.date);setActive(null)
+  }
+  function save(record:CalendarRecord){
+    if(commit({schemaVersion:1,records:[...calendar.records.filter(r=>r.id!==record.id),record]},'Event saved locally')){
+      setEditorDate(null);setEditing(null)
+    }
+  }
+  function remove(recordId:string) {
+    const record=calendar.records.find(r=>r.id===recordId)
+    if(!record || !window.confirm(record.repeat?'Delete the entire repeating series?':'Remove this calendar event?'))return
+    if(commit({schemaVersion:1,records:calendar.records.filter(x=>x.id!==recordId)},'Event removed locally'))setActive(null)
+  }
+  function skip(item:CalendarOccurrence){
+    const r=calendar.records.find(x=>x.id===item.recordId)
+    if(!r?.repeat)return
+    const next=excludeOccurrence(r,item.date)
+    if(commit({schemaVersion:1,records:calendar.records.map(x=>x.id===r.id?next:x)},'This occurrence was skipped'))setActive(null)
+  }
+  function step(direction:number){
+    setSelected(s=>mode==='month'?addMonths(s,direction):addDays(s,direction*(mode==='week'?7:mode==='agenda'?14:1)))
+  }
+  async function readIcs(e:ChangeEvent<HTMLInputElement>){
+    const f=e.target.files?.[0];e.target.value='';if(!f)return
+    try{setPending(previewIcs(await f.text()));setNotice('Review the import before applying')}
+    catch(error){setNotice('ICS import failed: '+String(error))}
+  }
+  async function readBackup(e:ChangeEvent<HTMLInputElement>){
+    const f=e.target.files?.[0];e.target.value='';if(!f)return
+    try{
+      const next=importBackup(await f.text())
+      if(window.confirm('Restore this backup and replace all current device-local Calendar data?'))commit(next,'Backup restored')
+    }catch(error){setNotice('Backup rejected: '+String(error))}
+  }
+  function applyImport(){
+    if(!pending)return
+    const result=mergeIcs(calendar,pending)
+    if(commit(result.state,`Imported ${result.added} events; ${result.duplicates} duplicates skipped`))setPending(null)
+  }
+  function removeSource(name:string){
+    if(!window.confirm('Remove all local imported snapshots from '+name+'? Original source data are not modified.'))return
+    commit({schemaVersion:1,records:calendar.records.filter(x=>x.source!=='ics'||x.sourceCalendar!==name)},'Imported snapshot removed locally')
+  }
+  const counts={all:calendar.records.length,personal:personalCount,ics:calendar.records.length-personalCount}
+  return <div className="app-shell">
+    <aside className={'sidebar '+(mobileNav?'mobile-open':'')}>
+      <div className="brand"><span className="brand-mark"><CalendarDays size={19}/></span><span><b>THIEPN</b><small>CALENDAR</small></span></div>
+      <button className="primary sidebar-create" onClick={()=>{create(selected);setMobileNav(false)}}><Plus size={17}/> Create event</button>
+      <div className="sidebar-section"><p className="eyebrow">NAVIGATE</p>
+        {(['month','week','day','agenda'] as const).map(m=><button key={m} className={'nav-entry '+(mode===m?'active':'')} onClick={()=>{setMode(m);setMobileNav(false)}}>
+          <span className="nav-mode-icon">{m==='month'?'▦':m==='week'?'▥':m==='day'?'▤':'≡'}</span>{m==='week'?'Week':m==='month'?'Month':m==='day'?'Day':'Agenda'}</button>)}
+      </div>
+      <div className="sidebar-section"><p className="eyebrow">CALENDARS</p>
+        <button className={'source-entry '+(filter==='all'?'active':'')} onClick={()=>setFilter('all')}><span className="source-swatch all"/>All calendars <b>{counts.all}</b></button>
+        <button className={'source-entry '+(filter==='personal'?'active':'')} onClick={()=>setFilter('personal')}><span className="source-swatch personal"/>Personal <b>{counts.personal}</b></button>
+        <button className={'source-entry '+(filter==='ics'?'active':'')} onClick={()=>setFilter('ics')}><span className="source-swatch ics"/>Imported snapshots <b>{counts.ics}</b></button>
+        <button className="text-action" onClick={()=>setSourcePanel(true)}>Manage sources <ChevronRight size={14}/></button>
+      </div>
+      <div className="sidebar-bottom"><div className="privacy-label"><Database size={15}/><span>Device-local workspace<small>No account or remote sync</small></span></div>
+        <a href="https://github.com/thiepn/folio" target="_blank" rel="noopener noreferrer" className="sidebar-link">Open Folio <ExternalLink size={13}/></a></div>
+    </aside>
+    {mobileNav&&<button aria-label="Close navigation" className="nav-scrim" onClick={()=>setMobileNav(false)}/>}
+    <div className="workspace">
+      <header className="topbar">
+        <button className="icon-button mobile-menu" aria-label="Open navigation" onClick={()=>setMobileNav(true)}><Menu size={20}/></button>
+        <div className="topbar-heading"><span className="eyebrow">MY WORKSPACE</span><h1>Calendar</h1></div>
+        <div className="topbar-actions">
+          <div className="search-field"><Search size={16}/><input ref={searchInput} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search events" aria-label="Search calendar events"/>{query&&<button aria-label="Clear search" onClick={()=>setQuery('')}><X size={14}/></button>}</div>
+          <button className="secondary compact" onClick={()=>importInput.current?.click()}><Upload size={15}/><span className="desktop-text">Import ICS</span></button>
+          <button className="icon-button" title="Export personal events as finite ICS snapshot" aria-label="Export personal events" onClick={()=>{
+            try{download('thiepn-calendar-snapshot.ics',exportIcs(calendar,addDays(selected,-30),addDays(selected,365)),'text/calendar');setNotice('Exported a finite 395-day personal event snapshot, not continuous sync')}
+            catch(error){setNotice('Export failed: '+String(error))}}}><Download size={17}/></button>
+          <button className="primary top-create" onClick={()=>create(selected)}><Plus size={16}/> <span>New event</span></button>
+        </div>
+      </header>
+      <main className="main-panel">
+        <div className="date-toolbar">
+          <div className="date-navigation"><button className="secondary compact" onClick={()=>setSelected(localDate())}>Today</button>
+            <button className="icon-button" aria-label="Previous period" onClick={()=>step(-1)}><ChevronLeft size={19}/></button>
+            <button className="icon-button" aria-label="Next period" onClick={()=>step(1)}><ChevronRight size={19}/></button>
+            <h2>{title}</h2></div>
+          <div className="view-switch">{(['month','week','day','agenda'] as const).map(m=><button key={m} onClick={()=>setMode(m)} className={mode===m?'active':''}>{m==='agenda'?'List':m[0].toUpperCase()+m.slice(1)}</button>)}</div>
+        </div>
+        {notice&&<div className={'notice '+(/failed|rejected|not saved|could not/i.test(notice)?'notice-error':'')} role="status">{notice}<button onClick={()=>setNotice('')} aria-label="Dismiss message"><X size={14}/></button></div>}
+        <div className="content-grid">
+          <div className="calendar-surface"><CalendarViews mode={mode} days={days} selected={selected} records={visible} onSelect={setSelected} onOpen={open} onCreate={create}/></div>
+          <aside className="inspector">
+            <div className="inspector-heading"><span className="eyebrow">SELECTED DAY</span><h3>{dateLabel(selected,{weekday:'long',month:'short',day:'numeric'})}</h3>
+              <p>{selectedEvents.length} visible commitment{selectedEvents.length===1?'':'s'}</p></div>
+            {selectedEvents.length?<div className="inspector-list">{selectedEvents.map(item=><button key={item.key} onClick={()=>open(item)} className={'inspector-event '+(item.source==='ics'?'imported':'')}>
+              <b>{item.allDay?'ALL DAY':new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit'}).format(new Date(item.start))}</b><span>{item.title}</span></button>)}</div>:
+              <div className="inspector-empty"><CalendarDays size={21}/><p>No events for this day.</p><button onClick={()=>create(selected)}>Add an event <Plus size={13}/></button></div>}
+            <div className="inspector-legend"><p className="eyebrow">SOURCE KEY</p><span><i className="legend-swatch personal"/>Personal event</span><span><i className="legend-swatch ics"/>Imported (read-only)</span></div>
+            <div className="inspector-foot">The calendar contains only data saved in this browser. Folio's source-owned tasks and habits are not mirrored live.</div>
+          </aside>
+        </div>
+      </main>
+    </div>
+    <input ref={importInput} type="file" accept=".ics,text/calendar" hidden onChange={readIcs}/>
+    <input ref={restoreInput} type="file" accept=".json,application/json" hidden onChange={readBackup}/>
+    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate} date={editorDate} event={editing??undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null)}}/>}
+    {active&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setActive(null)}}>
+      <section className="details dialog-surface" role="dialog" aria-modal="true" aria-label="Event details">
+        <header className="editor-head"><span className="eyebrow">{active.source==='ics'?'IMPORTED SNAPSHOT — READ ONLY':'PERSONAL EVENT'}</span><button className="icon-button" aria-label="Close event" onClick={()=>setActive(null)}><X size={19}/></button></header>
+        <h2>{active.title}</h2><p className="details-dates">{active.allDay?'All day · '+friendlyRange(active.startDate,addDays(active.endDateExclusive,-1)):new Date(active.start).toLocaleString()+' – '+new Date(active.end).toLocaleString()}</p>
+        {active.location&&<p><strong>Location:</strong> {active.location}</p>}{active.description&&<p className="description">{active.description}</p>}
+        {active.source==='ics'&&<div className="readonly-note"><AlertTriangle size={16}/> Imported from {active.sourceCalendar}. Editing the original requires the source calendar. This is only a local copy.</div>}
+        <footer className="editor-actions">
+          {calendar.records.find(r=>r.id===active.recordId)?.repeat&&<button className="secondary" onClick={()=>skip(active)}><RotateCcw size={15}/> Skip occurrence</button>}
+          {active.source==='personal'&&<button className="secondary" onClick={()=>edit(active)}><Pencil size={15}/> Edit series/event</button>}
+          <button className="danger" onClick={()=>remove(active.recordId)}><Trash2 size={15}/> {active.source==='ics'?'Remove copy':'Delete'}</button>
+        </footer>
+      </section>
+    </div>}
+    {pending&&<div className="modal-backdrop"><section className="import-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="ICS import review">
+      <header className="editor-head"><h2>Review ICS snapshot</h2><button className="icon-button" aria-label="Close import" onClick={()=>setPending(null)}><X size={19}/></button></header>
+      <p><strong>{pending.name}</strong> · {pending.records.length} supported events</p>
+      <div className="import-preview">{pending.records.slice(0,7).map(r=><div key={r.id}><span>{r.title}</span><small>{r.startDate??new Date(r.start).toLocaleString()}</small></div>)}{pending.records.length>7&&<p>+{pending.records.length-7} additional entries</p>}</div>
+      {pending.warnings.length>0&&<div className="import-warnings"><b>{pending.warnings.length} skipped or warned events</b>{pending.warnings.slice(0,12).map((w,i)=><p key={i}>{w}</p>)}</div>}
+      <p className="fine-print">This is a read-only local snapshot. Recurring RRULE masters are not silently expanded. Import does not connect to Google, Folio or KLIPS.</p>
+      <footer className="editor-actions"><button className="secondary" onClick={()=>setPending(null)}>Cancel</button><button className="primary" onClick={applyImport}>Import {pending.records.length} entries</button></footer>
+    </section></div>}
+    {sourcePanel&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setSourcePanel(false)}}>
+      <section className="sources-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Calendar data management">
+        <header className="editor-head"><h2>Sources & data</h2><button className="icon-button" aria-label="Close sources" onClick={()=>setSourcePanel(false)}><X size={19}/></button></header>
+        <div className="source-card"><strong>Personal <span>{personalCount} records</span></strong><p>Editable device-local events. This is not Folio's schedule.</p></div>
+        {Object.entries(sources).map(([name,count])=><div key={name} className="source-card"><strong>{name}<span>{count} entries</span></strong><p>ICS snapshot · no ongoing provider connection</p><button className="danger small" onClick={()=>removeSource(name)}>Remove local copy</button></div>)}
+        {!Object.keys(sources).length&&<p className="empty-note">No imported ICS snapshots.</p>}
+        <hr/><h3>Backups & interop</h3><div className="button-stack">
+          <button className="secondary" onClick={()=>importInput.current?.click()}><Upload size={16}/> Import ICS snapshot</button>
+          <button className="secondary" onClick={()=>download('thiepn-calendar-backup.json',exportBackup(calendar),'application/json')}><Download size={16}/> Save full JSON backup</button>
+          <button className="secondary" onClick={()=>restoreInput.current?.click()}><Upload size={16}/> Restore JSON backup</button>
+        </div><div className="readonly-note"><AlertTriangle size={16}/> No Account, Google or Folio sync is connected. Keep a backup before clearing browser data.</div>
+        <a target="_blank" rel="noopener noreferrer" href="https://github.com/thiepn/folio" className="external-inline">Open source-owned Folio <ExternalLink size={14}/></a>
+      </section></div>}
+  </div>
+}
