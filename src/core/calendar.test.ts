@@ -6,7 +6,7 @@ import {draftTimedRange,reviewDraft} from './draft'
 import {proposeAllDayChange,applyAllDayChange} from './all-day'
 import {occurrencesBetween,excludeOccurrence,conflictsOnDay} from './occurrences'
 import {previewIcs,mergeIcs,exportIcs} from './ics'
-import {validateState} from './storage'
+import {validateState,saveState,readRecovery,rawCalendarBackup,RECOVERY_STORAGE_KEY,STORAGE_KEY} from './storage'
 import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent,splitSeriesAt,endSeriesAt} from './series'
 import {layoutTimedDay,slotRange,dayAxis,slotAt} from './timeline'
 import {findFreeSlots} from './availability'
@@ -369,5 +369,51 @@ describe('C7 source-canonical repeated-hour adjustments',()=>{
     expect(after.records[0].start).toBe(proposal.start)
     expect(validateState(after).records).toHaveLength(1)
     expect(()=>proposeTimedChange(before,event,'move','2026-10-25',150,30)).toThrow('Choose')
+  })
+})
+
+describe('C8 recoverable local writes and recurrence integrity',()=>{
+  it('keeps a validated prior-version checkpoint before overwriting original records',()=>{
+    const prior:CalendarState={schemaVersion:1,records:[record({title:'Before change'})]}
+    const next:CalendarState={schemaVersion:1,records:[record({title:'After change'})]}
+    const map=new Map<string,string>()
+    const original=globalThis.localStorage
+    const mock={getItem:(key:string)=>map.get(key)??null,
+      setItem:(key:string,value:string)=>{map.set(key,value)},removeItem:(key:string)=>{map.delete(key)},
+      clear:()=>{map.clear()},key:(i:number)=>Array.from(map.keys())[i]??null,get length(){return map.size}}
+    Object.defineProperty(globalThis,'localStorage',{configurable:true,value:mock})
+    try{
+      saveState(prior,'initial')
+      expect(readRecovery()).toBeNull()
+      saveState(next,'Before editing')
+      expect(readRecovery()?.state.records[0].title).toBe('Before change')
+      expect(readRecovery()?.label).toBe('Before editing')
+      expect(JSON.parse(rawCalendarBackup()!).records[0].title).toBe('After change')
+      saveState(prior,'Undoing change')
+      expect(readRecovery()?.state.records[0].title).toBe('After change')
+      expect(map.has(RECOVERY_STORAGE_KEY)).toBe(true)
+      expect(map.has(STORAGE_KEY)).toBe(true)
+    }finally{
+      if(original)Object.defineProperty(globalThis,'localStorage',{configurable:true,value:original})
+      else Reflect.deleteProperty(globalThis,'localStorage')
+    }
+  })
+  it('rejects edits that disconnect recurring overrides from their source dates',()=>{
+    const base=record({id:'series',repeat:{frequency:'weekly',interval:1,weekdays:[1,3]}})
+    const original:CalendarState={schemaVersion:1,records:[base]}
+    const instance=occurrencesBetween([base],'2026-10-14','2026-10-14')[0]
+    const changed=replaceOccurrence(original,'series','2026-10-14',{...base,id:'detached-wed',
+      repeat:undefined,excludedDates:undefined,start:instance.start,end:instance.end})
+    expect(()=>saveWholeEvent(changed,{...changed.records[0],repeat:{frequency:'weekly',interval:1,weekdays:[1]}}))
+      .toThrow('previously edited occurrence')
+    expect(validateState(saveWholeEvent(changed,{...changed.records[0],title:'Safe rename'})).records)
+      .toHaveLength(2)
+    expect(changed.records[1].recurrenceParentId).toBe('series')
+  })
+  it('keeps imported entries unchanged when editing a personal rule',()=>{
+    const ics=record({id:'ics-readonly',source:'ics',sourceCalendar:'Classroom',sourceKey:'Classroom|uid-1'})
+    const personal=record({id:'series',repeat:{frequency:'daily',interval:2}})
+    const next=saveWholeEvent({schemaVersion:1,records:[personal,ics]},{...personal,title:'Updated title'})
+    expect(next.records[1]).toEqual(ics)
   })
 })

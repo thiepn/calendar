@@ -1,6 +1,7 @@
 import type {CalendarRecord,CalendarState} from '../types'
 import {day} from './dates'
 const KEY='thiepn.calendar.local.v1'
+const RECOVERY_KEY='thiepn.calendar.recovery.v1'
 const empty=():CalendarState=>({schemaVersion:1,records:[]})
 export function validateRecord(value:unknown):CalendarRecord {
   if(!value || typeof value!=='object') throw new Error('Invalid event record')
@@ -49,10 +50,29 @@ export function loadState():{state:CalendarState,error?:string} {
     return {state:empty(),error:'Saved calendar could not be read. Existing data was not overwritten: '+String(error)}
   }
 }
-export function saveState(state:CalendarState):void {
-  validateState(state)
-  localStorage.setItem(KEY,JSON.stringify(state))
+export interface RecoverySnapshot {schemaVersion:1;savedAt:string;label:string;state:CalendarState}
+/** One validated pre-write checkpoint, not a second writable calendar authority. */
+export function saveState(state:CalendarState,label='Previous calendar state'):void {
+  const next=JSON.stringify(validateState(state))
+  const current=localStorage.getItem(KEY)
+  if(current===next)return
+  if(current!==null){
+    const previous=validateState(JSON.parse(current))
+    const snapshot:RecoverySnapshot={schemaVersion:1,savedAt:new Date().toISOString(),label,state:previous}
+    localStorage.setItem(RECOVERY_KEY,JSON.stringify(snapshot))
+  }
+  localStorage.setItem(KEY,next)
 }
+export function readRecovery():RecoverySnapshot|null {
+  const raw=localStorage.getItem(RECOVERY_KEY)
+  if(!raw)return null
+  const value=JSON.parse(raw) as RecoverySnapshot
+  if(value.schemaVersion!==1||typeof value.savedAt!=='string'||!Number.isFinite(Date.parse(value.savedAt))||
+    typeof value.label!=='string')throw new Error('Invalid recovery checkpoint')
+  return {...value,state:validateState(value.state)}
+}
+export function rawCalendarBackup():string|null{return localStorage.getItem(KEY)}
+export const RECOVERY_STORAGE_KEY=RECOVERY_KEY
 export function importBackup(text:string):CalendarState {return validateState(JSON.parse(text))}
 export function exportBackup(state:CalendarState):string {return JSON.stringify(validateState(state),null,2)}
 export const STORAGE_KEY=KEY

@@ -45,6 +45,17 @@ export function saveWholeEvent(state:CalendarState,record:CalendarRecord):Calend
   const old=state.records.find(r=>r.id===record.id)
   if(!old||old.source!=='personal')throw new Error('Original personal event missing')
   const removingRepeat=Boolean(old.repeat&&!record.repeat)
+  if(old.repeat&&record.repeat){
+    const detached=state.records.filter(r=>r.recurrenceParentId===record.id)
+    for(const child of detached){
+      const date=child.recurrenceDate!
+      if(!record.excludedDates?.includes(date)||
+         !occurrencesBetween([{...record,excludedDates:record.excludedDates.filter(d=>d!==date)}],date,date)
+           .some(instance=>instance.date===date))
+        throw new Error('This recurrence change excludes a previously edited occurrence on '+date+
+          '. Restore its original or remove the edited occurrence first.')
+    }
+  }
   return {schemaVersion:1,records:state.records.map(r=>{
     if(r.id===record.id)return old.recurrenceParentId?{...record,recurrenceParentId:old.recurrenceParentId,recurrenceDate:old.recurrenceDate}:record
     if(removingRepeat&&r.recurrenceParentId===record.id)return {...r,recurrenceParentId:undefined,recurrenceDate:undefined}
