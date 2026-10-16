@@ -24,10 +24,10 @@ export function RestoreDialog({current,candidate,origin,onClose,onConfirm}:{
         <button className="icon-button" aria-label="Close restoration" onClick={onClose}><X size={18}/></button></header>
       <p className="fine-print">Source: <strong>{origin}</strong>. Restore replaces this browser's complete Calendar dataset, not Folio or any original imported provider. No change is made until you confirm.</p>
       <div className="restore-compare">
-        <section><h3>Saved now</h3><strong>{current.records.length} records</strong>
+        <section><h3>Saved now</h3><strong>{current.records.length} record{current.records.length===1?'':'s'}</strong>
           <p>{before.personal} personal · {before.imported} imported</p>
           <p>{before.recurring} recurring series · {before.overrides} detached edits</p></section>
-        <section><h3>In proposed backup</h3><strong>{candidate.records.length} records</strong>
+        <section><h3>In proposed backup</h3><strong>{candidate.records.length} record{candidate.records.length===1?'':'s'}</strong>
           <p>{after.personal} personal · {after.imported} imported</p>
           <p>{after.recurring} recurring series · {after.overrides} detached edits</p></section>
       </div>
