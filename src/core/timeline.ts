@@ -1,5 +1,5 @@
 import type { CalendarOccurrence, LocalDate } from '../types'
-import {addDays,day,localDate,localDateTime,offsetLabel} from './dates'
+import {addDays,day,localDateTime,offsetLabel} from './dates'
 export const SLOT_MINUTES=30
 export const TIMELINE_HOUR_HEIGHT=64
 export interface TimedBlock {
