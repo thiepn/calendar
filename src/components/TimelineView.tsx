@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState,type PointerEvent,type KeyboardEvent} from 'react'
 import {AlertTriangle,GripHorizontal,Plus} from 'lucide-react'
 import type {CalendarRecord,CalendarOccurrence,LocalDate} from '../types'
-import {dateLabel,displayTime,localDate} from '../core/dates'
+import {addDays,daysBetween,dateLabel,displayTime,localDate} from '../core/dates'
 import {dayOccurrences} from '../core/occurrences'
 import {layoutTimedDay,slotRange,TIMELINE_HOUR_HEIGHT,SLOT_MINUTES} from '../core/timeline'
 import {nudgeTimed,type TimedAction} from '../core/reschedule'
@@ -9,10 +9,12 @@ import {nudgeTimed,type TimedAction} from '../core/reschedule'
 type Props={days:LocalDate[];selected:LocalDate;records:CalendarRecord[];
   onSelect:(date:LocalDate)=>void;onOpen:(item:CalendarOccurrence)=>void;
   onSlot:(date:LocalDate,start:string,end:string)=>void;
-  onAdjust:(item:CalendarOccurrence,action:TimedAction,date:LocalDate,minute:number,length:number)=>void}
+  onAdjust:(item:CalendarOccurrence,action:TimedAction,date:LocalDate,minute:number,length:number)=>void;
+  onAllDaySlot:(from:LocalDate,through:LocalDate)=>void;
+  onAllDayAdjust:(item:CalendarOccurrence,from:LocalDate,through:LocalDate)=>void}
 type Preview={date:LocalDate;minute:number;length:number;kind:'create'|'move'|'resize';label:string}
-type Gesture={pointerId:number;kind:'create'|'move'|'resize';fromY:number;fromX:number;date:LocalDate;
-  minute:number;length:number;item?:CalendarOccurrence;moved:boolean;preview:Preview|null}
+type Gesture={pointerId:number;kind:'create'|'move'|'resize'|'day-create'|'day-move';fromY:number;fromX:number;scrollTop:number;date:LocalDate;
+  minute:number;length:number;item?:CalendarOccurrence;moved:boolean;preview:Preview|null;dayPreview?:{from:LocalDate;through:LocalDate}}
 const durations=[30,60,90,120] as const
 const snap=(value:number)=>Math.round(value/30)*30
 const clamp=(value:number,min:number,max:number)=>Math.max(min,Math.min(max,value))
@@ -26,11 +28,12 @@ function slot(date:LocalDate,minute:number,duration:number){
   try{return slotRange(date,minute,duration)}catch{return null}
 }
 /** Pointer gestures are staged here, never mutate sources. App confirms canonical changes. */
-export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdjust}:Props){
+export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdjust,onAllDaySlot,onAllDayAdjust}:Props){
   const scroll=useRef<HTMLDivElement>(null)
   const gesture=useRef<Gesture|null>(null)
   const suppressClick=useRef(false)
   const [preview,setPreview]=useState<Preview|null>(null)
+  const [dayPreview,setDayPreview]=useState<{from:LocalDate;through:LocalDate}|null>(null)
   const [duration,setDuration]=useState<number>(60)
   const [touchDrag,setTouchDrag]=useState(false)
   const week=days.length>1
@@ -53,7 +56,7 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
     minute:number,length:number,item?:CalendarOccurrence){
     if(event.button!==0||(event.pointerType==='touch'&&!touchDrag))return
     suppressClick.current=false
-    gesture.current={pointerId:event.pointerId,kind,fromY:event.clientY,fromX:event.clientX,
+    gesture.current={pointerId:event.pointerId,kind,fromY:event.clientY,fromX:event.clientX,scrollTop:scroll.current?.scrollTop??0,
       date,minute,length,item,moved:false,preview:null}
     event.currentTarget.setPointerCapture(event.pointerId)
     if(event.pointerType==='mouse')event.preventDefault()
@@ -62,10 +65,30 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
   function movePointer(event:PointerEvent<HTMLElement>){
     const active=gesture.current
     if(!active||active.pointerId!==event.pointerId)return
-    const dy=event.clientY-active.fromY
-    const selectedDate=active.kind==='move'?dateAtX(event.clientX)??active.date:active.date
+    const scroller=scroll.current
+    if(scroller){
+      const rect=scroller.getBoundingClientRect()
+      if(event.clientX>rect.right-25)scroller.scrollLeft+=17
+      if(event.clientX<rect.left+25)scroller.scrollLeft-=17
+      if(active.kind!=='day-create'&&active.kind!=='day-move'){
+        if(event.clientY>rect.bottom-30)scroller.scrollTop+=13
+        if(event.clientY<rect.top+95)scroller.scrollTop-=13
+      }
+    }
+    const dy=event.clientY-active.fromY+((scroller?.scrollTop??0)-active.scrollTop)
+    const selectedDate=active.kind==='move'||active.kind==='day-create'||active.kind==='day-move'
+      ?dateAtX(event.clientX)??active.date:active.date
     if(Math.abs(dy)<10&&Math.abs(event.clientX-active.fromX)<14&&!active.moved)return
     active.moved=true
+    if(active.kind==='day-create'||active.kind==='day-move'){
+      const from=active.kind==='day-create'?(active.date<selectedDate?active.date:selectedDate):
+        addDays(active.item!.startDate,daysBetween(active.date,selectedDate))
+      const through=active.kind==='day-create'?(active.date>selectedDate?active.date:selectedDate):
+        addDays(active.item!.endDateExclusive,daysBetween(active.date,selectedDate)-1)
+      active.dayPreview={from,through}
+      setDayPreview({from,through})
+      return
+    }
     const delta=snap(dy/TIMELINE_HOUR_HEIGHT*60)
     let minute=active.minute
     let length=active.length
@@ -88,8 +111,15 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
     const active=gesture.current
     if(!active||active.pointerId!==event.pointerId)return
     gesture.current=null
-    setPreview(null)
-    if(!active.moved||!active.preview)return
+    setPreview(null);setDayPreview(null)
+    if(!active.moved)return
+    if(active.dayPreview){
+      suppressClick.current=true
+      if(active.kind==='day-create')onAllDaySlot(active.dayPreview.from,active.dayPreview.through)
+      else if(active.item)onAllDayAdjust(active.item,active.dayPreview.from,active.dayPreview.through)
+      return
+    }
+    if(!active.preview)return
     suppressClick.current=true
     const result=active.preview
     if(active.kind==='create'){
@@ -114,9 +144,9 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
   }
   const height=24*TIMELINE_HOUR_HEIGHT
   return <section className={'timeline-view '+(touchDrag?'timeline-touch-drag':'')} aria-label={week?'Graphical weekly schedule':'Graphical daily schedule'}
-    onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={()=>{gesture.current=null;setPreview(null)}}>
+    onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={()=>{gesture.current=null;setPreview(null);setDayPreview(null)}}>
     <div className="timeline-tools">
-      <p>Drag empty space to create; drag personal blocks to move, or their lower handles to resize. All changes require confirmation.</p>
+      <p>Drag timed slots to create/move/resize. In the all-day row, drag across days to create a multi-day event or move a personal all-day event. Saves require confirmation.</p>
       <div className="timeline-controls">
         <label>Slot length <select aria-label="New event duration" value={duration} onChange={event=>setDuration(Number(event.target.value))}>
           {durations.map(value=><option value={value} key={value}>{value} min</option>)}
@@ -139,10 +169,15 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
             <span className="timeline-all-day-label">All day</span>
             {days.map(date=>{
               const events=dayOccurrences(records,date).filter(item=>item.allDay)
-              return <div className="timeline-all-day-col" key={date}>
+              return <div className={'timeline-all-day-col '+(dayPreview&&date>=dayPreview.from&&date<=dayPreview.through?'is-preview':'')} key={date}>
+                <button type="button" className="timeline-all-day-create" aria-label={'Plan all-day event on '+date}
+                  onPointerDown={e=>begin(e,'day-create',date,0,0)}
+                  onClick={()=>{if(suppressClick.current){suppressClick.current=false;return}onAllDaySlot(date,date)}}><Plus size={12} aria-hidden="true"/> All day</button>
                 {events.map(item=><button key={item.key} className={'timeline-all-day-event '+(item.source==='ics'?'imported':'')}
-                  type="button" onClick={()=>onOpen(item)} title={item.title}>{item.title}</button>)}
-                {!events.length&&<span className="timeline-all-day-empty">—</span>}
+                  type="button" onPointerDown={e=>{if(item.source==='personal')begin(e,'day-move',date,0,0,item)}}
+                  onClick={()=>{if(suppressClick.current){suppressClick.current=false;return}onOpen(item)}}
+                  title={item.source==='ics'?'Read-only imported event':'Drag across days to move; select for date editor'}>{item.title}</button>)}
+                {dayPreview&&date>=dayPreview.from&&date<=dayPreview.through&&<span className="timeline-all-day-preview">{dayPreview.from} → {dayPreview.through}</span>}
               </div>
             })}
           </div>
@@ -206,7 +241,7 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
     </div>
     <div className="timeline-footer">
       Keyboard: focus a personal event, Alt+↑/↓ moves 30 min; Alt+←/→ moves one day; Alt+Shift+↑/↓ resizes 30 min.
-      Touch drag mode disables native panning on event surfaces; switch it off to scroll normally.
+      Touch drag mode disables native panning on selectable event surfaces; switch it off to scroll normally. Drag toward the timeline edges to scroll.
       Times are in {Intl.DateTimeFormat().resolvedOptions().timeZone}. Spring gaps and duplicated autumn clock times cannot be selected by dragging.
     </div>
   </section>
