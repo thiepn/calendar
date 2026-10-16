@@ -124,6 +124,7 @@ export function previewIcs(text:string):IcsPreview {
         for(const [key,replacement] of replacements){
           if(key.startsWith(uid+'|'))recurOverrides.set(key,replacement)
         }
+        const generated:CalendarRecord[]=[]
         const dates=new Set<string>()
         for(const instance of expanded)dates.add(instance.replace(/-/g,''))
         // EXDATE plus overridden records must not reintroduce excluded original instances.
@@ -149,11 +150,12 @@ export function previewIcs(text:string):IcsPreview {
           if(finalTitle.length>240||finalDescription.length>4000||finalLocation.length>500)
             throw new Error('Finite recurring entry exceeds permitted text length')
           const sourceKey=name+'|'+uid+'|'+instanceToken
-          records.push({id:'ics-'+hash(sourceKey),source:'ics',sourceCalendar:name,sourceKey,
+          generated.push({id:'ics-'+hash(sourceKey),source:'ics',sourceCalendar:name,sourceKey,
             title:finalTitle,description:finalDescription,location:finalLocation,
             start:new Date(startDate+'T00:00:00').toISOString(),end:new Date(finalDate+'T00:00:00').toISOString(),
             allDay:true,startDate,endDateExclusive:finalDate,updatedAt:new Date().toISOString()})
         }
+        records.push(...generated)
         coveredUids.add(uid)
         warnings.push(title+': finite all-day RRULE materialized into '+expanded.length+' read-only instance(s); source owns recurrence')
         continue
