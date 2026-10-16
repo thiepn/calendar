@@ -335,6 +335,98 @@ async function exerciseC6Mobile(){
   await context.close()
 }
 
+
+async function exerciseC7DstAndRange(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage()
+  const errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  // Friday 16 October 2026 -> the next displayed week includes Sunday 25 October.
+  await page.getByRole('button',{name:'Next period'}).click()
+  const autumn=page.locator('.timeline-day').nth(6)
+  assert.equal(await autumn.locator('.timeline-slot').count(),50,'Autumn Sunday must have 50 physical slots')
+  const earlier=autumn.locator('.timeline-slot[aria-label*="at 02:00 UTC+02:00"]')
+  const later=autumn.locator('.timeline-slot[aria-label*="at 02:00 UTC+01:00"]')
+  assert.equal(await earlier.count(),1)
+  assert.equal(await later.count(),1)
+  const firstRect=await earlier.boundingBox(),secondRect=await later.boundingBox()
+  assert.ok(firstRect&&secondRect&&secondRect.y>firstRect.y,'The repeated hour should occupy distinct vertically ordered rows')
+  await later.click()
+  const edit=page.getByRole('dialog',{name:'New event'})
+  await edit.waitFor()
+  assert.equal(await edit.getByLabel('Repeated start hour').inputValue(),'later')
+  await edit.getByLabel('Event name').fill('C7 second DST hour')
+  await edit.getByRole('button',{name:'Create event'}).click()
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.find(r=>r.title==='C7 second DST hour'))
+  assert.equal(saved.start,'2026-10-25T01:00:00.000Z')
+  await page.locator('.timeline-block').filter({hasText:'C7 second DST hour'}).click()
+  await page.getByRole('button',{name:'Adjust time & duration'}).click()
+  const change=page.getByRole('dialog',{name:'Confirm time adjustment'})
+  await change.waitFor()
+  assert.equal(await change.getByLabel('Repeated proposed hour').inputValue(),'later')
+  await change.getByRole('button',{name:'Cancel'}).click()
+  console.log('BROWSER_C7_DST_SECOND_HOUR_CREATE_AND_ADJUST_PASS')
+  await page.locator('.top-create').click()
+  const recurring=page.getByRole('dialog',{name:'New event'})
+  await recurring.getByLabel('Repeats').selectOption('weekly')
+  await recurring.getByLabel('Conflict planning horizon').selectOption('365')
+  assert.match(await recurring.getByLabel('Calendar conflict review').innerText(),/first 365 days only/)
+  await recurring.getByRole('button',{name:'Cancel'}).click()
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_C7_365_DAY_PLANNING_PASS')
+  await context.close()
+}
+async function exerciseC7AllDayResize(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage()
+  const errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  // Create Mon–Wed from the accessible editor to seed an editable multi-day span.
+  await page.locator('.timeline-all-day-col').first().locator('.timeline-all-day-create').click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  const from=await editor.locator('input[type="date"]').first().inputValue()
+  const add=(str,n)=>new Date(Date.parse(str+'T00:00:00Z')+n*86400000).toISOString().slice(0,10)
+  await editor.getByLabel('Last day (inclusive)').fill(add(from,2))
+  await editor.getByLabel('Event name').fill('C7 elastic retreat')
+  await editor.getByRole('button',{name:'Create event'}).click()
+  const original=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.find(r=>r.title==='C7 elastic retreat'))
+  // Drag the lower-right all-day resize affordance from Wednesday to Friday.
+  const resize=page.locator('.timeline-all-day-col').nth(2).getByRole('button',{name:'Resize all-day C7 elastic retreat'})
+  await resize.scrollIntoViewIfNeeded()
+  const rect=await resize.boundingBox()
+  const target=await page.locator('.timeline-all-day-col').nth(4).locator('.timeline-all-day-create').boundingBox()
+  assert.ok(rect&&target)
+  await page.mouse.move(rect.x+rect.width/2,rect.y+rect.height/2)
+  await page.mouse.down()
+  await page.mouse.move(target.x+target.width/2,rect.y+rect.height/2,{steps:12})
+  await page.mouse.up()
+  const dlg=page.getByRole('dialog',{name:'Confirm all-day adjustment'})
+  await dlg.waitFor()
+  assert.equal(await dlg.getByLabel('Last day (inclusive)').inputValue(),add(from,4))
+  await dlg.getByRole('button',{name:'Confirm all-day change'}).click()
+  const longer=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.find(r=>r.title==='C7 elastic retreat'))
+  assert.equal(longer.id,original.id)
+  assert.equal(longer.endDateExclusive,add(from,5))
+  console.log('BROWSER_C7_ALLDAY_POINTER_RESIZE_PASS')
+  // Keyboard resize can cross the week edge through repeated Alt+Shift+Right.
+  for(let offset=4;offset<7;offset++){
+    const button=page.locator('.timeline-all-day-col').nth(offset).locator('.timeline-all-day-event').filter({hasText:'C7 elastic retreat'})
+    await button.focus()
+    await button.press('Alt+Shift+ArrowRight')
+    const adjust=page.getByRole('dialog',{name:'Confirm all-day adjustment'})
+    await adjust.waitFor()
+    await adjust.getByRole('button',{name:'Confirm all-day change'}).click()
+  }
+  const boundary=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.find(r=>r.title==='C7 elastic retreat'))
+  assert.equal(boundary.id,original.id)
+  assert.equal(boundary.endDateExclusive,add(from,8),'Keyboard should extend an all-day range beyond week boundary')
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_C7_KEYBOARD_WEEK_BOUNDARY_RESIZE_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -345,6 +437,8 @@ try{
   await exerciseTouchDragMobile()
   await exerciseC6Desktop()
   await exerciseC6Mobile()
+  await exerciseC7DstAndRange()
+  await exerciseC7AllDayResize()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
