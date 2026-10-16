@@ -11,6 +11,7 @@ import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent,split
 import {layoutTimedDay,slotRange,dayAxis,slotAt} from './timeline'
 import {findFreeSlots} from './availability'
 import {DEFAULT_REMINDER_SETTINGS,validateReminderSettings,inQuietHours} from './reminder-settings'
+import {validateViewPreferences,loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY} from './view-preferences'
 import {reminderItems,reminderKey,actionForReminder,deliverableReminders} from './reminders'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 const record=(patch:Partial<CalendarRecord>={}):CalendarRecord=>({
@@ -650,5 +651,67 @@ describe('C10 source timezone safety on short DST shifts and floating times',()=
     const parsed=previewIcs(input)
     expect(parsed.records).toHaveLength(0)
     expect(parsed.warnings.some(x=>x.includes('Mixed UTC suffix'))).toBe(true)
+  })
+})
+
+describe('C10+ destructive import guard and local display preferences',()=>{
+  it('blocks source-wide replacement when an unsupported master makes the ICS snapshot incomplete',()=>{
+    const calendar=(broken:boolean)=>['BEGIN:VCALENDAR','X-WR-CALNAME:Uni Labs',
+      'BEGIN:VEVENT','UID:stable','SUMMARY:Lab schedule','DTSTART:20261102T100000Z',
+      'DTEND:20261102T110000Z','END:VEVENT',
+      ...(broken?['BEGIN:VEVENT','UID:missing-future','SUMMARY:Unsupported source series',
+        'DTSTART:20261103T090000Z','DTEND:20261103T100000Z',
+        'RRULE:FREQ=WEEKLY','END:VEVENT']:[]),'END:VCALENDAR'].join('\r\n')
+    const pristine=previewIcs(calendar(false))
+    const first=mergeIcs({schemaVersion:1,records:[record({id:'personal-anchor'})]},pristine).state
+    const source=previewIcs(calendar(true))
+    expect(source.skippedEvents).toBe(1)
+    expect(source.records.map(x=>x.title)).toEqual(['Lab schedule'])
+    expect(source.warnings.some(x=>x.includes('Finite RRULE'))).toBe(true)
+    expect(()=>mergeIcs(first,source,'replace')).toThrow('Cannot replace an incomplete ICS snapshot')
+    const safer=mergeIcs(first,source,'update')
+    expect(safer.state.records).toEqual(first.records)
+    expect(safer.duplicates).toBe(1)
+    expect(safer.removed).toBe(0)
+    expect(first.records[0].id).toBe('personal-anchor')
+    expect(pristine.skippedEvents).toBe(0)
+  })
+  it('preserves previous personal and ICS source records if a formerly supported series becomes unsupported',()=>{
+    const valid=['BEGIN:VCALENDAR','X-WR-CALNAME:Department','BEGIN:VEVENT',
+      'UID:series-master','SUMMARY:Tutorial','DTSTART:20261019T100000Z',
+      'DTEND:20261019T110000Z','RRULE:FREQ=WEEKLY;COUNT=3',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const changed=valid.replace('RRULE:FREQ=WEEKLY;COUNT=3','RRULE:FREQ=WEEKLY')
+    const first=mergeIcs({schemaVersion:1,records:[record({id:'mine'})]},previewIcs(valid)).state
+    expect(first.records).toHaveLength(4)
+    const unsupported=previewIcs(changed)
+    expect(unsupported.records).toHaveLength(0)
+    expect(unsupported.skippedEvents).toBe(1)
+    expect(()=>mergeIcs(first,unsupported,'replace')).toThrow('incomplete')
+    expect(mergeIcs(first,unsupported,'update').state.records).toEqual(first.records)
+  })
+  it('validates persistent device display choices and resets without affecting calendar authority',()=>{
+    expect(validateViewPreferences({mode:'agenda',filter:'ics',agendaSpan:30,agendaBusyOnly:true})).toEqual({
+      mode:'agenda',filter:'ics',agendaSpan:30,agendaBusyOnly:true})
+    expect(()=>validateViewPreferences({mode:'agenda',filter:'ics',agendaSpan:500,agendaBusyOnly:true})).toThrow('Invalid agenda span')
+    expect(()=>validateViewPreferences({mode:'week',filter:'provider-write',agendaSpan:14,agendaBusyOnly:false})).toThrow('Invalid source filter')
+    const map=new Map<string,string>()
+    const previous=globalThis.localStorage
+    const mock={getItem:(key:string)=>map.get(key)??null,setItem:(key:string,value:string)=>{map.set(key,value)},
+      removeItem:(key:string)=>{map.delete(key)},clear:()=>map.clear(),
+      key:(n:number)=>Array.from(map.keys())[n]??null,get length(){return map.size}}
+    Object.defineProperty(globalThis,'localStorage',{configurable:true,value:mock})
+    try{
+      const v={mode:'agenda' as const,filter:'personal' as const,agendaSpan:30 as const,agendaBusyOnly:true}
+      saveViewPreferences(v)
+      expect(loadViewPreferences()).toEqual(v)
+      expect(JSON.parse(map.get(VIEW_PREFERENCES_KEY)!)).toEqual(v)
+      resetViewPreferences()
+      expect(loadViewPreferences().mode).toBe('week')
+      expect(map.has(VIEW_PREFERENCES_KEY)).toBe(false)
+    }finally{
+      if(previous)Object.defineProperty(globalThis,'localStorage',{configurable:true,value:previous})
+      else Reflect.deleteProperty(globalThis,'localStorage')
+    }
   })
 })
