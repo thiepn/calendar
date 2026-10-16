@@ -1,17 +1,18 @@
 import type {LocalDate} from '../types'
 import {addDays,day,daysBetween,dateSeries} from './dates'
 
-export interface FiniteAllDayRule {frequency:'DAILY'|'WEEKLY'|'MONTHLY';interval:number;count?:number;until?:LocalDate;weekdays?:number[]}
+export interface FiniteAllDayRule {frequency:'DAILY'|'WEEKLY'|'MONTHLY';interval:number;count?:number;until?:LocalDate;weekdays?:number[];monthdays?:number[]}
 const weekdays:Record<string,number>={SU:0,MO:1,TU:2,WE:3,TH:4,FR:5,SA:6}
 export function parseFiniteAllDayRule(value:string,start:LocalDate):FiniteAllDayRule {
   day(start)
   const pairs=value.split(';').map(v=>v.split('='))
   if(pairs.some(p=>p.length!==2)||new Set(pairs.map(p=>p[0])).size!==pairs.length)throw new Error('Unsupported or duplicate RRULE fields')
   const map=Object.fromEntries(pairs) as Record<string,string>
-  if(Object.keys(map).some(x=>!['FREQ','INTERVAL','COUNT','UNTIL','BYDAY'].includes(x)))throw new Error('Unsupported RRULE qualifier')
+  if(Object.keys(map).some(x=>!['FREQ','INTERVAL','COUNT','UNTIL','BYDAY','BYMONTHDAY'].includes(x)))throw new Error('Unsupported RRULE qualifier')
   if(!['DAILY','WEEKLY','MONTHLY'].includes(map.FREQ))throw new Error('Unsupported RRULE frequency')
   const freq=map.FREQ as FiniteAllDayRule['frequency']
   if(map.BYDAY&&freq!=='WEEKLY')throw new Error('BYDAY currently supports weekly all-day only')
+  if(map.BYMONTHDAY&&freq!=='MONTHLY')throw new Error('BYMONTHDAY currently supports monthly only')
   const interval=map.INTERVAL?Number(map.INTERVAL):1
   if(!Number.isInteger(interval)||interval<1||interval>12)throw new Error('Unsupported recurrence interval')
   if(Boolean(map.COUNT)===Boolean(map.UNTIL))throw new Error('Finite RRULE must specify exactly one of COUNT or UNTIL')
@@ -30,7 +31,20 @@ export function parseFiniteAllDayRule(value:string,start:LocalDate):FiniteAllDay
     selected=values.map(x=>weekdays[x])
     if(!selected.includes(day(start).getDay()))throw new Error('DTSTART weekday is not in BYDAY')
   }
-  return {frequency:freq,interval,count,until,weekdays:selected}
+  let monthdays:number[]|undefined
+  if(map.BYMONTHDAY){
+    const items=map.BYMONTHDAY.split(',')
+    monthdays=items.map(Number)
+    if(items.length<1||items.length>12||items.some((value,i)=>!/^[-]?(?:[1-9]|[12][0-9]|3[01])$/.test(value)||
+        value==='-0'||!Number.isInteger(monthdays![i])||monthdays![i]===0)||
+        new Set(monthdays).size!==monthdays.length)
+      throw new Error('Unsupported BYMONTHDAY list (use unique -31..-1 or 1..31)')
+    const current=day(start)
+    const lastDay=new Date(current.getFullYear(),current.getMonth()+1,0).getDate()
+    if(!monthdays.some(n=>n>0?n===current.getDate():lastDay+n+1===current.getDate()))
+      throw new Error('DTSTART is not included in BYMONTHDAY')
+  }
+  return {frequency:freq,interval,count,until,weekdays:selected,monthdays}
 }
 export function expandFiniteAllDay(start:LocalDate,rule:FiniteAllDayRule,exdates:LocalDate[]=[]):LocalDate[]{
   day(start)
@@ -48,7 +62,10 @@ export function expandFiniteAllDay(start:LocalDate,rule:FiniteAllDayRule,exdates
         (rule.weekdays?.length?rule.weekdays.includes(day(d).getDay()):day(d).getDay()===first.getDay())
     else{
       const at=day(d),diff=(at.getFullYear()-first.getFullYear())*12+at.getMonth()-first.getMonth()
-      matches=diff%rule.interval===0&&at.getDate()===anchorDay
+      if(rule.monthdays?.length){
+        const lastDay=new Date(at.getFullYear(),at.getMonth()+1,0).getDate()
+        matches=diff%rule.interval===0&&rule.monthdays.some(n=>n>0?n===at.getDate():lastDay+n+1===at.getDate())
+      }else matches=diff%rule.interval===0&&at.getDate()===anchorDay
     }
     if(!matches)continue
     emitted++
