@@ -4,9 +4,11 @@ import type {ReminderSettings} from '../core/reminder-settings'
 type Props={
   items:ReminderItem[]
   dismissed:ReminderItem[]
+  snoozedKeys:ReadonlySet<string>
   settings:ReminderSettings
   onSettingsChange:(value:ReminderSettings)=>void
   onUndoDismiss:(item:ReminderItem)=>void
+  onCancelSnooze:(item:ReminderItem)=>void
   onClose:()=>void
   onOpen:(item:ReminderItem)=>void
   onDismiss:(item:ReminderItem)=>void
@@ -16,7 +18,7 @@ type Props={
   foregroundEnabled:boolean
   onDisableNotifications:()=>void
 }
-export function ReminderCenter({items,dismissed,settings,onSettingsChange,onUndoDismiss,onClose,onOpen,onDismiss,onSnooze,onEnableNotifications,permission,foregroundEnabled,onDisableNotifications}:Props){
+export function ReminderCenter({items,dismissed,snoozedKeys,settings,onSettingsChange,onUndoDismiss,onCancelSnooze,onClose,onOpen,onDismiss,onSnooze,onEnableNotifications,permission,foregroundEnabled,onDisableNotifications}:Props){
   const due=items.filter(x=>x.status==='due')
   const upcoming=items.filter(x=>x.status==='upcoming')
   const time=(iso:string)=>new Date(iso).toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})
@@ -27,7 +29,10 @@ export function ReminderCenter({items,dismissed,settings,onSettingsChange,onUndo
       <small>{item.occurrence.allDay?'All-day':time(item.occurrence.start)} · {item.leadMinutes===0?'At start':item.leadMinutes+' minutes before'}</small>
     </button>
     <div className="reminder-actions">
-      <button type="button" onClick={()=>onSnooze(item,15)} aria-label={'Snooze '+item.occurrence.title+' for 15 minutes'}>Snooze 15m</button>
+      <button type="button" onClick={()=>onSnooze(item,5)} aria-label={'Snooze '+item.occurrence.title+' for 5 minutes'}>5m</button>
+      <button type="button" onClick={()=>onSnooze(item,15)} aria-label={'Snooze '+item.occurrence.title+' for 15 minutes'}>15m</button>
+      <button type="button" onClick={()=>onSnooze(item,60)} aria-label={'Snooze '+item.occurrence.title+' for 1 hour'}>1h</button>
+      {snoozedKeys.has(item.key)&&<button type="button" onClick={()=>onCancelSnooze(item)} aria-label={'Cancel snooze '+item.occurrence.title}>Undo snooze</button>}
       <button type="button" onClick={()=>onDismiss(item)} aria-label={'Dismiss '+item.occurrence.title}>Dismiss</button>
     </div>
   </div>
@@ -35,7 +40,7 @@ export function ReminderCenter({items,dismissed,settings,onSettingsChange,onUndo
     <section className="reminder-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Local reminders">
       <header className="editor-head"><div className="heading-inline"><Bell size={19}/><h2>Local reminders</h2></div>
         <button type="button" className="icon-button" aria-label="Close reminders" onClick={onClose}><X size={19}/></button></header>
-      <p className="fine-print">Personal-event reminders are calculated from your saved calendar in this browser. This center shows due reminders from the last 24 hours and upcoming reminders in the next 14 days; it is not remote scheduling. Dismissals and snoozes stay local.</p>
+      <p className="fine-print">Personal-event reminders are calculated from your saved calendar in this browser. This center shows due reminders from the last 24 hours and upcoming reminders in the next 14 days; it is not remote scheduling. Dismissals and snoozes stay local. Choose 5 minutes, 15 minutes or 1 hour to snooze; undo a snooze to restore the original due time.</p>
       <div className="reminder-notification-settings">
         <Clock3 size={16}/>
         {permission==='unsupported'?<p>Desktop notifications are unavailable in this browser. The in-app reminder center still works.</p>:

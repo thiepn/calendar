@@ -202,3 +202,8 @@
 .dismissed-reminders summary{font-size:12px;font-weight:650;cursor:pointer;margin:8px 0}
 .dismissed-reminders .reminder-entry{margin:5px 0}
 @media(max-width:650px){.reminder-local-settings{grid-template-columns:1fr}}
+
+/* C10+ snooze shortcuts remain tappable without sacrificing the original event link */
+.reminder-actions{align-items:center}
+.reminder-actions button{min-height:36px}
+@media(max-width:740px){.reminder-actions button{min-width:52px;flex:1 1 auto}}

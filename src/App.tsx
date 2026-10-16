@@ -98,7 +98,7 @@ export default function App(){
     try{
       const next=readReminderActions();delete next[item.key]
       saveReminderActions(next);setReminderActions(next);setReminderNow(new Date().toISOString())
-    }catch(error){setNotice('Reminder dismissal not reversed: '+String(error))}
+    }catch(error){setNotice('Reminder preference could not be reversed: '+String(error))}
   }
   function changeReminderSettings(next:ReminderSettings){
     try{saveReminderSettings(next);setReminderSettings(next)}
@@ -505,7 +505,9 @@ export default function App(){
       scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)}}/>}
     {restoreCandidate&&<RestoreDialog current={calendar} candidate={restoreCandidate.state} origin={restoreCandidate.origin} unreadableCurrent={unreadable}
       onClose={()=>setRestoreCandidate(null)} onConfirm={confirmRestore}/>}
-    {remindersOpen&&<ReminderCenter items={reminders} dismissed={dismissedReminders} settings={reminderSettings} onSettingsChange={changeReminderSettings} onUndoDismiss={undoReminderDismissal} onClose={()=>setRemindersOpen(false)}
+    {remindersOpen&&<ReminderCenter items={reminders} dismissed={dismissedReminders}
+      snoozedKeys={new Set(Object.entries(reminderActions).filter(([,action])=>action.kind==='snooze').map(([key])=>key))}
+      onCancelSnooze={undoReminderDismissal} settings={reminderSettings} onSettingsChange={changeReminderSettings} onUndoDismiss={undoReminderDismissal} onClose={()=>setRemindersOpen(false)}
       onOpen={item=>{setRemindersOpen(false);setMode('day');open(item.occurrence)}}
       onDismiss={item=>updateReminderAction(item,'dismiss')}
       onSnooze={(item,minutes)=>updateReminderAction(item,'snooze',minutes)}
