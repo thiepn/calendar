@@ -9,6 +9,7 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
   const [title,setTitle]=useState(event?.title??'')
   const [description,setDescription]=useState(event?.description??'')
   const [location,setLocation]=useState(event?.location??'')
+  const [reminder,setReminder]=useState<number>(event?.reminderMinutes??-1)
   const [allDay,setAllDay]=useState(event?.allDay??Boolean(initialAllDay))
   const [start,setStart]=useState(event ? event.allDay?event.startDate!:localDateTime(event.start) : initialAllDay?initialAllDay.from:initialRange?localDateTime(initialRange.start):date+'T09:00')
   const [end,setEnd]=useState(event ? event.allDay?addDays(event.endDateExclusive!,-1):localDateTime(event.end) : initialAllDay?initialAllDay.through:initialRange?localDateTime(initialRange.end):date+'T10:00')
@@ -36,7 +37,7 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
   const firstFoldOptions=allDay?[]:ambiguousOptions(start)
   const lastFoldOptions=allDay?[]:ambiguousOptions(end)
   const [acceptedSignature,setAcceptedSignature]=useState('')
-  const signature=[title,start,end,startFold,endFold,reviewDays,allDay,frequency,interval,until,weekdaysSet.join(',')].join('|')
+  const signature=[title,start,end,startFold,endFold,reviewDays,allDay,frequency,interval,until,reminder,weekdaysSet.join(',')].join('|')
   const accepted=acceptedSignature===signature
   function construct(id:string):CalendarRecord {
     const first=start.slice(0,10),last=end.slice(0,10)
@@ -61,7 +62,7 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
     return {id,title:title.trim()||'Draft event',description:description.trim(),location:location.trim(),
       source:'personal',allDay,start:startIso,end:endIso,
       ...(allDay?{startDate:first,endDateExclusive:endExclusive}:{}),
-      ...(repeat?{repeat}:{}),updatedAt:new Date().toISOString(),
+      ...(repeat?{repeat}:{}),...(reminder>=0?{reminderMinutes:reminder}:{}),updatedAt:new Date().toISOString(),
       ...(event?.excludedDates?{excludedDates:event.excludedDates}:{})}
   }
   const inspection=useMemo(()=>{
@@ -72,7 +73,7 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
     catch(e){return {review:null,error:e instanceof Error?e.message:String(e)}}
     // Review depends on all form inputs, original record and canonical calendar records.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[title,description,location,allDay,start,end,startFold,endFold,reviewDays,frequency,interval,until,weekdaysSet,event,scope,records,ignoreOccurrence,ignoreParentFrom])
+  },[title,description,location,reminder,allDay,start,end,startFold,endFold,reviewDays,frequency,interval,until,weekdaysSet,event,scope,records,ignoreOccurrence,ignoreParentFrom])
   const needsAck=Boolean(inspection.review&&(inspection.review.collisionCount||inspection.review.affectedClockCount))
   function toggleAllDay(value:boolean){
     if(value===allDay)return
@@ -124,6 +125,15 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
           {weekdays.map((w,i)=><label key={w}><input type="checkbox" checked={weekdaysSet.includes(i)} onChange={e=>setWeekdaysSet(old=>e.target.checked?[...old,i]:old.filter(x=>x!==i))}/>{w}</label>)}
         </fieldset>}
         {scope!=='instance'&&frequency!=='none'&&<label>Repeat until (optional)<input type="date" min={start.slice(0,10)} value={until} onChange={e=>setUntil(e.target.value)}/></label>}
+        <label className="reminder-setting">Local reminder<select aria-label="Local reminder" value={reminder}
+          onChange={e=>setReminder(Number(e.target.value))}>
+          <option value={-1}>None</option><option value={0}>At event start</option>
+          <option value={5}>5 minutes before</option><option value={10}>10 minutes before</option>
+          <option value={15}>15 minutes before</option><option value={30}>30 minutes before</option>
+          <option value={60}>1 hour before</option><option value={120}>2 hours before</option>
+          <option value={1440}>1 day before</option><option value={10080}>1 week before</option>
+        </select></label>
+        <p className="fine-print">Local reminders appear in the Reminders center. Optional browser notifications require explicit permission and only run while Calendar is open. Imported ICS calendars remain read-only.</p>
         <label>Location<input value={location} maxLength={500} onChange={e=>setLocation(e.target.value)} placeholder="Optional"/></label>
         <label>Notes<textarea rows={3} maxLength={4000} value={description} onChange={e=>setDescription(e.target.value)} placeholder="Optional details"/></label>
         <div className="draft-review" aria-label="Calendar conflict review" aria-live="polite">
