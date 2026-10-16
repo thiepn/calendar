@@ -1,5 +1,5 @@
 import type {CalendarRecord,CalendarState} from '../types'
-import {addDays,day,localDate} from './dates'
+import {addDays,day} from './dates'
 import {occurrencesBetween} from './occurrences'
 
 export interface IcsPreview {records:CalendarRecord[];warnings:string[];name:string}
