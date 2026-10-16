@@ -33,6 +33,9 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
   const [dayPreview,setDayPreview]=useState<{from:LocalDate;through:LocalDate}|null>(null)
   const [duration,setDuration]=useState<number>(60)
   const [touchDrag,setTouchDrag]=useState(false)
+  const pointerPosition=useRef({x:0,y:0})
+  const edgeTimer=useRef<number|null>(null)
+  useEffect(()=>()=>{if(edgeTimer.current!==null)window.clearInterval(edgeTimer.current)},[])
   const week=days.length>1
   useEffect(()=>{if(scroll.current)scroll.current.scrollTop=7*TIMELINE_HOUR_HEIGHT},[week])
   useEffect(()=>{
@@ -58,29 +61,33 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
     minute:number,length:number,item?:CalendarOccurrence){
     if(event.button!==0||(event.pointerType==='touch'&&!touchDrag))return
     suppressClick.current=false
+    pointerPosition.current={x:event.clientX,y:event.clientY}
+    if(edgeTimer.current===null)edgeTimer.current=window.setInterval(()=>{
+      if(gesture.current)updatePointer(pointerPosition.current.x,pointerPosition.current.y)
+    },100)
     gesture.current={pointerId:event.pointerId,kind,fromY:event.clientY,fromX:event.clientX,scrollTop:scroll.current?.scrollTop??0,
       date,minute,length,item,moved:false,preview:null}
     event.currentTarget.setPointerCapture(event.pointerId)
     if(event.pointerType==='mouse')event.preventDefault()
     event.stopPropagation()
   }
-  function movePointer(event:PointerEvent<HTMLElement>){
+  function updatePointer(clientX:number,clientY:number){
     const active=gesture.current
-    if(!active||active.pointerId!==event.pointerId)return
+    if(!active)return
     const scroller=scroll.current
     if(scroller){
       const rect=scroller.getBoundingClientRect()
-      if(event.clientX>rect.right-25)scroller.scrollLeft+=17
-      if(event.clientX<rect.left+25)scroller.scrollLeft-=17
+      if(clientX>rect.right-25)scroller.scrollLeft+=17
+      if(clientX<rect.left+25)scroller.scrollLeft-=17
       if(active.kind!=='day-create'&&active.kind!=='day-move'&&active.kind!=='day-resize'){
-        if(event.clientY>rect.bottom-30)scroller.scrollTop+=13
-        if(event.clientY<rect.top+95)scroller.scrollTop-=13
+        if(clientY>rect.bottom-30)scroller.scrollTop+=13
+        if(clientY<rect.top+95)scroller.scrollTop-=13
       }
     }
-    const dy=event.clientY-active.fromY+((scroller?.scrollTop??0)-active.scrollTop)
+    const dy=clientY-active.fromY+((scroller?.scrollTop??0)-active.scrollTop)
     const selectedDate=active.kind==='move'||active.kind==='day-create'||active.kind==='day-move'||active.kind==='day-resize'
-      ?dateAtX(event.clientX)??active.date:active.date
-    if(Math.abs(dy)<10&&Math.abs(event.clientX-active.fromX)<14&&!active.moved)return
+      ?dateAtX(clientX)??active.date:active.date
+    if(Math.abs(dy)<10&&Math.abs(clientX-active.fromX)<14&&!active.moved)return
     active.moved=true
     if(active.kind==='day-create'||active.kind==='day-move'||active.kind==='day-resize'){
       const from=active.kind==='day-create'?(active.date<selectedDate?active.date:selectedDate):active.kind==='day-resize'?active.item!.startDate:
@@ -110,10 +117,16 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
     active.preview=visual
     setPreview(visual)
   }
+  function movePointer(event:PointerEvent<HTMLElement>){
+    if(!gesture.current||gesture.current.pointerId!==event.pointerId)return
+    pointerPosition.current={x:event.clientX,y:event.clientY}
+    updatePointer(event.clientX,event.clientY)
+  }
   function endPointer(event:PointerEvent<HTMLElement>){
     const active=gesture.current
     if(!active||active.pointerId!==event.pointerId)return
     gesture.current=null
+    if(edgeTimer.current!==null){window.clearInterval(edgeTimer.current);edgeTimer.current=null}
     setPreview(null);setDayPreview(null)
     if(!active.moved)return
     if(active.dayPreview){
@@ -156,7 +169,7 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
   const axes=days.map(dayAxis)
   const height=Math.max(...axes.map(a=>a.minutes))/60*TIMELINE_HOUR_HEIGHT
   return <section className={'timeline-view '+(touchDrag?'timeline-touch-drag':'')} aria-label={week?'Graphical weekly schedule':'Graphical daily schedule'}
-    onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={()=>{gesture.current=null;setPreview(null);setDayPreview(null)}}>
+    onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={()=>{gesture.current=null;if(edgeTimer.current!==null)window.clearInterval(edgeTimer.current);edgeTimer.current=null;setPreview(null);setDayPreview(null)}}>
     <div className="timeline-tools">
       <p>Drag timed slots to create/move/resize. In the all-day row, drag across days to create a multi-day event or move a personal all-day event. Saves require confirmation.</p>
       <div className="timeline-controls">
