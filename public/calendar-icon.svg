@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="THIEPN Calendar">
+<rect width="512" height="512" rx="84" fill="#24533e"/>
+<rect x="95" y="129" width="322" height="290" rx="25" fill="#f6f8f0"/>
+<path d="M95 181h322v-30c0-12-10-22-22-22H117c-12 0-22 10-22 22v30Z" fill="#a4d1ad"/>
+<path d="M174 98v62M337 98v62" stroke="#e6eee3" stroke-width="24" stroke-linecap="round"/>
+<path d="M164 263h56M278 263h60M164 329h60M278 329h60" stroke="#2f6850" stroke-width="21" stroke-linecap="round"/>
+</svg>
