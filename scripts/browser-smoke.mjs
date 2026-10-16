@@ -805,6 +805,114 @@ async function exerciseC10OfflineShell(){
   await context.close()
 }
 
+
+async function exerciseC10SourceReplaceSafety(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage()
+  const errors=[];page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const good=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:Department C10',
+    'BEGIN:VEVENT','UID:lab-master','SUMMARY:Department tutorial',
+    'DTSTART;TZID=Europe/Berlin:20261019T100000',
+    'DTEND;TZID=Europe/Berlin:20261019T110000',
+    'RRULE:FREQ=WEEKLY;COUNT=3','END:VEVENT','END:VCALENDAR'].join('\r\n')
+  const put=async text=>page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'department.ics',mimeType:'text/calendar',buffer:Buffer.from(text)})
+  await put(good)
+  const first=page.getByRole('dialog',{name:'ICS import review'})
+  await first.waitFor()
+  assert.match(await first.getByLabel('Import change preview').innerText(),/3 new/)
+  await first.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const current=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(current.length,3)
+  const bad=good.replace('RRULE:FREQ=WEEKLY;COUNT=3','RRULE:FREQ=WEEKLY')
+  await put(bad)
+  const review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  await review.locator('input[type="radio"]').nth(1).check()
+  await review.getByRole('alert').getByText(/Cannot replace an incomplete ICS snapshot/).waitFor()
+  assert.equal(await review.getByRole('button',{name:'Apply reviewed changes'}).isDisabled(),true)
+  const still=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.deepEqual(still,current)
+  await review.locator('input[type="radio"]').nth(0).check()
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const unchanged=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.deepEqual(unchanged,current)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C10_INCOMPLETE_ICS_REPLACE_BLOCKED_PASS')
+  await context.close()
+}
+async function exerciseC10SnoozeLifecycleAndOfflineReadiness(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage()
+  const errors=[];page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.getByRole('button',{name:'New event'}).click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  const times=await page.evaluate(()=>{
+    const fmt=d=>{const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes())}
+    return [fmt(new Date(Date.now()+10*60000)),fmt(new Date(Date.now()+65*60000))]
+  })
+  await editor.getByLabel('Starts').fill(times[0])
+  await editor.getByLabel('Ends').fill(times[1])
+  await editor.getByLabel('Event name').fill('C10 snooze undo event')
+  await editor.getByLabel('Local reminder').selectOption('15')
+  await editor.getByRole('button',{name:'Create event'}).click()
+  const original=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records[0])
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const panel=page.getByRole('dialog',{name:'Local reminders'})
+  await panel.getByRole('button',{name:'Snooze C10 snooze undo event for 1 hour'}).click()
+  await panel.getByRole('button',{name:'Cancel snooze C10 snooze undo event'}).click()
+  const zero=await page.evaluate(()=>Object.keys(JSON.parse(localStorage.getItem('thiepn.calendar.reminder-actions.v1'))).length)
+  assert.equal(zero,0)
+  await panel.getByRole('button',{name:'Snooze C10 snooze undo event for 5 minutes'}).click()
+  assert.ok(await panel.getByRole('button',{name:'Cancel snooze C10 snooze undo event'}).count())
+  await panel.getByRole('button',{name:'Dismiss C10 snooze undo event'}).click()
+  const current=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records[0])
+  assert.deepEqual(current,original,'Reminder actions must not mutate canonical personal events')
+  await panel.getByRole('button',{name:'Close',exact:true}).click()
+  await page.getByRole('button',{name:/Manage sources/}).click()
+  const source=page.getByRole('dialog',{name:'Calendar data management'})
+  await source.getByRole('region',{name:'Offline and storage readiness'}).waitFor()
+  const status=source.getByRole('region',{name:'Offline and storage readiness'})
+  assert.match(await status.innerText(),/Offline app worker/)
+  assert.match(await status.innerText(),/Origin storage estimate/)
+  assert.match(await status.innerText(),/No calendar or imported data is cached/)
+  await status.getByRole('button',{name:'Check readiness'}).click()
+  await source.getByRole('button',{name:'Close sources'}).click()
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C10_SNOOZE_UNDO_OFFLINE_STATUS_PASS')
+  await context.close()
+}
+async function exerciseC10MobileSavedViewPreferences(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.locator('.view-switch button').filter({hasText:'List'}).click()
+  await page.getByLabel('Agenda range').selectOption('30')
+  await page.getByLabel('Only days with commitments').check()
+  await page.reload({waitUntil:'networkidle'})
+  assert.equal(await page.getByLabel('Agenda range').inputValue(),'30')
+  assert.equal(await page.getByLabel('Only days with commitments').isChecked(),true)
+  assert.equal(await page.locator('.view-switch .active').innerText(),'List')
+  const values=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.view-preferences.v1')))
+  assert.equal(values.mode,'agenda')
+  assert.equal(values.agendaSpan,30)
+  assert.equal(values.agendaBusyOnly,true)
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  await page.getByRole('button',{name:/Manage sources/}).click()
+  const dialog=page.getByRole('dialog',{name:'Calendar data management'})
+  await dialog.getByRole('button',{name:'Reset display preferences'}).click()
+  await dialog.getByRole('button',{name:'Close sources'}).click()
+  await page.reload({waitUntil:'networkidle'})
+  assert.equal(await page.locator('.view-switch .active').innerText(),'Week')
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C10_MOBILE_VIEW_PREFERENCE_RECOVERY_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -826,6 +934,9 @@ try{
   await exerciseC10TimezoneImportAndSettings()
   await exerciseC10ReversibleDismissal()
   await exerciseC10OfflineShell()
+  await exerciseC10SourceReplaceSafety()
+  await exerciseC10SnoozeLifecycleAndOfflineReadiness()
+  await exerciseC10MobileSavedViewPreferences()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
