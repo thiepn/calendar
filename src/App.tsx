@@ -12,6 +12,8 @@ import {EventEditor} from './components/EventEditor'
 import {AllDayDialog} from './components/AllDayDialog'
 import {RestoreDialog} from './components/RestoreDialog'
 import {ReminderCenter} from './components/ReminderCenter'
+import {OfflineReadiness} from './components/OfflineReadiness'
+import {loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY,type ViewPreferences} from './core/view-preferences'
 import {reminderItems,readReminderActions,saveReminderActions,actionForReminder,deliverableReminders,REMINDER_ACTIONS_KEY,REMINDER_DELIVERED_KEY,type ReminderItem,type ReminderActions} from './core/reminders'
 import {DEFAULT_REMINDER_SETTINGS,loadReminderSettings,saveReminderSettings,inQuietHours,REMINDER_SETTINGS_KEY,type ReminderSettings} from './core/reminder-settings'
 import {applyAllDayChange,type AllDayProposal} from './core/all-day'
@@ -25,6 +27,7 @@ function download(name:string,contents:string,type:string){
   window.setTimeout(()=>URL.revokeObjectURL(url),1000)
 }
 const initial=loadState()
+const initialView=(()=>{try{return loadViewPreferences()}catch{return {mode:'week' as const,filter:'all' as const,agendaSpan:14 as const,agendaBusyOnly:false}}})()
 export default function App(){
   const [calendar,setCalendar]=useState<CalendarState>(initial.state)
   const [remindersOpen,setRemindersOpen]=useState(false)
@@ -40,10 +43,10 @@ export default function App(){
   const [restoreCandidate,setRestoreCandidate]=useState<{state:CalendarState;origin:string}|null>(null)
   const [notice,setNotice]=useState(initial.error??'')
   const [selected,setSelected]=useState<LocalDate>(localDate())
-  const [mode,setMode]=useState<Mode>('week')
-  const [agendaSpan,setAgendaSpan]=useState<14|30>(14)
-  const [agendaBusyOnly,setAgendaBusyOnly]=useState(false)
-  const [filter,setFilter]=useState<Filter>('all')
+  const [mode,setMode]=useState<Mode>(initialView.mode)
+  const [agendaSpan,setAgendaSpan]=useState<14|30>(initialView.agendaSpan)
+  const [agendaBusyOnly,setAgendaBusyOnly]=useState(initialView.agendaBusyOnly)
+  const [filter,setFilter]=useState<Filter>(initialView.filter)
   const [query,setQuery]=useState('')
   const [editing,setEditing]=useState<CalendarRecord|null>(null)
   const [copyDraft,setCopyDraft]=useState(false)
@@ -143,9 +146,27 @@ export default function App(){
     }catch(error){setNotice('Foreground notification unavailable: '+String(error))}
   },[notifyEnabled,notifyPermission,reminders,reminderNow,reminderSettings.quietHours])
   useEffect(()=>{
+    try{saveViewPreferences({mode,filter,agendaSpan,agendaBusyOnly})}
+    catch(error){setNotice('Display preferences could not be saved: '+String(error))}
+  },[mode,filter,agendaSpan,agendaBusyOnly])
+  function resetDisplayPreferences(){
+    try{
+      resetViewPreferences()
+      setMode('week');setFilter('all');setAgendaSpan(14);setAgendaBusyOnly(false)
+      setNotice('Local display preferences reset to defaults')
+    }catch(error){setNotice('Display preferences could not be reset: '+String(error))}
+  }
+  useEffect(()=>{
     const sync=(e:StorageEvent)=>{
       if(e.key===REMINDER_ACTIONS_KEY){try{setReminderActions(readReminderActions())}catch{}}
       if(e.key===REMINDER_SETTINGS_KEY){try{setReminderSettings(loadReminderSettings())}catch{}}
+      if(e.key===VIEW_PREFERENCES_KEY){
+        try{
+          const updated:ViewPreferences=loadViewPreferences()
+          setMode(updated.mode);setFilter(updated.filter)
+          setAgendaSpan(updated.agendaSpan);setAgendaBusyOnly(updated.agendaBusyOnly)
+        }catch{}
+      }
       if(e.key===STORAGE_KEY||e.key===null){const read=loadState();if(read.error){setNotice(read.error);setUnreadable(true)}
         else{setCalendar(read.state);setUnreadable(false)}
         try{setRecovery(readRecovery())}catch{setRecovery(null)}}
@@ -629,7 +650,14 @@ export default function App(){
             const raw=rescuedUnparsedCalendar()
             if(raw!==null)download('thiepn-calendar-unreadable-rescue.txt',raw,'text/plain')
           }}><Download size={16}/> Download retained raw rescue snapshot</button>}
-        </div><div className="readonly-note"><AlertTriangle size={16}/> No Account, Google or Folio sync is connected. Keep a backup before clearing browser data.</div>
+        </div>
+        <section className="display-preferences" aria-label="Calendar display preferences">
+          <h3>Saved display</h3>
+          <p className="fine-print">Current view ({mode}), source filter ({filter}) and agenda options are saved on this device and reused when Calendar reopens. The selected date resets to today.</p>
+          <button type="button" className="secondary small" onClick={resetDisplayPreferences}><RotateCcw size={14}/> Reset display preferences</button>
+        </section>
+        <OfflineReadiness/>
+        <div className="readonly-note"><AlertTriangle size={16}/> No Account, Google or Folio sync is connected. Keep a backup before clearing browser data.</div>
         <a target="_blank" rel="noopener noreferrer" href="https://github.com/thiepn/folio" className="external-inline">Open source-owned Folio <ExternalLink size={14}/></a>
       </section></div>}
   </div>
