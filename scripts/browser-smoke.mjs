@@ -82,12 +82,148 @@ async function exerciseMobile(){
   console.log('BROWSER_MOBILE_SLOT_CREATE_PASS')
   await context.close()
 }
+
+async function exerciseGesturesDesktop(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage()
+  const errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const first=page.locator('.timeline-day').first()
+  await first.locator('.timeline-slot').nth(18).click()
+  await page.getByRole('dialog',{name:'New event'}).getByLabel('Event name').fill('Pointer base')
+  await page.getByRole('button',{name:'Create event'}).click()
+  const base=page.locator('.timeline-block').filter({hasText:'Pointer base'}).first()
+  await base.waitFor()
+
+  // Create by a genuine mouse press-move-release, not an action-button click.
+  const origin=first.locator('.timeline-slot').nth(24)
+  await origin.scrollIntoViewIfNeeded()
+  const originRect=await origin.boundingBox()
+  assert.ok(originRect)
+  await page.mouse.move(originRect.x+originRect.width*.5,originRect.y+originRect.height*.5)
+  await page.mouse.down()
+  await page.mouse.move(originRect.x+originRect.width*.5,originRect.y+originRect.height*.5+64,{steps:8})
+  await page.mouse.up()
+  const createDialog=page.getByRole('dialog',{name:'New event'})
+  await createDialog.waitFor()
+  assert.match(await createDialog.locator('input[type="datetime-local"]').first().inputValue(),/T12:00$/)
+  assert.match(await createDialog.locator('input[type="datetime-local"]').last().inputValue(),/T13:30$/)
+  await createDialog.getByLabel('Event name').fill('Pointer-created duration')
+  await createDialog.getByRole('button',{name:'Create event'}).click()
+  console.log('BROWSER_DESKTOP_DRAG_CREATE_PASS')
+
+  // Move the existing 09:00 event down by exactly two 30-minute rows.
+  await base.scrollIntoViewIfNeeded()
+  const baseRect=await base.boundingBox()
+  assert.ok(baseRect)
+  await page.mouse.move(baseRect.x+Math.min(12,baseRect.width/2),baseRect.y+10)
+  await page.mouse.down()
+  await page.mouse.move(baseRect.x+Math.min(12,baseRect.width/2),baseRect.y+10+64,{steps:8})
+  await page.mouse.up()
+  const adjust=page.getByRole('dialog',{name:'Confirm time adjustment'})
+  await adjust.waitFor()
+  assert.match(await adjust.locator('input[type="datetime-local"]').inputValue(),/T10:00$/)
+  await adjust.getByRole('button',{name:'Confirm change'}).click()
+  const moved=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.find(r=>r.title==='Pointer base'))
+  assert.equal(new Date(moved.start).getHours(),10)
+  console.log('BROWSER_DESKTOP_DRAG_MOVE_PASS')
+
+  // Resize with the dedicated pointer handle; the editor confirms before persisting.
+  const handle=page.locator('.timeline-event-frame').filter({hasText:'Pointer base'}).first().locator('.timeline-resize-handle')
+  await handle.scrollIntoViewIfNeeded()
+  const handleRect=await handle.boundingBox()
+  assert.ok(handleRect)
+  await page.mouse.move(handleRect.x+handleRect.width/2,handleRect.y+handleRect.height/2)
+  await page.mouse.down()
+  await page.mouse.move(handleRect.x+handleRect.width/2,handleRect.y+handleRect.height/2+32,{steps:8})
+  await page.mouse.up()
+  const resize=page.getByRole('dialog',{name:'Confirm time adjustment'})
+  await resize.waitFor()
+  assert.equal(await resize.locator('input[type="number"]').inputValue(),'90')
+  await resize.getByRole('button',{name:'Confirm change'}).click()
+  const resized=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.find(r=>r.title==='Pointer base'))
+  assert.equal(Date.parse(resized.end)-Date.parse(resized.start),90*60000)
+  console.log('BROWSER_DESKTOP_DRAG_RESIZE_PASS')
+
+  // Keyboard users have real adjustment controls, not just decorative shortcuts.
+  const focused=page.locator('.timeline-block').filter({hasText:'Pointer base'}).first()
+  await focused.focus()
+  await focused.press('Alt+ArrowDown')
+  await page.getByRole('dialog',{name:'Confirm time adjustment'}).waitFor()
+  await page.getByRole('button',{name:'Cancel',exact:true}).click()
+  console.log('BROWSER_DESKTOP_KEYBOARD_ADJUST_PASS')
+
+  // A hidden imported snapshot must still be disclosed when the new time overlaps.
+  await page.evaluate(()=>{
+    const key='thiepn.calendar.local.v1'
+    const state=JSON.parse(localStorage.getItem(key))
+    const event=state.records.find(r=>r.title==='Pointer base')
+    const start=new Date(event.start);start.setHours(11,30,0,0)
+    const end=new Date(start);end.setHours(12,30,0,0)
+    state.records.push({...event,id:'ics-collision-check',title:'Hidden imported lecture',source:'ics',sourceCalendar:'Hidden',
+      sourceKey:'Hidden|lecture',start:start.toISOString(),end:end.toISOString(),repeat:undefined,excludedDates:undefined,
+      recurrenceParentId:undefined,recurrenceDate:undefined})
+    localStorage.setItem(key,JSON.stringify(state))
+  })
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:/^Personal \d+/}).click()
+  await page.locator('.timeline-block').filter({hasText:'Pointer base'}).first().click()
+  await page.getByRole('button',{name:'Adjust time & duration'}).click()
+  const conflicts=page.getByRole('dialog',{name:'Confirm time adjustment'})
+  const value=await conflicts.locator('input[type="datetime-local"]').inputValue()
+  await conflicts.locator('input[type="datetime-local"]').fill(value.slice(0,10)+'T11:00')
+  await conflicts.getByText('Hidden imported lecture').waitFor()
+  assert.equal(await conflicts.getByRole('button',{name:'Confirm change'}).isDisabled(),true)
+  await conflicts.getByLabel('Save despite these overlaps').check()
+  await conflicts.getByRole('button',{name:'Confirm change'}).click()
+  const current=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(current.find(r=>r.id==='ics-collision-check').title,'Hidden imported lecture')
+  assert.equal(current.find(r=>r.title==='Pointer base').id,moved.id)
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_DESKTOP_HIDDEN_ICS_COLLISION_PASS')
+  await context.close()
+}
+
+async function exerciseTouchDragMobile(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage()
+  const errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.getByLabel('Touch drag mode').check()
+  const target=page.locator('.timeline-day .timeline-slot').nth(28)
+  await target.scrollIntoViewIfNeeded()
+  const rect=await target.boundingBox()
+  assert.ok(rect)
+  const x=rect.x+rect.width/2,y=rect.y+rect.height/2
+  const client=await context.newCDPSession(page)
+  await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]})
+  for(let step=1;step<=6;step++){
+    await client.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y+step*11}]})
+  }
+  await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]})
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.waitFor()
+  assert.match(await editor.locator('input[type="datetime-local"]').first().inputValue(),/T14:00$/)
+  await editor.getByLabel('Event name').fill('Touch-dragged plan')
+  await editor.getByRole('button',{name:'Create event'}).click()
+  await page.locator('.timeline-block').filter({hasText:'Touch-dragged plan'}).waitFor()
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_MOBILE_TOUCH_DRAG_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
   browser=await chromium.launch({headless:true,args:['--no-sandbox']})
   await exerciseDesktop()
   await exerciseMobile()
+  await exerciseGesturesDesktop()
+  await exerciseTouchDragMobile()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
