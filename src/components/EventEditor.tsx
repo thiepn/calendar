@@ -1,7 +1,7 @@
 import {useState,type FormEvent} from 'react'
 import {X,CalendarPlus} from 'lucide-react'
 import type {CalendarRecord,Frequency,LocalDate,RepeatRule} from '../types'
-import {addDays,fromLocalDateTime,localDate,localDateTime} from '../core/dates'
+import {addDays,fromLocalDateTime,localDateTime} from '../core/dates'
 const weekdays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 type Props={date:LocalDate;event?:CalendarRecord;onSave:(record:CalendarRecord)=>void;onClose:()=>void}
 export function EventEditor({date,event,onSave,onClose}:Props){
