@@ -365,7 +365,7 @@ async function exerciseC7DstAndRange(){
   const change=page.getByRole('dialog',{name:'Confirm time adjustment'})
   await change.waitFor()
   assert.equal(await change.getByLabel('Repeated proposed hour').inputValue(),'later')
-  await change.getByRole('button',{name:'Cancel'}).click()
+  await change.getByRole('button',{name:'Cancel',exact:true}).click()
   console.log('BROWSER_C7_DST_SECOND_HOUR_CREATE_AND_ADJUST_PASS')
   await page.locator('.top-create').click()
   const recurring=page.getByRole('dialog',{name:'New event'})
