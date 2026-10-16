@@ -1,7 +1,7 @@
 import {useEffect,useMemo,useRef,useState,type ChangeEvent} from 'react'
 import {CalendarDays,ChevronLeft,ChevronRight,Plus,Upload,Download,Search,Database,ExternalLink,AlertTriangle,Trash2,Pencil,X,RotateCcw,Menu,Clock3} from 'lucide-react'
 import type {CalendarOccurrence,CalendarRecord,CalendarState,LocalDate} from './types'
-import {addDays,addMonths,dateLabel,dateSeries,friendlyRange,localDate,monday,monthGridStart} from './core/dates'
+import {addDays,addMonths,dateLabel,dateSeries,friendlyRange,localDate,monday,monthGridStart,localDateTime,localInstantOptions,offsetLabel} from './core/dates'
 import {dayOccurrences,excludeOccurrence} from './core/occurrences'
 import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,splitSeriesAt,endSeriesAt} from './core/series'
 import {findFreeSlots,type FreeSlot} from './core/availability'
@@ -32,7 +32,7 @@ export default function App(){
   const [editInstance,setEditInstance]=useState<{parentId:string;date:LocalDate}|null>(null)
   const [editFuture,setEditFuture]=useState<{parentId:string;date:LocalDate;newId:string}|null>(null)
   const [moveDate,setMoveDate]=useState<LocalDate>(localDate())
-  const [adjustment,setAdjustment]=useState<{item:CalendarOccurrence;action:TimedAction;date:LocalDate;minute:number;length:number}|null>(null)
+  const [adjustment,setAdjustment]=useState<{item:CalendarOccurrence;action:TimedAction;date:LocalDate;minute:number;length:number;fold?:'earlier'|'later'}|null>(null)
   const [adjustAck,setAdjustAck]=useState(false)
   const [importMode,setImportMode]=useState<'update'|'replace'>('update')
   const [finderOpen,setFinderOpen]=useState(false)
@@ -95,7 +95,7 @@ export default function App(){
   const adjustmentReview=useMemo(()=>{
     if(!adjustment)return {proposal:null,error:''}
     try{return {proposal:proposeTimedChange(calendar,adjustment.item,adjustment.action,adjustment.date,
-      adjustment.minute,adjustment.length),error:''}}
+      adjustment.minute,adjustment.length,adjustment.fold),error:''}}
     catch(error){return {proposal:null,error:error instanceof Error?error.message:String(error)}}
   },[calendar,adjustment])
   const freeSlots=useMemo(()=>finderOpen?findFreeSlots(calendar.records,{
@@ -127,10 +127,10 @@ export default function App(){
     }catch(error){setNotice('All-day adjustment rejected: '+String(error))}
   }
   function open(item:CalendarOccurrence){setActive(item);setSelected(item.date);setMoveDate(item.startDate)}
-  function requestAdjustment(item:CalendarOccurrence,action:TimedAction,date:LocalDate,minute:number,length:number){
+  function requestAdjustment(item:CalendarOccurrence,action:TimedAction,date:LocalDate,minute:number,length:number,fold?:'earlier'|'later'){
     if(item.source!=='personal'||item.allDay)return
     setActive(null);setAdjustAck(false)
-    setAdjustment({item,action,date,minute,length})
+    setAdjustment({item,action,date,minute,length,fold})
   }
   function confirmAdjustment(){
     if(!adjustmentReview.proposal||!adjustment)return
@@ -335,12 +335,24 @@ export default function App(){
                 if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value))return
                 const hour=Number(value.slice(11,13)),minute=Number(value.slice(14,16))
                 setAdjustAck(false)
-                setAdjustment(prev=>prev?{...prev,date:value.slice(0,10),minute:hour*60+minute}:prev)
+                setAdjustment(prev=>prev?{...prev,date:value.slice(0,10),minute:hour*60+minute,fold:undefined}:prev)
               }}/></label>
           <label>Duration (minutes)
             <input type="number" min={15} max={1440} step={15} value={adjustment.length}
               onChange={event=>{setAdjustAck(false);setAdjustment(prev=>prev?{...prev,length:Number(event.target.value)}:prev)}}/></label>
         </div>
+        {adjustment&&(()=>{
+          const wall=adjustment.date+'T'+String(Math.floor(adjustment.minute/60)).padStart(2,'0')+':'+String(adjustment.minute%60).padStart(2,'0')
+          let options:string[]=[]
+          try{options=localInstantOptions(wall)}catch{}
+          return options.length===2?<label className="fold-choice">Repeated proposed hour
+            <select aria-label="Repeated proposed hour" value={adjustment.fold??''}
+              onChange={e=>setAdjustment(prev=>prev?{...prev,fold:e.target.value as 'earlier'|'later'|undefined}:prev)}>
+              <option value="">Choose the first or second occurrence</option>
+              <option value="earlier">First ({offsetLabel(options[0])})</option>
+              <option value="later">Second ({offsetLabel(options[1])})</option>
+            </select></label>:null
+        })()}
         {adjustmentReview.error&&<p role="alert" className="error">{adjustmentReview.error}</p>}
         {adjustmentReview.proposal&&<>
           <p className="adjust-new-time">Proposed: {new Date(adjustmentReview.proposal.start).toLocaleString()} – {new Date(adjustmentReview.proposal.end).toLocaleString()}</p>
@@ -381,7 +393,11 @@ export default function App(){
           {active.source==='personal'&&!active.allDay&&<button className="secondary" onClick={()=>{
             const date=new Date(active.start)
             requestAdjustment(active,'move',localDate(date),date.getHours()*60+date.getMinutes(),
-              Math.round((Date.parse(active.end)-Date.parse(active.start))/60000))
+              Math.round((Date.parse(active.end)-Date.parse(active.start))/60000),
+              (()=>{
+                const opts=localInstantOptions(localDateTime(active.start))
+                return opts.length===2?(opts[0]===active.start?'earlier':'later'):undefined
+              })())
           }}><Clock3 size={15}/> Adjust time & duration</button>}
           {active.source==='personal'&&<button className="secondary" onClick={()=>edit(active)}><Pencil size={15}/> {activeRecord?.repeat?'Edit whole series':'Edit event'}</button>}
           <button className="danger" onClick={()=>remove(active.recordId)}><Trash2 size={15}/> {active.source==='ics'?'Remove copy':activeRecord?.repeat?'Delete series':'Delete'}</button>

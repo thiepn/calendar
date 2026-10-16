@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState,type PointerEvent,type KeyboardEvent} from 'react'
 import {AlertTriangle,GripHorizontal,Plus} from 'lucide-react'
 import type {CalendarRecord,CalendarOccurrence,LocalDate} from '../types'
-import {addDays,daysBetween,dateLabel,displayTime,localDate} from '../core/dates'
+import {addDays,daysBetween,dateLabel,displayTime,localDate,localDateTime,localInstantOptions} from '../core/dates'
 import {dayOccurrences} from '../core/occurrences'
 import {layoutTimedDay,dayAxis,slotAt,TIMELINE_HOUR_HEIGHT,SLOT_MINUTES} from '../core/timeline'
 import {nudgeTimed,type TimedAction} from '../core/reschedule'
@@ -9,7 +9,7 @@ import {nudgeTimed,type TimedAction} from '../core/reschedule'
 type Props={days:LocalDate[];selected:LocalDate;records:CalendarRecord[];
   onSelect:(date:LocalDate)=>void;onOpen:(item:CalendarOccurrence)=>void;
   onSlot:(date:LocalDate,start:string,end:string)=>void;
-  onAdjust:(item:CalendarOccurrence,action:TimedAction,date:LocalDate,minute:number,length:number)=>void;
+  onAdjust:(item:CalendarOccurrence,action:TimedAction,date:LocalDate,minute:number,length:number,fold?:'earlier'|'later')=>void;
   onAllDaySlot:(from:LocalDate,through:LocalDate)=>void;
   onAllDayAdjust:(item:CalendarOccurrence,from:LocalDate,through:LocalDate)=>void}
 type Preview={date:LocalDate;minute:number;length:number;kind:'create'|'move'|'resize';label:string}
@@ -142,7 +142,12 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
       const range=slot(result.date,result.minute,result.length)
       if(range)onSlot(result.date,range.start,range.end)
     }else if(active.item&&(active.kind==='move'||active.kind==='resize')){
-      onAdjust(active.item,active.kind,result.date,result.minute,result.length)
+      const iso=new Date(dayAxis(result.date).start+result.minute*60000).toISOString()
+      const wall=localDateTime(iso)
+      const options=localInstantOptions(wall)
+      const fold=options.length===2?(iso===options[0]?'earlier':'later'):undefined
+      const minute=Number(wall.slice(11,13))*60+Number(wall.slice(14,16))
+      onAdjust(active.item,active.kind,result.date,minute,result.length,fold)
     }
   }
   function keyAllDay(event:KeyboardEvent<HTMLButtonElement>,item:CalendarOccurrence){

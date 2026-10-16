@@ -354,3 +354,20 @@ describe('C7 real elapsed-time DST graphical axis and fold selection',()=>{
     expect(check.collisions.some(x=>x.existing.recordId==='hidden')).toBe(true)
   })
 })
+
+describe('C7 source-canonical repeated-hour adjustments',()=>{
+  it('moves a personal event in the second repeated autumn hour without changing its fold',()=>{
+    if(Intl.DateTimeFormat().resolvedOptions().timeZone!=='Europe/Berlin')return
+    const choices=localInstantOptions('2026-10-25T02:00')
+    const personal=record({id:'late',start:choices[1],end:new Date(Date.parse(choices[1])+30*60000).toISOString()})
+    const before:CalendarState={schemaVersion:1,records:[personal]}
+    const event=occurrencesBetween([personal],'2026-10-25','2026-10-25')[0]
+    const proposal=proposeTimedChange(before,event,'move','2026-10-25',150,30,'later')
+    expect(proposal.start).toBe(localInstantOptions('2026-10-25T02:30')[1])
+    const after=applyTimedChange(before,proposal,()=> 'unused')
+    expect(after.records[0].id).toBe('late')
+    expect(after.records[0].start).toBe(proposal.start)
+    expect(validateState(after).records).toHaveLength(1)
+    expect(()=>proposeTimedChange(before,event,'move','2026-10-25',150,30)).toThrow('Choose')
+  })
+})

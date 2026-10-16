@@ -1,5 +1,5 @@
 import type {CalendarOccurrence,CalendarRecord,CalendarState,LocalDate} from '../types'
-import {day,fromUnambiguousLocalDateTime,localDate} from './dates'
+import {day,resolveLocalInstant,localInstantOptions,localDateTime,localDate} from './dates'
 import {occurrencesBetween} from './occurrences'
 import {replaceOccurrence,saveWholeEvent} from './series'
 import {validateState} from './storage'
@@ -17,7 +17,7 @@ const pad=(n:number)=>String(n).padStart(2,'0')
 const time=(n:number)=>pad(Math.floor(n/60))+':'+pad(n%60)
 export function proposeTimedChange(
   state:CalendarState,item:CalendarOccurrence,action:TimedAction,
-  targetDate:LocalDate,startMinute:number,lengthMinutes:number
+  targetDate:LocalDate,startMinute:number,lengthMinutes:number,fold?:'earlier'|'later'
 ):TimedProposal {
   day(targetDate)
   if(item.allDay||item.source!=='personal'||!['move','resize'].includes(action))
@@ -29,7 +29,7 @@ export function proposeTimedChange(
   if(!record||record.source!=='personal')throw new Error('Personal source event no longer exists')
   if(!occurrencesBetween([record],item.date,item.date).some(x=>x.key===item.key))
     throw new Error('Occurrence changed since selection')
-  const start=fromUnambiguousLocalDateTime(targetDate+'T'+time(startMinute))
+  const start=resolveLocalInstant(targetDate+'T'+time(startMinute),fold)
   const end=new Date(Date.parse(start)+lengthMinutes*60000).toISOString()
   // All saved calendars, regardless of UI visibility filters, contribute to collision warnings.
   const last=localDate(new Date(Date.parse(end)-1))
@@ -50,7 +50,9 @@ export function applyTimedChange(state:CalendarState,proposal:TimedProposal,idFa
   if(!fresh||fresh.start!==item.start||fresh.end!==item.end||fresh.title!==item.title)
     throw new Error('Source instance changed; open it again')
   const targetMinute=new Date(start).getHours()*60+new Date(start).getMinutes()
-  const expected=proposeTimedChange(state,item,action,proposal.targetDate,targetMinute,Math.round((Date.parse(end)-Date.parse(start))/60000))
+  const choices=localInstantOptions(localDateTime(start))
+  const fold=choices.length===2?(choices[0]===start?'earlier':'later'):undefined
+  const expected=proposeTimedChange(state,item,action,proposal.targetDate,targetMinute,Math.round((Date.parse(end)-Date.parse(start))/60000),fold)
   if(expected.start!==start||expected.end!==end)throw new Error('Adjusted local time is no longer valid')
   const updated:CalendarRecord={...record,start,end,updatedAt:new Date().toISOString(),
     startDate:undefined,endDateExclusive:undefined}

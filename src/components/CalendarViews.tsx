@@ -6,7 +6,7 @@ import {TimelineView} from './TimelineView'
 type Mode='month'|'week'|'day'|'agenda'
 type Props={mode:Mode;days:LocalDate[];selected:LocalDate;records:CalendarRecord[];
   onSelect:(date:LocalDate)=>void;onOpen:(event:CalendarOccurrence)=>void;onCreate:(date:LocalDate)=>void;onCreateAt:(date:LocalDate,start:string,end:string)=>void;
-  onAdjust:(item:CalendarOccurrence,action:'move'|'resize',date:LocalDate,minute:number,length:number)=>void;
+  onAdjust:(item:CalendarOccurrence,action:'move'|'resize',date:LocalDate,minute:number,length:number,fold?:'earlier'|'later')=>void;
   onAllDaySlot:(from:LocalDate,through:LocalDate)=>void;
   onAllDayAdjust:(item:CalendarOccurrence,from:LocalDate,through:LocalDate)=>void}
 const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
