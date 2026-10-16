@@ -6,6 +6,8 @@ import {dayOccurrences,excludeOccurrence,occurrencesBetween} from './core/occurr
 import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,splitSeriesAt,endSeriesAt} from './core/series'
 import {findFreeSlots,type FreeSlot} from './core/availability'
 import {adjacentBusyDay,exportAgendaCsv} from './core/agenda'
+import {previewMissingPersonal} from './core/recover-missing'
+import {personalDraftFromImported} from './core/personal-copy'
 import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
 import {exportBackup,importBackup,loadState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCalendar,restoreUnreadableCalendar,STORAGE_KEY,type RecoverySnapshot} from './core/storage'
 import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
@@ -50,6 +52,7 @@ export default function App(){
   const [agendaBusyOnly,setAgendaBusyOnly]=useState(initialView.agendaBusyOnly)
   const [filter,setFilter]=useState<Filter>(initialView.filter)
   const [query,setQuery]=useState('')
+  const [searchDirection,setSearchDirection]=useState<'forward'|'backward'>('forward')
   const [editing,setEditing]=useState<CalendarRecord|null>(null)
   const [copyDraft,setCopyDraft]=useState(false)
   const [editInstance,setEditInstance]=useState<{parentId:string;date:LocalDate}|null>(null)
@@ -226,8 +229,11 @@ export default function App(){
     const q=query.toLocaleLowerCase().trim()
     const matches=calendar.records.filter(x=>(filter==='all'||x.source===filter)&&
       [x.title,x.description,x.location,x.sourceCalendar??''].some(v=>v.toLocaleLowerCase().includes(q)))
-    return occurrencesBetween(matches,selected,addDays(selected,364)).slice(0,30)
-  },[calendar,selected,query,filter])
+    const from=searchDirection==='backward'?addDays(selected,-364):selected
+    const to=searchDirection==='backward'?selected:addDays(selected,364)
+    const occurrences=occurrencesBetween(matches,from,to)
+    return searchDirection==='backward'?occurrences.slice(-30).reverse():occurrences.slice(0,30)
+  },[calendar,selected,query,filter,searchDirection])
   const sources=calendar.records.filter(x=>x.source==='ics').reduce<Record<string,number>>((a,x)=>{
     const key=x.sourceCalendar??'Imported';a[key]=(a[key]??0)+1;return a
   },{})
@@ -302,6 +308,14 @@ export default function App(){
       }catch(error){setNotice('Future-series edit unavailable: '+String(error));return}
     }else{setEditing(record);setEditInstance(null)}
     setEditorDate(item.date);setActive(null)
+  }
+  function copyImportedToPersonal(item:CalendarOccurrence){
+    if(item.source!=='ics')return
+    try{
+      const draft=personalDraftFromImported(item,crypto.randomUUID(),reminderSettings.defaultLead)
+      setCopyDraft(true);setEditing(draft);setEditInstance(null);setEditFuture(null)
+      setNewEventRange(null);setNewAllDay(null);setEditorDate(item.startDate);setActive(null)
+    }catch(error){setNotice('Imported copy cannot be prepared: '+String(error))}
   }
   function duplicateToDate(item:CalendarOccurrence){
     const original=calendar.records.find(r=>r.id===item.recordId)
@@ -414,6 +428,18 @@ export default function App(){
       setSourcePanel(false)
     }catch(error){setNotice('Recovery checkpoint rejected: '+String(error))}
   }
+  function confirmRecoverMissing(){
+    if(!restoreCandidate||unreadable)return
+    try{
+      // Review again at action-time: original data and linked exceptions
+      // must remain valid, and the guarded canonical commit still checks tabs.
+      const review=previewMissingPersonal(calendar,restoreCandidate.state)
+      if(review.added.length===0){setNotice('No missing personal records to restore');return}
+      if(commit(review.state,'Recovered '+review.added.length+' missing personal record(s) without replacing existing calendar data')){
+        setRestoreCandidate(null);setActive(null);setEditing(null);setQuery('')
+      }
+    }catch(error){setNotice('Selective recovery rejected: '+String(error))}
+  }
   function confirmRestore(){
     if(!restoreCandidate)return
     let saved=false
@@ -507,13 +533,19 @@ export default function App(){
         {notice&&<div className={'notice '+(/failed|rejected|not saved|could not/i.test(notice)?'notice-error':'')} role="status">{notice}<button onClick={()=>setNotice('')} aria-label="Dismiss message"><X size={14}/></button></div>}
         {unreadable&&<div className="recovery-danger" role="alert">The saved calendar could not be read. No replacement has been written. <button className="secondary compact" onClick={downloadUnreadable}>Download original raw data</button> before attempting recovery.</div>}
         {query.trim()&&<section className="search-results-panel" aria-label="Calendar search results">
-          <header><strong>Search across the next 365 days</strong><span>{searchMatches.length} match{searchMatches.length===1?'':'es'} shown (maximum 30)</span></header>
+          <header><strong>Search {searchDirection==='backward'?'previous':'next'} 365 days from selected date</strong><span>{searchMatches.length} match{searchMatches.length===1?'':'es'} shown (maximum 30)</span></header>
+          <label className="search-window">Search period
+            <select aria-label="Search period" value={searchDirection} onChange={e=>setSearchDirection(e.target.value as 'forward'|'backward')}>
+              <option value="forward">Selected date and next year</option>
+              <option value="backward">Selected date and previous year</option>
+            </select>
+          </label>
           <div className="search-results-items">{searchMatches.map(item=><button key={item.key} type="button" onClick={()=>{setMode('day');open(item)}}>
             <span className="search-result-date">{dateLabel(item.startDate,{month:'short',day:'numeric',year:'numeric'})}</span>
             <span className="search-result-title">{item.title}</span>
             <small>{item.source==='ics'?'Imported · read only':'Personal'} · {item.allDay?'All day':new Date(item.start).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small>
           </button>)}
-          {!searchMatches.length&&<p className="empty-note">No matching saved events during this 365-day window. Change the selected date to search another period.</p>}</div>
+          {!searchMatches.length&&<p className="empty-note">No matching saved events in this 365-day window. Choose previous/next year or change the selected date.</p>}</div>
         </section>}
         {mode==='agenda'&&<div className="agenda-options">
           <label>Agenda range<select aria-label="Agenda range" value={agendaSpan} onChange={e=>setAgendaSpan(Number(e.target.value) as 14|30)}>
@@ -545,7 +577,7 @@ export default function App(){
       ignoreParentFrom={editFuture?{id:editFuture.parentId,date:editFuture.date}:undefined}
       scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)}}/>}
     {restoreCandidate&&<RestoreDialog current={calendar} candidate={restoreCandidate.state} origin={restoreCandidate.origin} unreadableCurrent={unreadable}
-      onClose={()=>setRestoreCandidate(null)} onConfirm={confirmRestore}/>}
+      onClose={()=>setRestoreCandidate(null)} onConfirm={confirmRestore} onRecoverMissing={unreadable?undefined:confirmRecoverMissing}/>}
     {remindersOpen&&<ReminderCenter items={reminders} dismissed={dismissedReminders}
       lookBackDays={overdueDays} onLookBackChange={setOverdueDays} onDismissDue={dismissDueReminders}
       snoozedKeys={new Set(Object.entries(reminderActions).filter(([,action])=>action.kind==='snooze').map(([key])=>key))}
@@ -630,7 +662,7 @@ export default function App(){
         <header className="editor-head"><span className="eyebrow">{active.source==='ics'?'IMPORTED SNAPSHOT — READ ONLY':'PERSONAL EVENT'}</span><button className="icon-button" aria-label="Close event" onClick={()=>setActive(null)}><X size={19}/></button></header>
         <h2>{active.title}</h2><p className="details-dates">{active.allDay?'All day · '+friendlyRange(active.startDate,addDays(active.endDateExclusive,-1)):new Date(active.start).toLocaleString()+' – '+new Date(active.end).toLocaleString()}</p>
         {active.location&&<p><strong>Location:</strong> {active.location}</p>}{active.description&&<p className="description">{active.description}</p>}
-        {active.source==='ics'&&<div className="readonly-note"><AlertTriangle size={16}/> Imported from {active.sourceCalendar}. Editing the original requires the source calendar. This is only a local copy.</div>}
+        {active.source==='ics'&&<div className="readonly-note"><AlertTriangle size={16}/> Imported from {active.sourceCalendar}. Editing the original requires the source calendar. This is only a local copy. You may create a separate personal event without modifying this snapshot.</div>}
         {activeRecord?.recurrenceParentId&&<div className="readonly-note">Edited occurrence from a recurring series. Original series date: {activeRecord.recurrenceDate}.</div>}
         {active.source==='personal'&&<div className="move-control"><label>Move to date<input type="date" value={moveDate} onChange={ev=>setMoveDate(ev.target.value)}/></label>
           <button className="secondary" type="button" disabled={!moveDate||moveDate===active.startDate} onClick={()=>move(active)}>Move event</button>
@@ -638,6 +670,7 @@ export default function App(){
           <p className="fine-print">Moving one repeating occurrence keeps the remaining series unchanged. All changes remain on this device.</p>
         </div>}
         <footer className="editor-actions">
+          {active.source==='ics'&&<button className="secondary" onClick={()=>copyImportedToPersonal(active)}><Plus size={15}/> Make personal copy</button>}
           {activeRecord?.repeat&&<button className="secondary" onClick={()=>nextRecurring(active)}><ChevronRight size={15}/> Next occurrence</button>}
           {activeRecord?.repeat&&<button className="secondary" onClick={()=>skip(active)}><RotateCcw size={15}/> Skip this date</button>}
           {activeRecord?.recurrenceParentId&&<button className="secondary" onClick={()=>restore(active)}><RotateCcw size={15}/> Restore original date</button>}
