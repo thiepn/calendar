@@ -112,3 +112,14 @@
 .draft-dst-warning{display:flex;gap:7px;align-items:flex-start;background:#fff3df;color:#7f5119;padding:8px}
 .draft-review label.checkline{font-size:11px;color:#74562f;font-weight:650;margin-top:10px}
 .editor-actions button:disabled{opacity:.5;cursor:not-allowed}
+
+/* C6 all-day row: multi-day pointer previews and click/tap/keyboard alternatives */
+.timeline-all-day-col{position:relative;min-height:58px}
+.timeline-all-day-create{border:1px dashed #c5d8ca;background:#f6faf6;display:flex;align-items:center;justify-content:center;gap:3px;min-width:0;min-height:25px;padding:3px 4px;font-size:10px;color:#447252;cursor:crosshair}
+.timeline-all-day-create:hover,.timeline-all-day-create:focus-visible{background:#dbeddf;outline:1px solid #689d78}
+.timeline-all-day-col.is-preview{background:#dff1e2;outline:2px dashed #448b61;outline-offset:-2px}
+.timeline-all-day-event{cursor:grab}
+.timeline-all-day-event.imported{cursor:default}
+.timeline-all-day-preview{font-size:9px;font-weight:650;color:#276c45;overflow-wrap:anywhere}
+.timeline-touch-drag .timeline-all-day-create,.timeline-touch-drag .timeline-all-day-event{touch-action:none}
+@media(max-width:740px){.timeline-all-day-col{min-height:62px}.timeline-all-day-create{font-size:10px}.timeline-all-day-preview{font-size:9px}}

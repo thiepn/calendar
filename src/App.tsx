@@ -9,6 +9,8 @@ import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/resch
 import {exportBackup,importBackup,loadState,saveState,STORAGE_KEY} from './core/storage'
 import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
 import {EventEditor} from './components/EventEditor'
+import {AllDayDialog} from './components/AllDayDialog'
+import {applyAllDayChange,type AllDayProposal} from './core/all-day'
 import {CalendarViews,type Mode} from './components/CalendarViews'
 
 type Filter='all'|'personal'|'ics'
@@ -39,6 +41,8 @@ export default function App(){
   const [finderWindow,setFinderWindow]=useState<'daytime'|'evening'>('daytime')
   const [finderBlockAllDay,setFinderBlockAllDay]=useState(true)
   const [newEventRange,setNewEventRange]=useState<{start:string;end:string}|null>(null)
+  const [newAllDay,setNewAllDay]=useState<{from:LocalDate;through:LocalDate}|null>(null)
+  const [allDayAdjustment,setAllDayAdjustment]=useState<{item:CalendarOccurrence;from:LocalDate;through:LocalDate}|null>(null)
   const [editorDate,setEditorDate]=useState<LocalDate|null>(null)
   const [active,setActive]=useState<CalendarOccurrence|null>(null)
   const [pending,setPending]=useState<IcsPreview|null>(null)
@@ -67,7 +71,7 @@ export default function App(){
     const key=(e:KeyboardEvent)=>{
       const target=e.target as HTMLElement
       if(['INPUT','TEXTAREA','SELECT'].includes(target.tagName)||target.isContentEditable)return
-      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setFinderOpen(false);setAdjustment(null)}
+      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setFinderOpen(false);setAdjustment(null);setAllDayAdjustment(null)}
       if(e.key==='n'){e.preventDefault();setEditorDate(selected);setEditing(null)}
       if(e.key==='t'){e.preventDefault();setSelected(localDate())}
       if(e.key==='/'){e.preventDefault();searchInput.current?.focus()}
@@ -100,11 +104,27 @@ export default function App(){
     blockAllDay:finderBlockAllDay,maxResults:18
   }):[],[finderOpen,calendar,selected,finderDays,finderDuration,finderWindow,finderBlockAllDay])
 
-  function create(date:LocalDate){setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setEditorDate(date)}
+  function create(date:LocalDate){setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setEditorDate(date)}
   function startSlot(slot:FreeSlot){
     setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null)
-    setNewEventRange({start:slot.start,end:slot.end});setEditorDate(slot.date)
+    setNewAllDay(null);setNewEventRange({start:slot.start,end:slot.end});setEditorDate(slot.date)
     setSelected(slot.date);setFinderOpen(false)
+  }
+  function startAllDay(from:LocalDate,through:LocalDate){
+    setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null)
+    setNewAllDay({from,through});setEditorDate(from);setSelected(from)
+  }
+  function requestAllDayAdjustment(item:CalendarOccurrence,from:LocalDate,through:LocalDate){
+    if(item.source!=='personal'||!item.allDay)return
+    setActive(null);setAllDayAdjustment({item,from,through})
+  }
+  function confirmAllDay(proposal:AllDayProposal){
+    try{
+      const next=applyAllDayChange(calendar,proposal,()=>crypto.randomUUID())
+      if(commit(next,'All-day event adjusted locally')){
+        setAllDayAdjustment(null);setSelected(proposal.from)
+      }
+    }catch(error){setNotice('All-day adjustment rejected: '+String(error))}
   }
   function open(item:CalendarOccurrence){setActive(item);setSelected(item.date);setMoveDate(item.startDate)}
   function requestAdjustment(item:CalendarOccurrence,action:TimedAction,date:LocalDate,minute:number,length:number){
@@ -148,7 +168,7 @@ export default function App(){
         calendar.records.some(r=>r.id===record.id)?saveWholeEvent(calendar,record):
         {schemaVersion:1 as const,records:[...calendar.records,record]}
       if(commit(next,'Event saved locally')){
-        setEditorDate(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null)
+        setEditorDate(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)
       }
     }catch(error){setNotice('Not saved: '+String(error))}
   }
@@ -261,7 +281,7 @@ export default function App(){
         {notice&&<div className={'notice '+(/failed|rejected|not saved|could not/i.test(notice)?'notice-error':'')} role="status">{notice}<button onClick={()=>setNotice('')} aria-label="Dismiss message"><X size={14}/></button></div>}
         <div className="content-grid">
           <div className="calendar-surface"><CalendarViews mode={mode} days={days} selected={selected} records={visible} onSelect={setSelected} onOpen={open} onCreate={create} onCreateAt={(date,start,end)=>startSlot({date,start,end})}
-              onAdjust={requestAdjustment}/></div>
+              onAdjust={requestAdjustment} onAllDaySlot={startAllDay} onAllDayAdjust={requestAllDayAdjustment}/></div>
           <aside className="inspector">
             <div className="inspector-heading"><span className="eyebrow">SELECTED DAY</span><h3>{dateLabel(selected,{weekday:'long',month:'short',day:'numeric'})}</h3>
               <p>{selectedEvents.length} visible commitment{selectedEvents.length===1?'':'s'}</p></div>
@@ -276,10 +296,10 @@ export default function App(){
     </div>
     <input ref={importInput} type="file" accept=".ics,text/calendar" hidden onChange={readIcs}/>
     <input ref={restoreInput} type="file" accept=".json,application/json" hidden onChange={readBackup}/>
-    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate+(newEventRange?.start??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} records={calendar.records}
+    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate+(newEventRange?.start??'')+(newAllDay?.through??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} initialAllDay={newAllDay??undefined} records={calendar.records}
       ignoreOccurrence={editInstance?{id:editInstance.parentId,date:editInstance.date}:undefined}
       ignoreParentFrom={editFuture?{id:editFuture.parentId,date:editFuture.date}:undefined}
-      scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null)}}/>}
+      scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)}}/>}
     {finderOpen&&<div className="modal-backdrop" onMouseDown={ev=>{if(ev.target===ev.currentTarget)setFinderOpen(false)}}>
       <section className="finder-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Find an available time">
         <header className="editor-head"><div className="heading-inline"><Clock3 size={20}/><h2>Find time</h2></div><button className="icon-button" aria-label="Close time finder" onClick={()=>setFinderOpen(false)}><X size={19}/></button></header>
@@ -298,6 +318,9 @@ export default function App(){
         {!freeSlots.length&&<p className="empty-note">No available slots in this window. Try a shorter duration, evening hours or more days.</p>}</div>
         <p className="fine-print">Suggestions are calculated locally, can become outdated and are rechecked against saved calendar changes when you save. This is not a multi-user booking system.</p>
       </section></div>}
+    {allDayAdjustment&&<AllDayDialog key={allDayAdjustment.item.key+allDayAdjustment.from+allDayAdjustment.through}
+      item={allDayAdjustment.item} initial={{from:allDayAdjustment.from,through:allDayAdjustment.through}}
+      state={calendar} onApply={confirmAllDay} onClose={()=>setAllDayAdjustment(null)}/>}
     {adjustment&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setAdjustment(null)}}>
       <section className="adjust-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Confirm time adjustment">
         <header className="editor-head"><h2>Review {adjustment.action==='move'?'move':'resize'}</h2>
@@ -352,6 +375,9 @@ export default function App(){
           {active.source==='personal'&&activeRecord?.repeat&&<button className="secondary" onClick={()=>edit(active,'instance')}><Pencil size={15}/> Edit this occurrence</button>}
           {active.source==='personal'&&activeRecord?.repeat&&<button className="secondary" onClick={()=>edit(active,'future')}><Pencil size={15}/> Edit this and future</button>}
           {active.source==='personal'&&activeRecord?.repeat&&<button className="secondary" onClick={()=>stopAfter(active)}><RotateCcw size={15}/> End after this date</button>}
+          {active.source==='personal'&&active.allDay&&<button className="secondary" onClick={()=>
+            requestAllDayAdjustment(active,active.startDate,addDays(active.endDateExclusive,-1))}>
+            <CalendarDays size={15}/> Adjust all-day dates</button>}
           {active.source==='personal'&&!active.allDay&&<button className="secondary" onClick={()=>{
             const date=new Date(active.start)
             requestAdjustment(active,'move',localDate(date),date.getHours()*60+date.getMinutes(),
