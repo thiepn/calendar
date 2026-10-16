@@ -9,6 +9,9 @@ type Props={
   onSettingsChange:(value:ReminderSettings)=>void
   onUndoDismiss:(item:ReminderItem)=>void
   onCancelSnooze:(item:ReminderItem)=>void
+  lookBackDays:1|7
+  onLookBackChange:(days:1|7)=>void
+  onDismissDue:(items:ReminderItem[])=>void
   onClose:()=>void
   onOpen:(item:ReminderItem)=>void
   onDismiss:(item:ReminderItem)=>void
@@ -18,7 +21,7 @@ type Props={
   foregroundEnabled:boolean
   onDisableNotifications:()=>void
 }
-export function ReminderCenter({items,dismissed,snoozedKeys,settings,onSettingsChange,onUndoDismiss,onCancelSnooze,onClose,onOpen,onDismiss,onSnooze,onEnableNotifications,permission,foregroundEnabled,onDisableNotifications}:Props){
+export function ReminderCenter({items,dismissed,snoozedKeys,settings,onSettingsChange,onUndoDismiss,onCancelSnooze,lookBackDays,onLookBackChange,onDismissDue,onClose,onOpen,onDismiss,onSnooze,onEnableNotifications,permission,foregroundEnabled,onDisableNotifications}:Props){
   const due=items.filter(x=>x.status==='due')
   const upcoming=items.filter(x=>x.status==='upcoming')
   const time=(iso:string)=>new Date(iso).toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})
@@ -40,7 +43,7 @@ export function ReminderCenter({items,dismissed,snoozedKeys,settings,onSettingsC
     <section className="reminder-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Local reminders">
       <header className="editor-head"><div className="heading-inline"><Bell size={19}/><h2>Local reminders</h2></div>
         <button type="button" className="icon-button" aria-label="Close reminders" onClick={onClose}><X size={19}/></button></header>
-      <p className="fine-print">Personal-event reminders are calculated from your saved calendar in this browser. This center shows due reminders from the last 24 hours and upcoming reminders in the next 14 days; it is not remote scheduling. Dismissals and snoozes stay local. Choose 5 minutes, 15 minutes or 1 hour to snooze; undo a snooze to restore the original due time.</p>
+      <p className="fine-print">Personal-event reminders are calculated from your saved calendar in this browser. This center shows due reminders from the selected last 24 hours or 7 days, and upcoming reminders in the next 14 days; it is not remote scheduling. Dismissals and snoozes stay local. Choose 5 minutes, 15 minutes or 1 hour to snooze; undo a snooze to restore the original due time.</p>
       <div className="reminder-notification-settings">
         <Clock3 size={16}/>
         {permission==='unsupported'?<p>Desktop notifications are unavailable in this browser. The in-app reminder center still works.</p>:
@@ -62,9 +65,17 @@ export function ReminderCenter({items,dismissed,snoozedKeys,settings,onSettingsC
           </select></label>
         <p>Quiet hours suppress only optional foreground desktop notifications on this device; due items stay visible here. Suppressed alerts are not guaranteed to be delivered later.</p>
       </div>
+      <div className="reminder-triage">
+        <label>Overdue review range
+          <select aria-label="Overdue review range" value={lookBackDays} onChange={e=>onLookBackChange(Number(e.target.value) as 1|7)}>
+            <option value={1}>Last 24 hours</option><option value={7}>Last 7 days</option>
+          </select>
+        </label>
+        {due.length>1&&<button type="button" className="secondary small" onClick={()=>onDismissDue(due)}>Dismiss {due.length} reviewed due reminders</button>}
+      </div>
       <div className="reminder-groups">
         <h3>Due now or overdue <span>{due.length}</span></h3>
-        {due.length?due.map(render):<p className="empty-note">No due reminders in the past 24 hours.</p>}
+        {due.length?due.map(render):<p className="empty-note">No due reminders in the selected review range.</p>}
         <h3>Upcoming <span>{upcoming.length}</span></h3>
         {upcoming.length?upcoming.map(render):<p className="empty-note">No upcoming reminders in the next 14 days. Set a reminder while creating a personal event.</p>}
       </div>
