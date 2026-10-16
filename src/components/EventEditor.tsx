@@ -1,7 +1,7 @@
 import {useMemo,useState,type FormEvent} from 'react'
 import {X,CalendarPlus,AlertTriangle} from 'lucide-react'
 import type {CalendarRecord,Frequency,LocalDate,RepeatRule} from '../types'
-import {addDays,day,localDateTime,dateLabel} from '../core/dates'
+import {addDays,day,localDateTime,dateLabel,localInstantOptions,offsetLabel} from '../core/dates'
 import {draftTimedRange,reviewDraft} from '../core/draft'
 const weekdays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 type Props={date:LocalDate;event?:CalendarRecord;initialRange?:{start:string;end:string};initialAllDay?:{from:LocalDate;through:LocalDate};records:CalendarRecord[];ignoreOccurrence?:{id:string;date:LocalDate};ignoreParentFrom?:{id:string;date:LocalDate};scope?:'instance'|'future';onSave:(record:CalendarRecord)=>void;onClose:()=>void}
@@ -17,8 +17,26 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
   const [until,setUntil]=useState(event?.repeat?.until??'')
   const [weekdaysSet,setWeekdaysSet]=useState<number[]>(event?.repeat?.weekdays??[])
   const [error,setError]=useState('')
+  function inferredFold(iso?:string):''|'earlier'|'later' {
+    if(!iso)return ''
+    try{
+      const opts=localInstantOptions(localDateTime(iso))
+      return opts.length===2?(opts[0]===iso?'earlier':'later'):''
+    }catch{return ''}
+  }
+  const [startFold,setStartFold]=useState<''|'earlier'|'later'>(()=>inferredFold(event&&!event.allDay?event.start:initialRange?.start))
+  const [endFold,setEndFold]=useState<''|'earlier'|'later'>(()=>inferredFold(event&&!event.allDay?event.end:initialRange?.end))
+  const [reviewDays,setReviewDays]=useState<90|180|365>(90)
+  function ambiguousOptions(value:string):string[]{
+    try{
+      const options=localInstantOptions(value)
+      return options.length===2?options:[]
+    }catch{return []}
+  }
+  const firstFoldOptions=allDay?[]:ambiguousOptions(start)
+  const lastFoldOptions=allDay?[]:ambiguousOptions(end)
   const [acceptedSignature,setAcceptedSignature]=useState('')
-  const signature=[title,start,end,allDay,frequency,interval,until,weekdaysSet.join(',')].join('|')
+  const signature=[title,start,end,startFold,endFold,reviewDays,allDay,frequency,interval,until,weekdaysSet.join(',')].join('|')
   const accepted=acceptedSignature===signature
   function construct(id:string):CalendarRecord {
     const first=start.slice(0,10),last=end.slice(0,10)
@@ -31,7 +49,7 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
       startIso=new Date(first+'T00:00:00').toISOString()
       endIso=new Date(endExclusive+'T00:00:00').toISOString()
     }else{
-      const range=draftTimedRange(start,end)
+      const range=draftTimedRange(start,end,startFold||undefined,endFold||undefined)
       startIso=range.start;endIso=range.end
     }
     const repeat:RepeatRule|undefined=scope==='instance'||frequency==='none'?undefined:{
@@ -49,12 +67,12 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
   const inspection=useMemo(()=>{
     try{return {review:reviewDraft(records,construct(event?.id??'__draft_preview__'),{
       ignoreRecordId:scope==='instance'||scope==='future'?undefined:event?.id,
-      ignoreOccurrence,ignoreParentFrom,horizonDays:90
+      ignoreOccurrence,ignoreParentFrom,horizonDays:reviewDays
     }),error:''}}
     catch(e){return {review:null,error:e instanceof Error?e.message:String(e)}}
     // Review depends on all form inputs, original record and canonical calendar records.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[title,description,location,allDay,start,end,frequency,interval,until,weekdaysSet,event,scope,records,ignoreOccurrence,ignoreParentFrom])
+  },[title,description,location,allDay,start,end,startFold,endFold,reviewDays,frequency,interval,until,weekdaysSet,event,scope,records,ignoreOccurrence,ignoreParentFrom])
   const needsAck=Boolean(inspection.review&&(inspection.review.collisionCount||inspection.review.affectedClockCount))
   function toggleAllDay(value:boolean){
     if(value===allDay)return
@@ -68,26 +86,7 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
       if(!title.trim())throw new Error('Enter an event title')
       if(inspection.error||!inspection.review)throw new Error(inspection.error||'Check the proposed dates')
       if(needsAck&&!accepted)throw new Error('Acknowledge overlapping events or recurring clock warnings before saving')
-      const startDay=start.slice(0,10)
-      const endDay=end.slice(0,10)
-      if(until && until<startDay)throw new Error('Repeat end cannot precede the first occurrence')
-      const startIso=allDay ? new Date(startDay+'T00:00:00').toISOString() : draftTimedRange(start,end).start
-      const endExclusive=addDays(endDay,1)
-      const endIso=allDay ? new Date(endExclusive+'T00:00:00').toISOString() : draftTimedRange(start,end).end
-      if(Date.parse(endIso)<=Date.parse(startIso))throw new Error('End must follow start')
-      if(allDay && endDay<startDay)throw new Error('End day must not precede start')
-      const repeat:RepeatRule|undefined=scope==='instance'||frequency==='none'?undefined:{
-        frequency,interval:Math.floor(interval),...(until?{until}:{}),
-        ...(frequency==='weekly'&&weekdaysSet.length?{weekdays:weekdaysSet}:{}),
-      }
-      if(repeat && (repeat.interval<1||repeat.interval>30))throw new Error('Repeat interval must be between 1 and 30')
-      const record:CalendarRecord={id:event?.id??crypto.randomUUID(),title:title.trim(),
-        description:description.trim(),location:location.trim(),source:'personal',
-        allDay,start:startIso,end:endIso,...(allDay?{startDate:startDay,endDateExclusive:endExclusive}:{}),
-        ...(repeat?{repeat}:{}),updatedAt:new Date().toISOString(),
-        ...(event?.excludedDates?{excludedDates:event.excludedDates}:{}),
-      }
-      onSave({...record,...construct(record.id),title:record.title})
+      onSave({...construct(event?.id??crypto.randomUUID()),title:title.trim()})
     }catch(err){setError(err instanceof Error?err.message:String(err))}
   }
   return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
@@ -98,9 +97,21 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
         <label>Event name<input autoFocus required maxLength={240} value={title} onChange={e=>setTitle(e.target.value)} placeholder="What are you planning?"/></label>
         <label className="checkline"><input type="checkbox" checked={allDay} onChange={e=>toggleAllDay(e.target.checked)}/> All-day event</label>
         <div className="editor-grid">
-          <label>Starts<input required type={allDay?'date':'datetime-local'} value={start} onChange={e=>setStart(e.target.value)}/></label>
-          <label>{allDay?'Last day (inclusive)':'Ends'}<input required type={allDay?'date':'datetime-local'} value={end} onChange={e=>setEnd(e.target.value)}/></label>
+          <label>Starts<input required type={allDay?'date':'datetime-local'} value={start} onChange={e=>{setStart(e.target.value);setStartFold('')}}/></label>
+          <label>{allDay?'Last day (inclusive)':'Ends'}<input required type={allDay?'date':'datetime-local'} value={end} onChange={e=>{setEnd(e.target.value);setEndFold('')}}/></label>
         </div>
+        {firstFoldOptions.length===2&&<label className="fold-choice">Repeated start hour
+          <select aria-label="Repeated start hour" value={startFold} onChange={e=>setStartFold(e.target.value as ''|'earlier'|'later')}>
+            <option value="">Choose the first or second occurrence</option>
+            <option value="earlier">First {start.slice(11)} ({offsetLabel(firstFoldOptions[0])})</option>
+            <option value="later">Second {start.slice(11)} ({offsetLabel(firstFoldOptions[1])})</option>
+          </select></label>}
+        {lastFoldOptions.length===2&&<label className="fold-choice">Repeated end hour
+          <select aria-label="Repeated end hour" value={endFold} onChange={e=>setEndFold(e.target.value as ''|'earlier'|'later')}>
+            <option value="">Choose the first or second occurrence</option>
+            <option value="earlier">First {end.slice(11)} ({offsetLabel(lastFoldOptions[0])})</option>
+            <option value="later">Second {end.slice(11)} ({offsetLabel(lastFoldOptions[1])})</option>
+          </select></label>}
         {scope==='instance'&&<p className="fine-print">Only this instance changes. The original date will be skipped in its series; other occurrences keep their schedule.</p>}
         {scope==='future'&&<p className="fine-print">Saving creates a future-only series while preserving earlier occurrences. Cancel leaves the calendar unchanged.</p>}
         {scope!=='instance'&&<div className="editor-grid">
@@ -117,8 +128,13 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
         <label>Notes<textarea rows={3} maxLength={4000} value={description} onChange={e=>setDescription(e.target.value)} placeholder="Optional details"/></label>
         <div className="draft-review" aria-label="Calendar conflict review" aria-live="polite">
           <strong>Calendar review — all saved calendars</strong>
+          {frequency!=='none'&&scope!=='instance'&&<label className="review-horizon">Conflict planning horizon
+            <select aria-label="Conflict planning horizon" value={reviewDays} onChange={e=>setReviewDays(Number(e.target.value) as 90|180|365)}>
+              <option value={90}>90 days</option><option value={180}>180 days</option><option value={365}>365 days</option>
+            </select>
+          </label>}
           {inspection.error?<p className="error" role="alert">{inspection.error}</p>:inspection.review&&<>
-            <p>{inspection.review.collisionCount} overlapping commitment(s) through {dateLabel(inspection.review.checkedThrough,{year:'numeric',month:'short',day:'numeric'})}{inspection.review.repeating?' — first 90 days only':' — this event'}.</p>
+            <p>{inspection.review.collisionCount} overlapping commitment(s) through {dateLabel(inspection.review.checkedThrough,{year:'numeric',month:'short',day:'numeric'})}{inspection.review.repeating?' — first '+reviewDays+' days only':' — this event'}.</p>
             {inspection.review.collisions.length>0&&<ul className="draft-collisions">
               {inspection.review.collisions.map((hit,i)=><li key={i}><AlertTriangle size={13}/><span>{dateLabel(hit.candidate.date)}: {hit.existing.title} ({hit.existing.source==='ics'?'imported, read-only':'personal'})</span></li>)}
             </ul>}
@@ -129,7 +145,7 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
             {needsAck&&<label className="checkline"><input type="checkbox" checked={accepted} onChange={e=>setAcceptedSignature(e.target.checked?signature:'')}/> Save despite these overlaps or recurrence time warnings</label>}
           </>}
         </div>
-        <p className="fine-print">Times use this device's local time zone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Start/end local times that do not exist or occur twice are rejected. Recurring collision review is limited to 90 days; further conflicts may exist.</p>
+        <p className="fine-print">Times use this device's local time zone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Start/end local times that do not exist or occur twice are rejected. Recurring collision review uses the selected 90–365-day horizon; conflicts beyond it remain unchecked.</p>
         {error&&<div className="error" role="alert">{error}</div>}
         <footer className="editor-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" type="submit" disabled={Boolean(inspection.error)}>{scope==='instance'?'Save this occurrence':scope==='future'?'Save future series':event?'Save changes':'Create event'}</button></footer>
       </form>

@@ -1,5 +1,5 @@
 import type {CalendarOccurrence,CalendarRecord,LocalDate} from '../types'
-import {addDays,fromUnambiguousLocalDateTime,localDate,localDateTime} from './dates'
+import {addDays,resolveLocalInstant,fromUnambiguousLocalDateTime,localDate,localDateTime} from './dates'
 import {occurrencesBetween} from './occurrences'
 
 export interface DraftHit { candidate:CalendarOccurrence; existing:CalendarOccurrence }
@@ -12,9 +12,9 @@ export interface DraftReview {
   repeating:boolean
 }
 /** Both ends of edited wall-clock ranges must resolve to exactly one instant. */
-export function draftTimedRange(start:string,end:string):{start:string;end:string}{
-  const first=fromUnambiguousLocalDateTime(start)
-  const last=fromUnambiguousLocalDateTime(end)
+export function draftTimedRange(start:string,end:string,startFold?:'earlier'|'later',endFold?:'earlier'|'later'):{start:string;end:string}{
+  const first=resolveLocalInstant(start,startFold)
+  const last=resolveLocalInstant(end,endFold)
   if(Date.parse(last)<=Date.parse(first))throw new Error('End must follow start')
   return {start:first,end:last}
 }
