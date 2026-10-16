@@ -6,7 +6,7 @@ import {dayOccurrences,excludeOccurrence,occurrencesBetween} from './core/occurr
 import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,splitSeriesAt,endSeriesAt} from './core/series'
 import {findFreeSlots,type FreeSlot} from './core/availability'
 import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
-import {exportBackup,importBackup,loadState,saveState,readRecovery,rawCalendarBackup,STORAGE_KEY,RECOVERY_STORAGE_KEY,type RecoverySnapshot} from './core/storage'
+import {exportBackup,importBackup,loadState,saveState,readRecovery,rawCalendarBackup,STORAGE_KEY,type RecoverySnapshot} from './core/storage'
 import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
 import {EventEditor} from './components/EventEditor'
 import {AllDayDialog} from './components/AllDayDialog'
