@@ -465,6 +465,8 @@ async function exerciseC8RecoverySearchAndAgenda(){
     await page.getByRole('button',{name:'New event'}).click()
     const form=page.getByRole('dialog',{name:'New event'})
     await form.getByLabel('Event name').fill(title)
+    const acknowledgement=form.getByLabel('Save despite these overlaps or recurrence time warnings')
+    if(await acknowledgement.count())await acknowledgement.check()
     await form.getByRole('button',{name:'Create event'}).click()
     await form.waitFor({state:'hidden'})
   }
