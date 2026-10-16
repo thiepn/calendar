@@ -100,3 +100,15 @@
 .adjust-conflicts label{display:flex;align-items:center;gap:7px;font-weight:650;color:#59462d;margin-top:13px}
 .adjust-dialog .primary:disabled{opacity:.45;cursor:not-allowed}
 @media(max-width:740px){.timeline-tools{gap:10px}.timeline-controls{justify-content:space-between}.timeline-resize-handle{height:18px}.adjust-fields{grid-template-columns:1fr}}
+
+/* C6: real-time draft and recurrence source warnings */
+.draft-review{border:1px solid #d9e2d8;background:#f8faf7;padding:11px 13px;border-radius:4px;font-size:12px;line-height:1.5;color:#4b614e}
+.draft-review strong{display:block;color:#35563f;margin-bottom:5px}
+.draft-review p{font-size:11px;margin:5px 0}
+.draft-review .error{background:#fff0ec;color:#963f34;padding:8px}
+.draft-collisions{list-style:none;padding:0;margin:8px 0;max-height:125px;overflow-y:auto;display:grid;gap:5px}
+.draft-collisions li{display:flex;gap:7px;color:#835e2c;align-items:center;font-size:11px}
+.draft-collisions svg{flex:none}
+.draft-dst-warning{display:flex;gap:7px;align-items:flex-start;background:#fff3df;color:#7f5119;padding:8px}
+.draft-review label.checkline{font-size:11px;color:#74562f;font-weight:650;margin-top:10px}
+.editor-actions button:disabled{opacity:.5;cursor:not-allowed}

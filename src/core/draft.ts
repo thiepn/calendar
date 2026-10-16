@@ -1,5 +1,5 @@
 import type {CalendarOccurrence,CalendarRecord,LocalDate} from '../types'
-import {addDays,daysBetween,fromUnambiguousLocalDateTime,localDate,localDateTime} from './dates'
+import {addDays,fromUnambiguousLocalDateTime,localDate,localDateTime} from './dates'
 import {occurrencesBetween} from './occurrences'
 
 export interface DraftHit { candidate:CalendarOccurrence; existing:CalendarOccurrence }

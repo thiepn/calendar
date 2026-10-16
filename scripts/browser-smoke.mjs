@@ -40,6 +40,7 @@ async function exerciseDesktop(){
   const recurring=page.getByRole('dialog',{name:'New event'})
   await recurring.getByLabel('Event name').fill('Browser recurring')
   await recurring.getByLabel('Repeats').selectOption('weekly')
+  await recurring.getByLabel('Save despite these overlaps or recurrence time warnings').check()
   await recurring.getByRole('button',{name:'Create event'}).click()
   assert.ok(await page.locator('.timeline-block.overlap').count()>=2,'Colliding events should occupy separate lanes')
   const named=page.locator('.timeline-block').filter({hasText:'Browser recurring'}).first()
