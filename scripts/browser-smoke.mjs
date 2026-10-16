@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
 import {setTimeout as sleep} from 'node:timers/promises'
+import {readFile} from 'node:fs/promises'
 import {chromium} from 'playwright'
 
 const url='http://127.0.0.1:4173'
@@ -913,6 +914,111 @@ async function exerciseC10MobileSavedViewPreferences(){
   await context.close()
 }
 
+
+async function exerciseC11SourceAgendaAndCheckpoint(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB',acceptDownloads:true})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const ics=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C11 Seminars','BEGIN:VEVENT',
+    'UID:c11-rdate','SUMMARY:Seminar','DTSTART;VALUE=DATE:20261102','DTEND;VALUE=DATE:20261103',
+    'RDATE;VALUE=DATE:20261105,20261107','END:VEVENT','END:VCALENDAR'].join('\r\n')
+  const choose=()=>page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'c11.ics',mimeType:'text/calendar',buffer:Buffer.from(ics)})
+  await choose()
+  const review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  assert.match(await review.getByLabel('Import change preview').innerText(),/3 new/)
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  await choose()
+  const again=page.getByRole('dialog',{name:'ICS import review'})
+  await again.waitFor()
+  assert.match(await again.getByLabel('Import change preview').innerText(),/3 unchanged/)
+  await again.getByRole('button',{name:'Cancel'}).click()
+  const state=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(state.length,3)
+  assert.ok(state.every(x=>x.source==='ics'&&!x.repeat))
+  console.log('BROWSER_C11_RDATE_READONLY_UID_REFRESH_PASS')
+
+  await page.getByLabel('Jump to date').fill('2026-11-03')
+  await page.getByRole('button',{name:'Next busy day'}).click()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-11-05')
+  await page.getByRole('button',{name:'Previous busy day'}).click()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-11-02')
+  await page.getByLabel('Jump to date').fill('2026-11-05')
+  await page.getByRole('button',{name:'New event'}).click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.getByLabel('Event name').fill('C11 private seminar work')
+  await editor.getByLabel('Notes').fill('CONFIDENTIAL JOURNAL NOT FOR CSV')
+  const acknowledged=editor.getByLabel('Save despite these overlaps or recurrence time warnings')
+  if(await acknowledged.count())await acknowledged.check()
+  await editor.getByRole('button',{name:'Create event'}).click()
+  await editor.waitFor({state:'hidden'})
+  const all=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(all.length,4)
+  await page.getByRole('button',{name:'List'}).click()
+  const csvPending=page.waitForEvent('download')
+  await page.getByRole('button',{name:'Download visible agenda CSV'}).click()
+  const csvDownload=await csvPending
+  assert.match(csvDownload.suggestedFilename(),/\.csv$/)
+  const csv=await readFile(await csvDownload.path(),'utf8')
+  assert.match(csv,/C11 private seminar work/)
+  assert.match(csv,/Imported: C11 Seminars/)
+  assert.ok(!csv.includes('CONFIDENTIAL JOURNAL'),'Private event notes must not leak into exported agenda')
+  console.log('BROWSER_C11_BUSY_DAY_CSV_SAFE_EXPORT_PASS')
+  await page.getByRole('button',{name:/Manage sources/}).click()
+  const sourceDialog=page.getByRole('dialog',{name:'Calendar data management'})
+  const checkpointPending=page.waitForEvent('download')
+  await sourceDialog.getByRole('button',{name:'Export previous-version checkpoint JSON'}).click()
+  const file=await checkpointPending
+  const backup=JSON.parse(await readFile(await file.path(),'utf8'))
+  assert.equal(backup.schemaVersion,1)
+  assert.equal(backup.records.length,3)
+  assert.equal(backup.records.filter(x=>x.source==='ics').length,3)
+  assert.ok(!backup.records.some(x=>x.title==='C11 private seminar work'))
+  console.log('BROWSER_C11_PORTABLE_PREVIOUS_VERSION_CHECKPOINT_PASS')
+  assert.equal(errors.length,0,errors.join(';'))
+  await context.close()
+}
+async function exerciseC11MobileOverdueTriage(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.evaluate(()=>{
+    const now=Date.now(),source=Array.from({length:2},(_,i)=>{
+      const start=new Date(now-(4+i)*86400000),end=new Date(start.getTime()+3600000)
+      return {id:'c11-overdue-'+i,title:'C11 overdue '+i,description:'',location:'',
+        start:start.toISOString(),end:end.toISOString(),allDay:false,source:'personal',
+        reminderMinutes:15,updatedAt:new Date().toISOString()}
+    })
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify({schemaVersion:1,records:source}))
+  })
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const panel=page.getByRole('dialog',{name:'Local reminders'})
+  await panel.waitFor()
+  await panel.getByLabel('Overdue review range').selectOption('7')
+  await panel.getByRole('button',{name:'Dismiss 2 reviewed due reminders'}).waitFor()
+  page.once('dialog',dialog=>void dialog.accept())
+  await panel.getByRole('button',{name:'Dismiss 2 reviewed due reminders'}).click()
+  const data=await page.evaluate(()=>({
+    original:JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records,
+    actions:JSON.parse(localStorage.getItem('thiepn.calendar.reminder-actions.v1'))
+  }))
+  assert.equal(data.original.length,2)
+  assert.ok(Object.values(data.actions).every(x=>x.kind==='dismiss'))
+  await panel.locator('.dismissed-reminders summary').click()
+  await panel.getByRole('button',{name:'Restore reminder C11 overdue 0'}).click()
+  const restored=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.reminder-actions.v1')))
+  assert.equal(Object.values(restored).length,1)
+  const width=await page.evaluate(()=>({screen:innerWidth,document:document.documentElement.scrollWidth}))
+  assert.ok(width.document<=width.screen+2,'Mobile overdue panel caused page overflow '+JSON.stringify(width))
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_C11_MOBILE_OVERDUE_BULK_DISMISS_UNDO_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -937,6 +1043,8 @@ try{
   await exerciseC10SourceReplaceSafety()
   await exerciseC10SnoozeLifecycleAndOfflineReadiness()
   await exerciseC10MobileSavedViewPreferences()
+  await exerciseC11SourceAgendaAndCheckpoint()
+  await exerciseC11MobileOverdueTriage()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true

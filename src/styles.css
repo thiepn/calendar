@@ -219,3 +219,18 @@
 .offline-ready{display:flex;gap:7px;align-items:center;color:#365f43;font-size:11px;background:#e9f2eb;padding:9px}
 .incomplete-ics-notice{font-size:12px;line-height:1.5;border:1px solid #e1ba8e;border-left:3px solid #a06b2c;padding:10px;color:#765027;background:#fff7e9}
 @media(max-width:740px){.offline-readiness dl>div{flex-direction:column;gap:4px}.offline-readiness dd{max-width:100%;text-align:left}.offline-actions button{min-height:42px}}
+
+/* C11 source-visible agenda handoff, busy-date travel and overdue triage */
+.busy-day-navigation{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.busy-day-navigation button{font-size:11px;min-height:31px}
+.reminder-triage{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:center;margin:12px 0;padding:9px;border:1px solid #d8e4da;background:#f7faf7}
+.reminder-triage label{display:flex;align-items:center;gap:8px;font-size:12px}
+.reminder-triage select{border:1px solid #cedfd0;color:#335b42;padding:7px;background:white}
+.agenda-options button{min-height:33px}
+@media(max-width:740px){
+  .busy-day-navigation{width:100%;order:3}
+  .busy-day-navigation button{flex:1 1 120px;min-height:40px}
+  .agenda-options button{width:100%;min-height:40px;justify-content:center}
+  .reminder-triage{align-items:stretch}
+  .reminder-triage label,.reminder-triage button{width:100%;min-height:40px}
+}
