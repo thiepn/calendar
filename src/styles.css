@@ -207,3 +207,15 @@
 .reminder-actions{align-items:center}
 .reminder-actions button{min-height:36px}
 @media(max-width:740px){.reminder-actions button{min-width:52px;flex:1 1 auto}}
+
+/* C10 continuation: source integrity and truthful browser-specific offline state */
+.display-preferences,.offline-readiness{margin:14px 0;padding:14px;border:1px solid #d5e0d8;background:#f8faf8}
+.display-preferences h3,.offline-readiness h3{display:flex;align-items:center;gap:8px;margin:0 0 9px;font-size:13px;color:#375b44}
+.offline-readiness dl{margin:12px 0;display:grid;gap:0;font-size:11px}
+.offline-readiness dl>div{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #e3eae4;padding:8px 0}
+.offline-readiness dt{font-weight:600;color:#54735c}
+.offline-readiness dd{margin:0;max-width:65%;text-align:right;color:#405c47;overflow-wrap:anywhere}
+.offline-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}
+.offline-ready{display:flex;gap:7px;align-items:center;color:#365f43;font-size:11px;background:#e9f2eb;padding:9px}
+.incomplete-ics-notice{font-size:12px;line-height:1.5;border:1px solid #e1ba8e;border-left:3px solid #a06b2c;padding:10px;color:#765027;background:#fff7e9}
+@media(max-width:740px){.offline-readiness dl>div{flex-direction:column;gap:4px}.offline-readiness dd{max-width:100%;text-align:left}.offline-actions button{min-height:42px}}
