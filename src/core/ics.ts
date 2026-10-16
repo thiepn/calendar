@@ -1,6 +1,7 @@
 import type {CalendarRecord,CalendarState} from '../types'
-import {addDays,day} from './dates'
+import {addDays,day,daysBetween} from './dates'
 import {occurrencesBetween} from './occurrences'
+import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 
 export interface IcsPreview {records:CalendarRecord[];warnings:string[];name:string}
 type Property={name:string;params:Record<string,string>;value:string}
@@ -78,12 +79,81 @@ export function previewIcs(text:string):IcsPreview {
     if(event)event.push(p)
     else if(p.name==='X-WR-CALNAME')name=unescapeText(p.value).slice(0,100)||name
   }
+  // Resolve all-day recurrence overrides regardless of their position in the ICS file.
+  const replacements=new Map<string,Property[]>()
   for(const props of items){
+    const uid=props.find(p=>p.name==='UID')?.value
+    const original=props.find(p=>p.name==='RECURRENCE-ID')
+    if(uid&&original&&/^\d{8}$/.test(original.value))
+      replacements.set(uid+'|'+original.value,props)
+  }
+  const consumed=new Set<Property[]>()
+  const coveredUids=new Set<string>()
+  for(const props of items){
+    if(consumed.has(props))continue
     const get=(key:string)=>props.find(p=>p.name===key)
     const title=unescapeText(get('SUMMARY')?.value??'Untitled').trim()||'Untitled'
     try{
       if(get('STATUS')?.value.toUpperCase()==='CANCELLED')continue
-      if(get('RRULE')||get('RDATE')||get('EXDATE')){warnings.push(title+': recurrence definition skipped; import expanded instances instead');continue}
+      if(get('RRULE')||get('RDATE')||get('EXDATE')){
+        if(!get('RRULE')||get('RDATE'))throw new Error('Unsupported recurrence rule/RDATE; no partial series imported')
+        const uid=get('UID')?.value
+        if(!uid)throw new Error('Finite recurring event requires UID')
+        const rawStart=get('DTSTART'),rawEnd=get('DTEND')
+        if(!rawStart)throw new Error('Missing DTSTART')
+        const start=parseInstant(rawStart)
+        if(!start.date)throw new Error('Timed ICS RRULE requires external source expansion; only finite all-day recurrence is supported')
+        const end=rawEnd?parseInstant(rawEnd):{date:addDays(start.date,1),iso:new Date(addDays(start.date,1)+'T00:00:00').toISOString()}
+        if(!end.date||end.date<=start.date)throw new Error('Invalid finite all-day range')
+        const duration=daysBetween(start.date,end.date)
+        const rules=parseFiniteAllDayRule(get('RRULE')!.value,start.date)
+        const exdateValues=props.filter(p=>p.name==='EXDATE')
+        const excluded:string[]=[]
+        for(const ex of exdateValues){
+          if(ex.params.VALUE&&ex.params.VALUE!=='DATE')throw new Error('Unsupported EXDATE timezone; recurrence not imported')
+          for(const v of ex.value.split(','))excluded.push(dateOnly(v))
+        }
+        const expanded=expandFiniteAllDay(start.date,rules,excluded)
+        if(records.length+expanded.length>5000)throw new Error('ICS expansion exceeds maximum snapshot size')
+        const recurOverrides=new Map<string,Property[]>()
+        for(const [key,replacement] of replacements){
+          if(key.startsWith(uid+'|'))recurOverrides.set(key,replacement)
+        }
+        const dates=new Set<string>()
+        for(const instance of expanded)dates.add(instance.replace(/-/g,''))
+        // EXDATE plus overridden records must not reintroduce excluded original instances.
+        for(const ex of excluded)dates.add(ex.replace(/-/g,''))
+        for(const instanceToken of dates){
+          const originalDate=dateOnly(instanceToken)
+          const key=uid+'|'+instanceToken
+          const replacement=recurOverrides.get(key)
+          if(replacement)consumed.add(replacement)
+          if(replacement?.find(p=>p.name==='STATUS')?.value.toUpperCase()==='CANCELLED')continue
+          if(excluded.includes(originalDate)&&!replacement)continue
+          if(!expanded.includes(originalDate)&&!replacement)continue
+          const overrideValue=(field:string)=>replacement?.find(p=>p.name===field)?.value
+          const adjustedStart=replacement?.find(p=>p.name==='DTSTART')
+          const adjustedEnd=replacement?.find(p=>p.name==='DTEND')
+          const startDate=adjustedStart?parseInstant(adjustedStart).date:originalDate
+          if(!startDate)throw new Error('Timed recurrence overrides are unsupported')
+          const finalDate=adjustedEnd?parseInstant(adjustedEnd).date:addDays(startDate,duration)
+          if(!finalDate||finalDate<=startDate)throw new Error('Invalid all-day override')
+          const finalTitle=unescapeText(overrideValue('SUMMARY')??get('SUMMARY')?.value??'Untitled').trim()||'Untitled'
+          const finalDescription=unescapeText(overrideValue('DESCRIPTION')??get('DESCRIPTION')?.value??'')
+          const finalLocation=unescapeText(overrideValue('LOCATION')??get('LOCATION')?.value??'')
+          if(finalTitle.length>240||finalDescription.length>4000||finalLocation.length>500)
+            throw new Error('Finite recurring entry exceeds permitted text length')
+          const sourceKey=name+'|'+uid+'|'+instanceToken
+          records.push({id:'ics-'+hash(sourceKey),source:'ics',sourceCalendar:name,sourceKey,
+            title:finalTitle,description:finalDescription,location:finalLocation,
+            start:new Date(startDate+'T00:00:00').toISOString(),end:new Date(finalDate+'T00:00:00').toISOString(),
+            allDay:true,startDate,endDateExclusive:finalDate,updatedAt:new Date().toISOString()})
+        }
+        coveredUids.add(uid)
+        warnings.push(title+': finite all-day RRULE materialized into '+expanded.length+' read-only instance(s); source owns recurrence')
+        continue
+      }
+      if(get('RECURRENCE-ID')&&coveredUids.has(get('UID')?.value??''))continue
       const rawStart=get('DTSTART')
       if(!rawStart)throw new Error('Missing DTSTART')
       const rawEnd=get('DTEND')
@@ -152,8 +222,11 @@ export function exportIcs(state:CalendarState,from:string,through:string):string
     if(item.allDay){
       lines.push('DTSTART;VALUE=DATE:'+item.startDate.replace(/-/g,''),'DTEND;VALUE=DATE:'+item.endDateExclusive.replace(/-/g,''))
     }else lines.push('DTSTART:'+utcValue(item.start),'DTEND:'+utcValue(item.end))
+    if(record.reminderMinutes!==undefined){
+      lines.push('BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+textValue(item.title),
+        'TRIGGER:-PT'+record.reminderMinutes+'M','END:VALARM')
+    }
     lines.push('END:VEVENT')
-    void record
   }
   lines.push('END:VCALENDAR')
   return lines.map(fold).join('\r\n')+'\r\n'
