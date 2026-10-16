@@ -1,4 +1,4 @@
-import type {CalendarOccurrence,CalendarRecord,CalendarState,LocalDate} from '../types'
+import type {CalendarOccurrence,CalendarRecord,CalendarState} from '../types'
 import {addDays,localDate} from './dates'
 import {occurrencesBetween} from './occurrences'
 

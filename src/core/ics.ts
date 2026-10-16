@@ -87,10 +87,15 @@ export function previewIcs(text:string):IcsPreview {
     if(uid&&original&&/^\d{8}$/.test(original.value))
       replacements.set(uid+'|'+original.value,props)
   }
+  const recurrenceMasterUids=new Set(items.filter(props=>props.some(p=>p.name==='RRULE'))
+    .map(props=>props.find(p=>p.name==='UID')?.value).filter((uid):uid is string=>Boolean(uid)))
   const consumed=new Set<Property[]>()
   const coveredUids=new Set<string>()
   for(const props of items){
     if(consumed.has(props))continue
+    // The source-owned master controls overrides even when recurrence exceptions
+    // precede it in file order. Never materialize both a detached and a master copy.
+    if(props.some(p=>p.name==='RECURRENCE-ID')&&recurrenceMasterUids.has(props.find(p=>p.name==='UID')?.value??''))continue
     const get=(key:string)=>props.find(p=>p.name===key)
     const title=unescapeText(get('SUMMARY')?.value??'Untitled').trim()||'Untitled'
     try{
