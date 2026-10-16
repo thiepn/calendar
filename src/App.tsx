@@ -2,14 +2,15 @@ import {useEffect,useMemo,useRef,useState,type ChangeEvent} from 'react'
 import {CalendarDays,ChevronLeft,ChevronRight,Plus,Upload,Download,Search,Database,ExternalLink,AlertTriangle,Trash2,Pencil,X,RotateCcw,Menu,Clock3} from 'lucide-react'
 import type {CalendarOccurrence,CalendarRecord,CalendarState,LocalDate} from './types'
 import {addDays,addMonths,dateLabel,dateSeries,friendlyRange,localDate,monday,monthGridStart,localDateTime,localInstantOptions,offsetLabel} from './core/dates'
-import {dayOccurrences,excludeOccurrence} from './core/occurrences'
+import {dayOccurrences,excludeOccurrence,occurrencesBetween} from './core/occurrences'
 import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,splitSeriesAt,endSeriesAt} from './core/series'
 import {findFreeSlots,type FreeSlot} from './core/availability'
 import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
-import {exportBackup,importBackup,loadState,saveState,STORAGE_KEY} from './core/storage'
+import {exportBackup,importBackup,loadState,saveState,readRecovery,rawCalendarBackup,STORAGE_KEY,RECOVERY_STORAGE_KEY,type RecoverySnapshot} from './core/storage'
 import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
 import {EventEditor} from './components/EventEditor'
 import {AllDayDialog} from './components/AllDayDialog'
+import {RestoreDialog} from './components/RestoreDialog'
 import {applyAllDayChange,type AllDayProposal} from './core/all-day'
 import {CalendarViews,type Mode} from './components/CalendarViews'
 
@@ -23,9 +24,14 @@ function download(name:string,contents:string,type:string){
 const initial=loadState()
 export default function App(){
   const [calendar,setCalendar]=useState<CalendarState>(initial.state)
+  const [unreadable,setUnreadable]=useState(Boolean(initial.error))
+  const [recovery,setRecovery]=useState<RecoverySnapshot|null>(()=>{try{return readRecovery()}catch{return null}})
+  const [restoreCandidate,setRestoreCandidate]=useState<{state:CalendarState;origin:string}|null>(null)
   const [notice,setNotice]=useState(initial.error??'')
   const [selected,setSelected]=useState<LocalDate>(localDate())
   const [mode,setMode]=useState<Mode>('week')
+  const [agendaSpan,setAgendaSpan]=useState<14|30>(14)
+  const [agendaBusyOnly,setAgendaBusyOnly]=useState(false)
   const [filter,setFilter]=useState<Filter>('all')
   const [query,setQuery]=useState('')
   const [editing,setEditing]=useState<CalendarRecord|null>(null)
@@ -51,19 +57,24 @@ export default function App(){
   const importInput=useRef<HTMLInputElement>(null)
   const restoreInput=useRef<HTMLInputElement>(null)
   const searchInput=useRef<HTMLInputElement>(null)
+  const jumpInput=useRef<HTMLInputElement>(null)
 
-  function commit(next:CalendarState,success='Saved on this device',confirmedRestore=false) {
+  function commit(next:CalendarState,success='Saved on this device') {
     try{
       // The read is immediately before the write: never knowingly overwrite another tab's changes.
       const current=loadState()
-      if(!confirmedRestore&&(current.error||JSON.stringify(current.state)!==JSON.stringify(calendar)))
+      if(current.error||JSON.stringify(current.state)!==JSON.stringify(calendar))
         throw new Error('Saved calendar changed in another tab or cannot be read. Review the latest events before retrying.')
-      saveState(next);setCalendar(next);setNotice(success);return true
+      saveState(next,'Before: '+success);setCalendar(next);setUnreadable(false)
+      try{setRecovery(readRecovery())}catch{setRecovery(null)}
+      setNotice(success);return true
     }catch(error){setNotice('Not saved: '+String(error));return false}
   }
   useEffect(()=>{
     const sync=(e:StorageEvent)=>{
-      if(e.key===STORAGE_KEY||e.key===null){const read=loadState();if(read.error)setNotice(read.error);else setCalendar(read.state)}
+      if(e.key===STORAGE_KEY||e.key===null){const read=loadState();if(read.error){setNotice(read.error);setUnreadable(true)}
+        else{setCalendar(read.state);setUnreadable(false)}
+        try{setRecovery(readRecovery())}catch{setRecovery(null)}}
     }
     window.addEventListener('storage',sync);return ()=>window.removeEventListener('storage',sync)
   },[])
@@ -72,21 +83,36 @@ export default function App(){
       const target=e.target as HTMLElement
       if(['INPUT','TEXTAREA','SELECT'].includes(target.tagName)||target.isContentEditable)return
       if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setFinderOpen(false);setAdjustment(null);setAllDayAdjustment(null)}
-      if(e.key==='n'){e.preventDefault();setEditorDate(selected);setEditing(null)}
+      if(e.key==='n'){e.preventDefault();create(selected)}
       if(e.key==='t'){e.preventDefault();setSelected(localDate())}
       if(e.key==='/'){e.preventDefault();searchInput.current?.focus()}
+      if(e.key==='g'){e.preventDefault();jumpInput.current?.focus()}
+      const views:Mode[]=['month','week','day','agenda']
+      if(!e.ctrlKey&&!e.metaKey&&!e.altKey&&['1','2','3','4'].includes(e.key)){setMode(views[Number(e.key)-1])}
+      if(!e.ctrlKey&&!e.metaKey&&!e.altKey&&(e.key==='j'||e.key==='k')){
+        e.preventDefault()
+        const direction=e.key==='j'?1:-1
+        setSelected(s=>mode==='month'?addMonths(s,direction):addDays(s,direction*(mode==='week'?7:mode==='agenda'?agendaSpan:1)))
+      }
     }
     window.addEventListener('keydown',key);return ()=>window.removeEventListener('keydown',key)
-  },[selected])
+  },[selected,mode,agendaSpan])
   const visible=useMemo(()=>calendar.records.filter(x=>(filter==='all'||x.source===filter)&&
     (!query.trim()||[x.title,x.description,x.location,x.sourceCalendar??''].some(s=>s.toLowerCase().includes(query.toLowerCase().trim())))),[calendar,filter,query])
   const days=useMemo(()=>{
     const start=mode==='month'?monthGridStart(selected):mode==='week'?monday(selected):selected
-    return dateSeries(start,addDays(start,mode==='month'?41:mode==='week'?6:mode==='agenda'?13:0))
-  },[mode,selected])
+    return dateSeries(start,addDays(start,mode==='month'?41:mode==='week'?6:mode==='agenda'?agendaSpan-1:0))
+  },[mode,selected,agendaSpan])
   const title=mode==='month'?dateLabel(selected,{month:'long',year:'numeric'}):
     friendlyRange(days[0],days[days.length-1])
   const selectedEvents=dayOccurrences(visible,selected)
+  const searchMatches=useMemo(()=>{
+    if(!query.trim())return []
+    const q=query.toLocaleLowerCase().trim()
+    const matches=calendar.records.filter(x=>(filter==='all'||x.source===filter)&&
+      [x.title,x.description,x.location,x.sourceCalendar??''].some(v=>v.toLocaleLowerCase().includes(q)))
+    return occurrencesBetween(matches,selected,addDays(selected,364)).slice(0,30)
+  },[calendar,selected,query,filter])
   const sources=calendar.records.filter(x=>x.source==='ics').reduce<Record<string,number>>((a,x)=>{
     const key=x.sourceCalendar??'Imported';a[key]=(a[key]??0)+1;return a
   },{})
@@ -212,7 +238,7 @@ export default function App(){
     }catch(error){setNotice('Move failed: '+String(error))}
   }
   function step(direction:number){
-    setSelected(s=>mode==='month'?addMonths(s,direction):addDays(s,direction*(mode==='week'?7:mode==='agenda'?14:1)))
+    setSelected(s=>mode==='month'?addMonths(s,direction):addDays(s,direction*(mode==='week'?7:mode==='agenda'?agendaSpan:1)))
   }
   async function readIcs(e:ChangeEvent<HTMLInputElement>){
     const f=e.target.files?.[0];e.target.value='';if(!f)return
@@ -223,15 +249,42 @@ export default function App(){
     const f=e.target.files?.[0];e.target.value='';if(!f)return
     try{
       const next=importBackup(await f.text())
-      if(window.confirm('Restore this backup and replace all current device-local Calendar data?'))commit(next,'Backup restored',true)
+      setRestoreCandidate({state:next,origin:'JSON backup file: '+f.name})
+      setSourcePanel(false)
     }catch(error){setNotice('Backup rejected: '+String(error))}
   }
+  function proposeRecovery(){
+    try{
+      const snapshot=readRecovery()
+      if(!snapshot){setNotice('No previous-version checkpoint is available');return}
+      setRestoreCandidate({state:snapshot.state,origin:'Local checkpoint from '+new Date(snapshot.savedAt).toLocaleString()+' — '+snapshot.label})
+      setSourcePanel(false)
+    }catch(error){setNotice('Recovery checkpoint rejected: '+String(error))}
+  }
+  function confirmRestore(){
+    if(!restoreCandidate)return
+    if(commit(restoreCandidate.state,'Calendar restored from '+restoreCandidate.origin)){
+      setRestoreCandidate(null);setActive(null);setEditorDate(null);setPending(null)
+      setQuery('');setFilter('all');setSelected(localDate())
+    }
+  }
+  const importReview=useMemo(()=>{
+    if(!pending)return null
+    try{return {result:mergeIcs(calendar,pending,importMode),error:''}}
+    catch(error){return {result:null,error:error instanceof Error?error.message:String(error)}}
+  },[calendar,pending,importMode])
   function applyImport(){
     if(!pending)return
     const count=calendar.records.filter(x=>x.source==='ics'&&x.sourceCalendar===pending.name).length
     if(importMode==='replace'&&count>0&&!window.confirm('Replace all '+count+' imported copies from '+pending.name+' with this file? Personal events will be preserved.'))return
     const result=mergeIcs(calendar,pending,importMode)
     if(commit(result.state,`Imported ${result.added}; updated ${result.updated}; unchanged ${result.duplicates}; removed from prior snapshot ${result.removed}`))setPending(null)
+  }
+  function downloadUnreadable(){
+    const raw=rawCalendarBackup()
+    if(raw===null){setNotice('No raw calendar text found');return}
+    download('thiepn-calendar-raw-rescue.txt',raw,'text/plain')
+    setNotice('Downloaded the original unreadable bytes. Do not clear browser data until you have a valid backup.')
   }
   function removeSource(name:string){
     if(!window.confirm('Remove all local imported snapshots from '+name+'? Original source data are not modified.'))return
