@@ -13,6 +13,7 @@ import {AllDayDialog} from './components/AllDayDialog'
 import {RestoreDialog} from './components/RestoreDialog'
 import {ReminderCenter} from './components/ReminderCenter'
 import {reminderItems,readReminderActions,saveReminderActions,actionForReminder,deliverableReminders,REMINDER_ACTIONS_KEY,REMINDER_DELIVERED_KEY,type ReminderItem,type ReminderActions} from './core/reminders'
+import {DEFAULT_REMINDER_SETTINGS,loadReminderSettings,saveReminderSettings,inQuietHours,REMINDER_SETTINGS_KEY,type ReminderSettings} from './core/reminder-settings'
 import {applyAllDayChange,type AllDayProposal} from './core/all-day'
 import {CalendarViews,type Mode} from './components/CalendarViews'
 
@@ -27,6 +28,7 @@ const initial=loadState()
 export default function App(){
   const [calendar,setCalendar]=useState<CalendarState>(initial.state)
   const [remindersOpen,setRemindersOpen]=useState(false)
+  const [reminderSettings,setReminderSettings]=useState<ReminderSettings>(()=>{try{return loadReminderSettings()}catch{return DEFAULT_REMINDER_SETTINGS}})
   const [reminderActions,setReminderActions]=useState<ReminderActions>(()=>{try{return readReminderActions()}catch{return {}}})
   const [reminderNow,setReminderNow]=useState(()=>new Date().toISOString())
   const [notifyEnabled,setNotifyEnabled]=useState(()=>{try{return localStorage.getItem('thiepn.calendar.foreground-notify.v1')==='yes'}catch{return false}})
@@ -88,6 +90,17 @@ export default function App(){
   },[])
   const reminders=useMemo(()=>reminderItems(calendar,reminderNow,reminderActions),[calendar,reminderNow,reminderActions])
   const dueReminderCount=reminders.filter(x=>x.status==='due').length
+  const dismissedReminders=useMemo(()=>reminderItems(calendar,reminderNow,{}).filter(x=>reminderActions[x.key]?.kind==='dismiss'),[calendar,reminderNow,reminderActions])
+  function undoReminderDismissal(item:ReminderItem){
+    try{
+      const next=readReminderActions();delete next[item.key]
+      saveReminderActions(next);setReminderActions(next);setReminderNow(new Date().toISOString())
+    }catch(error){setNotice('Reminder dismissal not reversed: '+String(error))}
+  }
+  function changeReminderSettings(next:ReminderSettings){
+    try{saveReminderSettings(next);setReminderSettings(next)}
+    catch(error){setNotice('Reminder settings not saved: '+String(error))}
+  }
   function updateReminderAction(item:ReminderItem,kind:'dismiss'|'snooze',minutes=15){
     try{
       // Re-read right before changing independent reminder preferences, so other-tab changes are retained.
@@ -113,7 +126,7 @@ export default function App(){
     catch(error){setNotice('Notification preference could not be saved: '+String(error))}
   }
   useEffect(()=>{
-    if(!notifyEnabled||notifyPermission!=='granted'||typeof Notification==='undefined'||document.visibilityState!=='visible')return
+    if(!notifyEnabled||notifyPermission!=='granted'||typeof Notification==='undefined'||document.visibilityState!=='visible'||inQuietHours(reminderNow,reminderSettings.quietHours))return
     try{
       const raw=localStorage.getItem(REMINDER_DELIVERED_KEY)
       const delivered=new Set<string>(raw?JSON.parse(raw) as string[]:[])
@@ -128,10 +141,11 @@ export default function App(){
       }
       localStorage.setItem(REMINDER_DELIVERED_KEY,JSON.stringify(Array.from(next).slice(-250)))
     }catch(error){setNotice('Foreground notification unavailable: '+String(error))}
-  },[notifyEnabled,notifyPermission,reminders,reminderNow])
+  },[notifyEnabled,notifyPermission,reminders,reminderNow,reminderSettings.quietHours])
   useEffect(()=>{
     const sync=(e:StorageEvent)=>{
       if(e.key===REMINDER_ACTIONS_KEY){try{setReminderActions(readReminderActions())}catch{}}
+      if(e.key===REMINDER_SETTINGS_KEY){try{setReminderSettings(loadReminderSettings())}catch{}}
       if(e.key===STORAGE_KEY||e.key===null){const read=loadState();if(read.error){setNotice(read.error);setUnreadable(true)}
         else{setCalendar(read.state);setUnreadable(false)}
         try{setRecovery(readRecovery())}catch{setRecovery(null)}}
@@ -464,13 +478,13 @@ export default function App(){
     </div>
     <input ref={importInput} type="file" accept=".ics,text/calendar" hidden onChange={readIcs}/>
     <input ref={restoreInput} type="file" accept=".json,application/json" hidden onChange={readBackup}/>
-    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate+(newEventRange?.start??'')+(newAllDay?.through??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} initialAllDay={newAllDay??undefined} records={calendar.records} isCopy={copyDraft}
+    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate+(newEventRange?.start??'')+(newAllDay?.through??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} initialAllDay={newAllDay??undefined} records={calendar.records} isCopy={copyDraft} defaultReminderMinutes={reminderSettings.defaultLead}
       ignoreOccurrence={editInstance?{id:editInstance.parentId,date:editInstance.date}:undefined}
       ignoreParentFrom={editFuture?{id:editFuture.parentId,date:editFuture.date}:undefined}
       scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)}}/>}
     {restoreCandidate&&<RestoreDialog current={calendar} candidate={restoreCandidate.state} origin={restoreCandidate.origin} unreadableCurrent={unreadable}
       onClose={()=>setRestoreCandidate(null)} onConfirm={confirmRestore}/>}
-    {remindersOpen&&<ReminderCenter items={reminders} onClose={()=>setRemindersOpen(false)}
+    {remindersOpen&&<ReminderCenter items={reminders} dismissed={dismissedReminders} settings={reminderSettings} onSettingsChange={changeReminderSettings} onUndoDismiss={undoReminderDismissal} onClose={()=>setRemindersOpen(false)}
       onOpen={item=>{setRemindersOpen(false);setMode('day');open(item.occurrence)}}
       onDismiss={item=>updateReminderAction(item,'dismiss')}
       onSnooze={(item,minutes)=>updateReminderAction(item,'snooze',minutes)}

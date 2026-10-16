@@ -192,3 +192,13 @@
 .reminder-actions button{background:#f3f8f3;border:1px solid #cbdccc;color:#486f51;padding:7px;cursor:pointer;min-height:34px}
 .reminder-actions button:focus-visible,.reminder-visit:focus-visible{outline:2px solid #387c4c}
 @media(max-width:740px){.reminder-dialog{width:min(96vw,680px);padding:14px}.reminder-entry{flex-direction:column;align-items:stretch}.reminder-actions button{flex:1;min-height:42px}.reminder-launch .desktop-text{display:none}}
+
+/* C10 per-device reminder defaults, quiet time and reversible dismissals */
+.reminder-local-settings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0;padding:12px;background:#f7faf8;border:1px solid #d3e1d8}
+.reminder-local-settings label{display:grid;gap:6px;font-size:11px;font-weight:650}
+.reminder-local-settings select{border:1px solid #bfcfc2;padding:9px;color:#2b5139;background:#fff}
+.reminder-local-settings p{grid-column:1/-1;font-size:11px;line-height:1.5;color:#617366;margin:0}
+.dismissed-reminders{margin:15px 0;border-top:1px solid #dbe6dc;padding-top:8px}
+.dismissed-reminders summary{font-size:12px;font-weight:650;cursor:pointer;margin:8px 0}
+.dismissed-reminders .reminder-entry{margin:5px 0}
+@media(max-width:650px){.reminder-local-settings{grid-template-columns:1fr}}

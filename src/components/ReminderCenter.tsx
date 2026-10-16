@@ -1,7 +1,12 @@
 import {Bell,Clock3,X} from 'lucide-react'
 import type {ReminderItem} from '../core/reminders'
+import type {ReminderSettings} from '../core/reminder-settings'
 type Props={
   items:ReminderItem[]
+  dismissed:ReminderItem[]
+  settings:ReminderSettings
+  onSettingsChange:(value:ReminderSettings)=>void
+  onUndoDismiss:(item:ReminderItem)=>void
   onClose:()=>void
   onOpen:(item:ReminderItem)=>void
   onDismiss:(item:ReminderItem)=>void
@@ -11,7 +16,7 @@ type Props={
   foregroundEnabled:boolean
   onDisableNotifications:()=>void
 }
-export function ReminderCenter({items,onClose,onOpen,onDismiss,onSnooze,onEnableNotifications,permission,foregroundEnabled,onDisableNotifications}:Props){
+export function ReminderCenter({items,dismissed,settings,onSettingsChange,onUndoDismiss,onClose,onOpen,onDismiss,onSnooze,onEnableNotifications,permission,foregroundEnabled,onDisableNotifications}:Props){
   const due=items.filter(x=>x.status==='due')
   const upcoming=items.filter(x=>x.status==='upcoming')
   const time=(iso:string)=>new Date(iso).toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})
@@ -40,12 +45,30 @@ export function ReminderCenter({items,onClose,onOpen,onDismiss,onSnooze,onEnable
             <><p>Optional desktop alerts only while this tab is open and visible. No background service or push notifications are installed.</p>
               <button type="button" className="secondary small" onClick={onEnableNotifications}>Enable foreground desktop alerts</button></>}
       </div>
+      <div className="reminder-local-settings">
+        <label>Default reminder on new events
+          <select aria-label="Default reminder on new events" value={settings.defaultLead} onChange={e=>onSettingsChange({...settings,defaultLead:Number(e.target.value)})}>
+            <option value={-1}>No reminder</option><option value={0}>At event start</option><option value={15}>15 minutes</option>
+            <option value={30}>30 minutes</option><option value={60}>1 hour</option><option value={1440}>1 day</option>
+          </select></label>
+        <label>Foreground alert quiet hours
+          <select aria-label="Foreground alert quiet hours" value={settings.quietHours} onChange={e=>onSettingsChange({...settings,quietHours:e.target.value as ReminderSettings['quietHours']})}>
+            <option value="off">Off</option><option value="22-07">22:00–07:00</option><option value="00-08">00:00–08:00</option>
+          </select></label>
+        <p>Quiet hours suppress only optional foreground desktop notifications on this device; due items stay visible here. Suppressed alerts are not guaranteed to be delivered later.</p>
+      </div>
       <div className="reminder-groups">
         <h3>Due now or overdue <span>{due.length}</span></h3>
         {due.length?due.map(render):<p className="empty-note">No due reminders in the past 24 hours.</p>}
         <h3>Upcoming <span>{upcoming.length}</span></h3>
         {upcoming.length?upcoming.map(render):<p className="empty-note">No upcoming reminders in the next 14 days. Set a reminder while creating a personal event.</p>}
       </div>
+      {dismissed.length>0&&<details className="dismissed-reminders"><summary>Dismissed reminders ({dismissed.length})</summary>
+        {dismissed.map(item=><div key={item.key} className="reminder-entry">
+          <span className="reminder-visit"><strong>{item.occurrence.title}</strong><small>Dismissed · {time(item.dueAt)}</small></span>
+          <button type="button" className="secondary small" onClick={()=>onUndoDismiss(item)} aria-label={'Restore reminder '+item.occurrence.title}>Restore reminder</button>
+        </div>)}
+      </details>}
       {items.length>=150&&<p className="fine-print">Showing the first 150 reminders only; narrow the date range before relying on this list.</p>}
       <footer className="editor-actions"><button className="secondary" type="button" onClick={onClose}>Close</button></footer>
     </section>

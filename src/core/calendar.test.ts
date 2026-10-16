@@ -10,6 +10,7 @@ import {validateState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCa
 import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent,splitSeriesAt,endSeriesAt} from './series'
 import {layoutTimedDay,slotRange,dayAxis,slotAt} from './timeline'
 import {findFreeSlots} from './availability'
+import {DEFAULT_REMINDER_SETTINGS,validateReminderSettings,inQuietHours} from './reminder-settings'
 import {reminderItems,reminderKey,actionForReminder,deliverableReminders} from './reminders'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 const record=(patch:Partial<CalendarRecord>={}):CalendarRecord=>({
@@ -599,5 +600,17 @@ describe('C10 finite timed ICS source clocks, identity, and safe rejection',()=>
     const bounded=unbounded.replace('RRULE:FREQ=DAILY','RRULE:FREQ=DAILY;UNTIL=20261021T100000Z')
     expect(previewIcs(bounded).records.map(r=>r.start)).toEqual([
       '2026-10-19T10:00:00.000Z','2026-10-20T10:00:00.000Z','2026-10-21T10:00:00.000Z'])
+  })
+})
+
+describe('C10 reversible local reminder settings',()=>{
+  it('validates per-device defaults and overnight quiet periods without hiding due events',()=>{
+    expect(validateReminderSettings(DEFAULT_REMINDER_SETTINGS).defaultLead).toBe(-1)
+    expect(validateReminderSettings({defaultLead:15,quietHours:'22-07'}).defaultLead).toBe(15)
+    expect(()=>validateReminderSettings({defaultLead:7,quietHours:'off'})).toThrow('Invalid')
+    expect(inQuietHours(fromLocalDateTime('2026-10-16T23:30'),'22-07')).toBe(true)
+    expect(inQuietHours(fromLocalDateTime('2026-10-17T06:30'),'22-07')).toBe(true)
+    expect(inQuietHours(fromLocalDateTime('2026-10-17T12:30'),'22-07')).toBe(false)
+    expect(inQuietHours(fromLocalDateTime('2026-10-17T12:30'),'off')).toBe(false)
   })
 })

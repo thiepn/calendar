@@ -4,12 +4,12 @@ import type {CalendarRecord,Frequency,LocalDate,RepeatRule} from '../types'
 import {addDays,day,localDateTime,dateLabel,localInstantOptions,offsetLabel} from '../core/dates'
 import {draftTimedRange,reviewDraft} from '../core/draft'
 const weekdays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
-type Props={date:LocalDate;event?:CalendarRecord;initialRange?:{start:string;end:string};initialAllDay?:{from:LocalDate;through:LocalDate};records:CalendarRecord[];ignoreOccurrence?:{id:string;date:LocalDate};ignoreParentFrom?:{id:string;date:LocalDate};scope?:'instance'|'future';isCopy?:boolean;onSave:(record:CalendarRecord)=>void;onClose:()=>void}
-export function EventEditor({date,event,initialRange,initialAllDay,records,ignoreOccurrence,ignoreParentFrom,scope,isCopy=false,onSave,onClose}:Props){
+type Props={date:LocalDate;event?:CalendarRecord;initialRange?:{start:string;end:string};initialAllDay?:{from:LocalDate;through:LocalDate};records:CalendarRecord[];ignoreOccurrence?:{id:string;date:LocalDate};ignoreParentFrom?:{id:string;date:LocalDate};scope?:'instance'|'future';isCopy?:boolean;defaultReminderMinutes?:number;onSave:(record:CalendarRecord)=>void;onClose:()=>void}
+export function EventEditor({date,event,initialRange,initialAllDay,records,ignoreOccurrence,ignoreParentFrom,scope,isCopy=false,defaultReminderMinutes=-1,onSave,onClose}:Props){
   const [title,setTitle]=useState(event?.title??'')
   const [description,setDescription]=useState(event?.description??'')
   const [location,setLocation]=useState(event?.location??'')
-  const [reminder,setReminder]=useState<number>(event?.reminderMinutes??-1)
+  const [reminder,setReminder]=useState<number>(event?.reminderMinutes??(event?-1:defaultReminderMinutes))
   const [allDay,setAllDay]=useState(event?.allDay??Boolean(initialAllDay))
   const [start,setStart]=useState(event ? event.allDay?event.startDate!:localDateTime(event.start) : initialAllDay?initialAllDay.from:initialRange?localDateTime(initialRange.start):date+'T09:00')
   const [end,setEnd]=useState(event ? event.allDay?addDays(event.endDateExclusive!,-1):localDateTime(event.end) : initialAllDay?initialAllDay.through:initialRange?localDateTime(initialRange.end):date+'T10:00')
