@@ -1,6 +1,7 @@
 import {describe,it,expect} from 'vitest'
 import type {CalendarRecord,CalendarState} from '../types'
-import {addDays,daysBetween,fromLocalDateTime} from './dates'
+import {addDays,daysBetween,fromLocalDateTime,fromUnambiguousLocalDateTime} from './dates'
+import {proposeTimedChange,applyTimedChange,nudgeTimed} from './reschedule'
 import {occurrencesBetween,excludeOccurrence,conflictsOnDay} from './occurrences'
 import {previewIcs,mergeIcs,exportIcs} from './ics'
 import {validateState} from './storage'
@@ -174,5 +175,68 @@ describe('Future-only recurring series changes',()=>{
     expect(ended.records[1].recurrenceParentId).toBeUndefined()
     expect(validateState(ended).records).toHaveLength(2)
     expect(occurrencesBetween(ended.records,'2026-10-15','2026-10-15')).toHaveLength(0)
+  })
+})
+
+describe('C5 interactive rescheduling and DST integrity',()=>{
+  it('flags collisions across filtered-out imported and recurring sources without changing them',()=>{
+    const itemRecord=record({start:fromLocalDateTime('2026-10-19T09:00'),end:fromLocalDateTime('2026-10-19T10:00')})
+    const hidden=record({id:'ics-lecture',source:'ics',start:fromLocalDateTime('2026-10-19T10:30'),
+      end:fromLocalDateTime('2026-10-19T11:30')})
+    const state:CalendarState={schemaVersion:1,records:[itemRecord,hidden]}
+    const item=occurrencesBetween([itemRecord],'2026-10-19','2026-10-19')[0]
+    const proposal=proposeTimedChange(state,item,'move','2026-10-19',630,60)
+    expect(proposal.conflicts.map(x=>x.recordId)).toEqual(['ics-lecture'])
+    const next=applyTimedChange(state,proposal,()=> 'unused')
+    expect(next.records.find(r=>r.id==='ics-lecture')).toEqual(hidden)
+    expect(next.records.find(r=>r.id==='test')?.start).toBe(proposal.start)
+  })
+  it('changes exactly one recurring occurrence and preserves source ID and exceptions',()=>{
+    const parent=record({repeat:{frequency:'daily',interval:1}})
+    const original:CalendarState={schemaVersion:1,records:[parent]}
+    const item=occurrencesBetween(original.records,'2026-10-20','2026-10-20')[0]
+    const proposal=proposeTimedChange(original,item,'resize','2026-10-20',540,90)
+    const next=applyTimedChange(original,proposal,()=> 'detached')
+    expect(next.records.find(r=>r.id==='test')?.repeat?.frequency).toBe('daily')
+    expect(next.records.find(r=>r.id==='test')?.excludedDates).toContain('2026-10-20')
+    expect(next.records.find(r=>r.id==='detached')?.recurrenceParentId).toBe('test')
+    expect(next.records.find(r=>r.id==='detached')?.recurrenceDate).toBe('2026-10-20')
+    expect(Date.parse(next.records[1].end)-Date.parse(next.records[1].start)).toBe(90*60000)
+  })
+  it('updates an already detached event without breaking original instance linkage',()=>{
+    const parent=record({repeat:{frequency:'daily',interval:1}})
+    const original:CalendarState={schemaVersion:1,records:[parent]}
+    const item=occurrencesBetween(original.records,'2026-10-20','2026-10-20')[0]
+    const initial=applyTimedChange(original,proposeTimedChange(original,item,'move','2026-10-20',630,60),()=> 'override')
+    const isolated=occurrencesBetween([initial.records[1]],'2026-10-20','2026-10-20')[0]
+    const next=applyTimedChange(initial,proposeTimedChange(initial,isolated,'move','2026-10-21',660,60),()=> 'never')
+    expect(validateState(next).records).toHaveLength(2)
+    expect(next.records[1].id).toBe('override')
+    expect(next.records[1].recurrenceDate).toBe('2026-10-20')
+    expect(next.records[1].recurrenceParentId).toBe('test')
+  })
+  it('rejects editing read-only ICS and stale event details',()=>{
+    const ics=record({source:'ics'})
+    const item=occurrencesBetween([ics],'2026-10-12','2026-10-12')[0]
+    expect(()=>proposeTimedChange({schemaVersion:1,records:[ics]},item,'move','2026-10-12',600,60)).toThrow('personal')
+    const mine=record()
+    const original=occurrencesBetween([mine],'2026-10-12','2026-10-12')[0]
+    const state:CalendarState={schemaVersion:1,records:[mine]}
+    const proposal=proposeTimedChange(state,original,'move','2026-10-12',660,60)
+    expect(()=>applyTimedChange({...state,records:[{...mine,title:'Changed'}]},proposal,()=> 'x')).toThrow('changed')
+  })
+  it('distinguishes nonexistent and repeated DST times in the Europe/Berlin zone when configured',()=>{
+    if(Intl.DateTimeFormat().resolvedOptions().timeZone==='Europe/Berlin'){
+      expect(()=>fromUnambiguousLocalDateTime('2026-03-29T02:30')).toThrow()
+      expect(()=>fromUnambiguousLocalDateTime('2026-10-25T02:30')).toThrow('twice')
+      expect(fromUnambiguousLocalDateTime('2026-10-25T03:30')).toBeTruthy()
+      expect(()=>slotRange('2026-10-25',150,60)).toThrow('twice')
+    }
+  })
+  it('offers deterministic keyboard equivalents for move and resize',()=>{
+    const item=occurrencesBetween([record()],'2026-10-12','2026-10-12')[0]
+    expect(nudgeTimed(item,'2026-10-12','later')).toMatchObject({minute:630,length:60,kind:'move'})
+    expect(nudgeTimed(item,'2026-10-12','longer')).toMatchObject({minute:600,length:90,kind:'resize'})
+    expect(nudgeTimed(item,'2026-10-12','next-day').date).toBe('2026-10-13')
   })
 })

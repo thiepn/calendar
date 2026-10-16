@@ -1,5 +1,5 @@
 import type { CalendarOccurrence, LocalDate } from '../types'
-import { addDays, day, fromLocalDateTime, localDate } from './dates'
+import { addDays, day, fromUnambiguousLocalDateTime, localDate } from './dates'
 
 export const SLOT_MINUTES=30
 export const TIMELINE_HOUR_HEIGHT=64
@@ -20,7 +20,7 @@ export function slotRange(date:LocalDate,minute:number,length:number):{start:str
     !Number.isInteger(length)||length<30||length>240||length%30!==0)throw new Error('Invalid time slot')
   const hours=String(Math.floor(minute/60)).padStart(2,'0')
   const minutes=String(minute%60).padStart(2,'0')
-  const start=fromLocalDateTime(date+'T'+hours+':'+minutes)
+  const start=fromUnambiguousLocalDateTime(date+'T'+hours+':'+minutes)
   const end=new Date(Date.parse(start)+length*60000).toISOString()
   return {start,end}
 }

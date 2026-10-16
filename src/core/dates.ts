@@ -39,6 +39,18 @@ export function fromLocalDateTime(value:string):string {
   if (!Number.isFinite(d.getTime()) || localDateTime(d.toISOString())!==value) throw new Error('Time does not exist in this time zone')
   return d.toISOString()
 }
+/** Reject nonexistent and duplicated local clock times on DST transitions.
+ * Device zone is authoritative for this standalone local-only planner. */
+export function fromUnambiguousLocalDateTime(value:string):string {
+  const iso=fromLocalDateTime(value)
+  const time=Date.parse(iso)
+  for(let offset=-180;offset<=180;offset+=15){
+    if(!offset)continue
+    if(localDateTime(new Date(time+offset*60000).toISOString())===value)
+      throw new Error('This local time occurs twice during a daylight-saving transition. Use a different time.')
+  }
+  return iso
+}
 export function displayTime(iso:string):string {
   return new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit'}).format(new Date(iso))
 }
