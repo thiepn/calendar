@@ -125,7 +125,7 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
     if(active.kind==='create'){
       const range=slot(result.date,result.minute,result.length)
       if(range)onSlot(result.date,range.start,range.end)
-    }else if(active.item){
+    }else if(active.item&&(active.kind==='move'||active.kind==='resize')){
       onAdjust(active.item,active.kind,result.date,result.minute,result.length)
     }
   }
