@@ -25,7 +25,7 @@ function instantiate(record:CalendarRecord,date:LocalDate):CalendarOccurrence|nu
   const length=record.allDay ? daysBetween(record.startDate!,record.endDateExclusive!) :
     Math.ceil((Date.parse(record.end)-Date.parse(record.start))/86400000)
   const endDateExclusive=addDays(date,Math.max(1,length))
-  const start=record.allDay ? new Date(date+'T00:00:00').toISOString() : dateTimeOn(date,record.start)
+  const start=record.allDay ? new Date(date+'T00:00:00').toISOString() : date===anchorOf(record)?record.start:dateTimeOn(date,record.start)
   if(!start) return null
   const end=record.allDay ? new Date(endDateExclusive+'T00:00:00').toISOString() :
     new Date(Date.parse(start)+(Date.parse(record.end)-Date.parse(record.start))).toISOString()

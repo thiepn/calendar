@@ -232,7 +232,7 @@ describe('C5 interactive rescheduling and DST integrity',()=>{
       expect(()=>fromUnambiguousLocalDateTime('2026-03-29T02:30')).toThrow()
       expect(()=>fromUnambiguousLocalDateTime('2026-10-25T02:30')).toThrow('twice')
       expect(fromUnambiguousLocalDateTime('2026-10-25T03:30')).toBeTruthy()
-      expect(()=>slotRange('2026-10-25',150,60)).toThrow('twice')
+      expect(slotRange('2026-10-25',150,60).start).toBe(localInstantOptions('2026-10-25T02:30')[0])
     }
   })
   it('offers deterministic keyboard equivalents for move and resize',()=>{
@@ -346,7 +346,7 @@ describe('C7 real elapsed-time DST graphical axis and fold selection',()=>{
     expect(blocks[1].lanes).toBe(1)
   })
   it('supports full-year conflict review without claiming a lifetime clean series',()=>{
-    const future=record({id:'hidden',source:'ics',start:fromLocalDateTime('2027-09-06T09:00'),end:fromLocalDateTime('2027-09-06T10:00')})
+    const future=record({id:'hidden',source:'ics',start:fromLocalDateTime('2027-09-06T10:00'),end:fromLocalDateTime('2027-09-06T11:00')})
     const daily=record({id:'candidate',repeat:{frequency:'weekly',interval:1}})
     const check=reviewDraft([future],daily,{horizonDays:365})
     expect(check.checkedThrough).toBe('2027-10-11')
