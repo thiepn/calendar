@@ -10,11 +10,13 @@ import {validateState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCa
 import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent,splitSeriesAt,endSeriesAt} from './series'
 import {layoutTimedDay,slotRange,dayAxis,slotAt} from './timeline'
 import {findFreeSlots} from './availability'
-import {DEFAULT_REMINDER_SETTINGS,validateReminderSettings,inQuietHours} from './reminder-settings'
+import {DEFAULT_REMINDER_SETTINGS,validateReminderSettings,inQuietHours,foregroundNotificationText} from './reminder-settings'
 import {validateViewPreferences,loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY} from './view-preferences'
 import {reminderItems,reminderKey,actionForReminder,deliverableReminders,proposedSnooze,dismissReminderBatch} from './reminders'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {adjacentBusyDay,exportAgendaCsv} from './agenda'
+import {previewMissingPersonal} from './recover-missing'
+import {personalDraftFromImported} from './personal-copy'
 const record=(patch:Partial<CalendarRecord>={}):CalendarRecord=>({
   id:'test',title:'Study',description:'',location:'',source:'personal',
   start:fromLocalDateTime('2026-10-12T10:00'),end:fromLocalDateTime('2026-10-12T11:00'),
@@ -826,5 +828,113 @@ describe('C11 source-owned RDATE, agenda and reminder triage',()=>{
     expect(reminderItems(state,now,next,14,7)).toHaveLength(0)
     expect(()=>dismissReminderBatch({},[])).toThrow('Review')
     expect(()=>reminderItems(state,now,{},14,8)).toThrow('Invalid')
+  })
+})
+
+
+describe('C12 bounded source-owned monthly BYMONTHDAY interoperability',()=>{
+  it('expands last-day-of-month rules across short months without date drift',()=>{
+    const rule=parseFiniteAllDayRule('FREQ=MONTHLY;COUNT=5;BYMONTHDAY=-1','2026-01-31')
+    expect(expandFiniteAllDay('2026-01-31',rule)).toEqual([
+      '2026-01-31','2026-02-28','2026-03-31','2026-04-30','2026-05-31'])
+  })
+  it('supports a bounded selector list and truly skipped 31st-day months',()=>{
+    expect(expandFiniteAllDay('2026-01-15',parseFiniteAllDayRule(
+      'FREQ=MONTHLY;COUNT=5;BYMONTHDAY=15,-1','2026-01-15'))).toEqual([
+        '2026-01-15','2026-01-31','2026-02-15','2026-02-28','2026-03-15'])
+    expect(expandFiniteAllDay('2026-01-31',parseFiniteAllDayRule(
+      'FREQ=MONTHLY;COUNT=3;BYMONTHDAY=31','2026-01-31'))).toEqual([
+        '2026-01-31','2026-03-31','2026-05-31'])
+  })
+  it('preserves original imported source TZID and UID for end-of-month course series',()=>{
+    const input=['BEGIN:VCALENDAR','X-WR-CALNAME:End of month',
+      'BEGIN:VEVENT','UID:month-1','SUMMARY:Accounts',
+      'DTSTART;TZID=Europe/Berlin:20260131T100000','DTEND;TZID=Europe/Berlin:20260131T110000',
+      'RRULE:FREQ=MONTHLY;COUNT=4;BYMONTHDAY=-1','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const p=previewIcs(input)
+    expect(p.skippedEvents).toBe(0)
+    expect(p.records.map(r=>r.start)).toEqual([
+      '2026-01-31T09:00:00.000Z','2026-02-28T09:00:00.000Z',
+      '2026-03-31T08:00:00.000Z','2026-04-30T08:00:00.000Z'])
+    expect(p.records.every(r=>r.source==='ics'&&r.sourceCalendar==='End of month'&&r.repeat===undefined)).toBe(true)
+    const first=mergeIcs({schemaVersion:1,records:[record({id:'personal'})]},p).state
+    const refresh=mergeIcs(first,previewIcs(input),'update')
+    expect(refresh.duplicates).toBe(4)
+    expect(refresh.state.records.map(r=>r.id)).toEqual(first.records.map(r=>r.id))
+  })
+  it('rejects unsupported monthly selectors and mismatching DTSTART rather than guessing',()=>{
+    for(const rule of [
+      'FREQ=WEEKLY;COUNT=3;BYMONTHDAY=-1',
+      'FREQ=MONTHLY;COUNT=3;BYMONTHDAY=0',
+      'FREQ=MONTHLY;COUNT=3;BYMONTHDAY=32',
+      'FREQ=MONTHLY;COUNT=3;BYMONTHDAY=15,15',
+      'FREQ=MONTHLY;COUNT=3;BYMONTHDAY=-31',
+      'FREQ=MONTHLY;COUNT=3;BYMONTHDAY=-1;BYDAY=MO'
+    ])expect(()=>parseFiniteAllDayRule(rule,'2026-01-15')).toThrow()
+    const input=['BEGIN:VCALENDAR','BEGIN:VEVENT','UID:wrong-day','SUMMARY:Unsafe',
+      'DTSTART;VALUE=DATE:20260115','DTEND;VALUE=DATE:20260116',
+      'RRULE:FREQ=MONTHLY;COUNT=3;BYMONTHDAY=-1','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    expect(previewIcs(input).records).toHaveLength(0)
+    expect(previewIcs(input).skippedEvents).toBe(1)
+  })
+})
+
+describe('C12 additive personal recovery and imported-personal draft isolation',()=>{
+  it('restores only original missing personal IDs with detached exceptions without touching current provider IDs',()=>{
+    const imported=record({id:'ics-one',source:'ics',sourceCalendar:'University',sourceKey:'Uni|123'})
+    const retained=record({id:'present',title:'Edited after backup'})
+    const parent=record({id:'weekly',repeat:{frequency:'weekly',interval:1},excludedDates:['2026-10-19']})
+    const edited=record({id:'detached',recurrenceParentId:'weekly',recurrenceDate:'2026-10-19'})
+    const current:CalendarState={schemaVersion:1,records:[imported,retained]}
+    const backup:CalendarState={schemaVersion:1,records:[{...retained,title:'Old title'},parent,edited]}
+    const review=previewMissingPersonal(current,backup)
+    expect(review.added.map(r=>r.id)).toEqual(['weekly','detached'])
+    expect(review.state.records.slice(0,2)).toEqual(current.records)
+    expect(review.state.records[0]).toBe(imported)
+    expect(review.state.records[1]).toBe(retained)
+    expect(validateState(review.state).records).toHaveLength(4)
+    expect(previewMissingPersonal(review.state,backup).added).toHaveLength(0)
+  })
+  it('refuses restoring detached exceptions into a changed incompatible parent',()=>{
+    const parent=record({id:'weekly',repeat:{frequency:'weekly',interval:1},excludedDates:['2026-10-19']})
+    const edited=record({id:'detached',recurrenceParentId:'weekly',recurrenceDate:'2026-10-19'})
+    const old:CalendarState={schemaVersion:1,records:[parent,edited]}
+    const current:CalendarState={schemaVersion:1,records:[{...parent,excludedDates:[]}]}
+    expect(()=>previewMissingPersonal(current,old)).toThrow('Detached event')
+    expect(current.records).toHaveLength(1)
+  })
+  it('prepares a source-disconnected personal draft without editing the original imported occurrence',()=>{
+    const imported=record({id:'ics-lecture',source:'ics',sourceCalendar:'School',sourceKey:'School|lecture',
+      title:'Guest lecture'})
+    const occ=occurrencesBetween([imported],'2026-10-12','2026-10-12')[0]
+    const copy=personalDraftFromImported(occ,'private-lecture',15)
+    expect(copy.id).toBe('private-lecture')
+    expect(copy.source).toBe('personal')
+    expect(copy.title).toBe('Guest lecture')
+    expect(copy.reminderMinutes).toBe(15)
+    expect(copy.sourceCalendar).toBeUndefined()
+    expect(copy.sourceKey).toBeUndefined()
+    expect(copy.repeat).toBeUndefined()
+    expect(copy.recurrenceParentId).toBeUndefined()
+    const state=mergeIcs({schemaVersion:1,records:[copy,imported]},previewIcs([
+      'BEGIN:VCALENDAR','X-WR-CALNAME:School','BEGIN:VEVENT','UID:lecture',
+      'SUMMARY:External new title','DTSTART:20261012T100000Z',
+      'DTEND:20261012T110000Z','END:VEVENT','END:VCALENDAR'].join('\r\n'))).state
+    expect(state.records[0]).toEqual(copy)
+    expect(state.records[1]).toEqual(imported)
+    expect(()=>personalDraftFromImported({...occ,source:'personal'},'other')).toThrow('imported')
+  })
+})
+describe('C12 lock-screen privacy and legacy reminder settings',()=>{
+  it('defaults pre-C12 preferences to generic notifications without leaking title/time',()=>{
+    const prior=validateReminderSettings({defaultLead:15,quietHours:'22-07'})
+    expect(prior.notificationPreview).toBe('private')
+    expect(foregroundNotificationText('Confidential therapy','2026-10-12T09:00:00.000Z',prior))
+      .toEqual({title:'THIEPN Calendar reminder',body:'Open Calendar to review your local reminder.'})
+    const detailed=validateReminderSettings({...prior,notificationPreview:'details'})
+    const content=foregroundNotificationText('Client visit','2026-10-12T09:00:00.000Z',detailed)
+    expect(content.title).toContain('Client visit')
+    expect(content.body).toContain('Local reminder')
+    expect(()=>validateReminderSettings({...prior,notificationPreview:'remote'})).toThrow('Invalid')
   })
 })
