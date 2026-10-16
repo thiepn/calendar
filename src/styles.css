@@ -164,3 +164,10 @@
 .restore-dialog .primary:disabled,.button-stack button:disabled{opacity:.4;cursor:not-allowed}
 .import-delta{border:1px solid #bad2bd;background:#edf7ee;padding:10px;font-size:12px;line-height:1.5}
 @media(max-width:740px){.date-navigation{flex-wrap:wrap}.date-jump{width:100%}.search-results-items{max-height:170px}.restore-compare{grid-template-columns:1fr;gap:6px}.restore-dialog{max-height:90dvh;overflow:auto}}
+
+/* C8 compact discoverable keyboard help */
+.calendar-shortcuts{flex-basis:100%;font-size:11px;color:#6b836f;margin:2px 0;position:relative}
+.calendar-shortcuts summary{cursor:pointer;width:max-content;list-style-position:inside}
+.calendar-shortcuts summary:focus-visible{outline:2px solid #3f8157}
+.calendar-shortcuts p{padding:9px 12px;margin:5px 0;border:1px solid #cfdbd0;background:#f8faf7;line-height:1.6;color:#46624d;max-width:650px}
+.restore-corrupt{font-size:12px;color:#873b24;background:#fff3e9;border:1px solid #e8c6ab;padding:10px;line-height:1.5}
