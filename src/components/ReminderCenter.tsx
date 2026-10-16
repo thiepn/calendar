@@ -63,6 +63,13 @@ export function ReminderCenter({items,dismissed,snoozedKeys,settings,onSettingsC
           <select aria-label="Foreground alert quiet hours" value={settings.quietHours} onChange={e=>onSettingsChange({...settings,quietHours:e.target.value as ReminderSettings['quietHours']})}>
             <option value="off">Off</option><option value="22-07">22:00–07:00</option><option value="00-08">00:00–08:00</option>
           </select></label>
+        <label>Desktop notification preview privacy
+          <select aria-label="Desktop notification preview privacy" value={settings.notificationPreview}
+            onChange={e=>onSettingsChange({...settings,notificationPreview:e.target.value as ReminderSettings['notificationPreview']})}>
+            <option value="private">Private — no event title or time</option>
+            <option value="details">Show event title and time</option>
+          </select></label>
+        <p>Private previews hide event titles and dates from optional operating-system notifications, including on a locked screen. The in-app reminder center always shows your locally stored details.</p>
         <p>Quiet hours suppress only optional foreground desktop notifications on this device; due items stay visible here. Suppressed alerts are not guaranteed to be delivered later.</p>
       </div>
       <div className="reminder-triage">

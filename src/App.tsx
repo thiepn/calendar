@@ -16,7 +16,7 @@ import {ReminderCenter} from './components/ReminderCenter'
 import {OfflineReadiness} from './components/OfflineReadiness'
 import {loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY,type ViewPreferences} from './core/view-preferences'
 import {reminderItems,readReminderActions,saveReminderActions,actionForReminder,deliverableReminders,proposedSnooze,dismissReminderBatch,REMINDER_ACTIONS_KEY,REMINDER_DELIVERED_KEY,type ReminderItem,type ReminderActions} from './core/reminders'
-import {DEFAULT_REMINDER_SETTINGS,loadReminderSettings,saveReminderSettings,inQuietHours,REMINDER_SETTINGS_KEY,type ReminderSettings} from './core/reminder-settings'
+import {DEFAULT_REMINDER_SETTINGS,loadReminderSettings,saveReminderSettings,inQuietHours,foregroundNotificationText,REMINDER_SETTINGS_KEY,type ReminderSettings} from './core/reminder-settings'
 import {applyAllDayChange,type AllDayProposal} from './core/all-day'
 import {CalendarViews,type Mode} from './components/CalendarViews'
 
@@ -158,12 +158,12 @@ export default function App(){
       for(const item of pending){
         const identity=item.key+'@'+item.dueAt
         next.add(identity)
-        new Notification('THIEPN Calendar · '+item.occurrence.title,{
-          body:'Local reminder · '+new Date(item.occurrence.start).toLocaleString(),tag:identity})
+        const contents=foregroundNotificationText(item.occurrence.title,item.occurrence.start,reminderSettings)
+        new Notification(contents.title,{body:contents.body,tag:identity})
       }
       localStorage.setItem(REMINDER_DELIVERED_KEY,JSON.stringify(Array.from(next).slice(-250)))
     }catch(error){setNotice('Foreground notification unavailable: '+String(error))}
-  },[notifyEnabled,notifyPermission,reminders,reminderNow,reminderSettings.quietHours])
+  },[notifyEnabled,notifyPermission,reminders,reminderNow,reminderSettings])
   useEffect(()=>{
     try{saveViewPreferences({mode,filter,agendaSpan,agendaBusyOnly})}
     catch(error){setNotice('Display preferences could not be saved: '+String(error))}
