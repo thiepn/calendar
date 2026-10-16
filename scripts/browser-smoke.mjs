@@ -1019,6 +1019,118 @@ async function exerciseC11MobileOverdueTriage(){
   await context.close()
 }
 
+
+async function exerciseC12DesktopMonthlyPersonalWorkflow(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const ics=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C12 Monthly Source','BEGIN:VEVENT',
+    'UID:c12-lastday','SUMMARY:C12 Monthclose',
+    'DTSTART;TZID=Europe/Berlin:20260131T100000','DTEND;TZID=Europe/Berlin:20260131T110000',
+    'RRULE:FREQ=MONTHLY;COUNT=4;BYMONTHDAY=-1','END:VEVENT','END:VCALENDAR'].join('\r\n')
+  const choose=()=>page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'c12.ics',mimeType:'text/calendar',buffer:Buffer.from(ics)})
+  await choose()
+  const importer=page.getByRole('dialog',{name:'ICS import review'})
+  await importer.waitFor()
+  assert.match(await importer.getByLabel('Import change preview').innerText(),/4 new/)
+  await importer.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.deepEqual(before.map(x=>x.start),[
+    '2026-01-31T09:00:00.000Z','2026-02-28T09:00:00.000Z',
+    '2026-03-31T08:00:00.000Z','2026-04-30T08:00:00.000Z'])
+  console.log('BROWSER_C12_MONTHLY_BYMONTHDAY_TZID_PASS')
+  await page.getByLabel('Jump to date').fill('2026-10-01')
+  await page.getByLabel('Search calendar events').fill('C12 Monthclose')
+  const results=page.getByRole('region',{name:'Calendar search results'})
+  await results.getByLabel('Search period').selectOption('backward')
+  assert.equal(await results.getByRole('button',{name:/C12 Monthclose/}).count(),4)
+  await results.getByRole('button',{name:/C12 Monthclose/}).first().click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  await details.getByRole('button',{name:'Make personal copy'}).click()
+  const draft=page.getByRole('dialog',{name:'Duplicate event'})
+  await draft.waitFor()
+  assert.equal(await draft.getByLabel('Event name').inputValue(),'C12 Monthclose')
+  await draft.getByLabel('Event name').fill('C12 Personal study')
+  await draft.getByLabel('Local reminder').selectOption('30')
+  const acknowledgement=draft.getByLabel('Save despite these overlaps or recurrence time warnings')
+  if(await acknowledgement.count())await acknowledgement.check()
+  await draft.getByRole('button',{name:'Create duplicate'}).click()
+  await draft.waitFor({state:'hidden'})
+  const after=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(after.length,5)
+  assert.deepEqual(after.slice(0,4),before)
+  assert.equal(after[4].source,'personal')
+  assert.equal(after[4].reminderMinutes,30)
+  assert.equal(after[4].sourceKey,undefined)
+  await choose()
+  const again=page.getByRole('dialog',{name:'ICS import review'})
+  await again.waitFor()
+  assert.match(await again.getByLabel('Import change preview').innerText(),/4 unchanged/)
+  await again.getByRole('button',{name:'Cancel'}).click()
+  console.log('BROWSER_C12_HISTORIC_SEARCH_PERSONAL_COPY_UID_REFRESH_PASS')
+  await page.getByLabel('Search calendar events').fill('')
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const panel=page.getByRole('dialog',{name:'Local reminders'})
+  await panel.waitFor()
+  assert.equal(await panel.getByLabel('Desktop notification preview privacy').inputValue(),'private')
+  await panel.getByLabel('Desktop notification preview privacy').selectOption('details')
+  await panel.getByRole('button',{name:'Close',exact:true}).click()
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const reopened=page.getByRole('dialog',{name:'Local reminders'})
+  assert.equal(await reopened.getByLabel('Desktop notification preview privacy').inputValue(),'details')
+  await reopened.getByLabel('Desktop notification preview privacy').selectOption('private')
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_C12_LOCKSCREEN_PREVIEW_OPT_IN_RESTORES_PASS')
+  await context.close()
+}
+async function exerciseC12MobileAdditiveRecovery(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const record=(id,title,source='personal')=>({id,title,description:'',location:'',source,
+    ...(source==='ics'?{sourceCalendar:'School',sourceKey:'School|original'}:{}),
+    start:'2026-11-04T09:00:00.000Z',end:'2026-11-04T10:00:00.000Z',
+    allDay:false,updatedAt:'2026-10-16T00:00:00.000Z'})
+  const current=[record('kept','Local latest'),record('readonly','Original School','ics')]
+  const backup={schemaVersion:1,records:[record('kept','Old backup value'),
+    record('missing','C12 recovered course'),record('external-backup','Other source','ics')]}
+  await page.evaluate(records=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records})),current)
+  await page.reload({waitUntil:'networkidle'})
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  await page.locator('input[accept=".json,application/json"]').setInputFiles({
+    name:'old.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(backup))})
+  const dialog=page.getByRole('dialog',{name:'Review calendar restoration'})
+  await dialog.waitFor()
+  const region=dialog.getByRole('region',{name:'Selective personal recovery'})
+  await region.waitFor()
+  assert.match(await region.innerText(),/1 personal record/)
+  assert.ok(await region.getByRole('button',{name:'Recover 1 missing personal record'}).isDisabled())
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+  await region.getByLabel(/Append only these missing personal records/).check()
+  await region.getByRole('button',{name:'Recover 1 missing personal record'}).click()
+  await dialog.waitFor({state:'hidden'})
+  const actual=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(actual.length,3)
+  assert.deepEqual(actual.slice(0,2),current)
+  assert.equal(actual[2].id,'missing')
+  assert.equal(actual[2].source,'personal')
+  assert.ok(!actual.some(x=>x.id==='external-backup'))
+  const prior=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.recovery.v1')).state.records)
+  assert.deepEqual(prior,current)
+  const width=await page.evaluate(()=>({screen:innerWidth,document:document.documentElement.scrollWidth}))
+  assert.ok(width.document<=width.screen+2,'C12 mobile recovery overflow '+JSON.stringify(width))
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_C12_MOBILE_ADD_MISSING_PERSONAL_BACKUP_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -1045,6 +1157,8 @@ try{
   await exerciseC10MobileSavedViewPreferences()
   await exerciseC11SourceAgendaAndCheckpoint()
   await exerciseC11MobileOverdueTriage()
+  await exerciseC12DesktopMonthlyPersonalWorkflow()
+  await exerciseC12MobileAdditiveRecovery()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
