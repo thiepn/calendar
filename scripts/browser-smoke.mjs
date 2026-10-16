@@ -651,7 +651,8 @@ async function exerciseC9MobileDuplicate(){
   const page=await context.newPage(),errors=[]
   page.on('pageerror',e=>errors.push(e.message))
   await page.goto(url,{waitUntil:'networkidle'})
-  await page.getByRole('button',{name:'New event'}).click()
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.locator('.timeline-slot').nth(18).click()
   const form=page.getByRole('dialog',{name:'New event'})
   await form.getByLabel('Event name').fill('C9 mobile class')
   await form.getByLabel('Local reminder').selectOption('60')
