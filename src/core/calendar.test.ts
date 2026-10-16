@@ -2,6 +2,8 @@ import {describe,it,expect} from 'vitest'
 import type {CalendarRecord,CalendarState} from '../types'
 import {addDays,daysBetween,fromLocalDateTime,fromUnambiguousLocalDateTime} from './dates'
 import {proposeTimedChange,applyTimedChange,nudgeTimed} from './reschedule'
+import {draftTimedRange,reviewDraft} from './draft'
+import {proposeAllDayChange,applyAllDayChange} from './all-day'
 import {occurrencesBetween,excludeOccurrence,conflictsOnDay} from './occurrences'
 import {previewIcs,mergeIcs,exportIcs} from './ics'
 import {validateState} from './storage'
@@ -238,5 +240,69 @@ describe('C5 interactive rescheduling and DST integrity',()=>{
     expect(nudgeTimed(item,'2026-10-12','later')).toMatchObject({minute:630,length:60,kind:'move'})
     expect(nudgeTimed(item,'2026-10-12','longer')).toMatchObject({minute:600,length:90,kind:'resize'})
     expect(nudgeTimed(item,'2026-10-12','next-day').date).toBe('2026-10-13')
+  })
+})
+
+describe('C6 candidate review and all-day integrity',()=>{
+  it('rejects ambiguous and nonexistent edited wall-clock endpoints, while retaining valid range',()=>{
+    if(Intl.DateTimeFormat().resolvedOptions().timeZone==='Europe/Berlin'){
+      expect(()=>draftTimedRange('2026-10-25T02:30','2026-10-25T04:30')).toThrow('twice')
+      expect(()=>draftTimedRange('2026-03-29T01:30','2026-03-29T02:30')).toThrow()
+      expect(draftTimedRange('2026-10-25T03:30','2026-10-25T04:30').start).toBeTruthy()
+    }
+    expect(()=>draftTimedRange('2026-10-19T11:00','2026-10-19T10:00')).toThrow('End must')
+  })
+  it('identifies conflicts in an unfiltered ICS calendar across a recurring candidate window',()=>{
+    const recurring=record({id:'draft',start:fromLocalDateTime('2026-10-19T11:00'),
+      end:fromLocalDateTime('2026-10-19T12:00'),repeat:{frequency:'weekly',interval:1}})
+    const imported=record({id:'hidden-ics',source:'ics',start:fromLocalDateTime('2026-10-26T11:30'),
+      end:fromLocalDateTime('2026-10-26T12:00')})
+    const report=reviewDraft([imported],recurring,{horizonDays:28})
+    expect(report.collisionCount).toBe(1)
+    expect(report.collisions[0].existing.recordId).toBe('hidden-ics')
+    expect(report.repeating).toBe(true)
+    expect(report.checkedThrough).toBe('2026-11-15')
+  })
+  it('excludes a series own old instances, not unrelated personal records',()=>{
+    const parent=record({id:'original',start:fromLocalDateTime('2026-10-19T11:00'),
+      end:fromLocalDateTime('2026-10-19T12:00'),repeat:{frequency:'weekly',interval:1}})
+    const edited={...parent,title:'Rescheduled'}
+    expect(reviewDraft([parent],edited,{ignoreRecordId:'original',horizonDays:21}).collisionCount).toBe(0)
+  })
+  it('discloses spring missing and autumn repeated wall times for recurring events',()=>{
+    if(Intl.DateTimeFormat().resolvedOptions().timeZone!=='Europe/Berlin')return
+    const rule=record({id:'dst-series',start:fromLocalDateTime('2026-03-01T02:30'),
+      end:fromLocalDateTime('2026-03-01T03:30'),repeat:{frequency:'daily',interval:1,until:'2026-11-01'}})
+    const result=reviewDraft([],rule,{horizonDays:25})
+    expect(result.missingOrAmbiguousDates).toContain('2026-03-29')
+    expect(result.missingOrAmbiguousDates).toContain('2026-10-25')
+    expect(result.affectedClockCount).toBeGreaterThanOrEqual(2)
+  })
+  it('adjusts standalone all-day spans and warns about hidden imported events',()=>{
+    const meeting=record({id:'meeting',allDay:true,startDate:'2026-10-19',endDateExclusive:'2026-10-21',
+      start:fromLocalDateTime('2026-10-19T00:00'),end:fromLocalDateTime('2026-10-21T00:00')})
+    const ics=record({id:'ics',source:'ics',start:fromLocalDateTime('2026-10-23T14:00'),
+      end:fromLocalDateTime('2026-10-23T15:00')})
+    const state:CalendarState={schemaVersion:1,records:[meeting,ics]}
+    const original=occurrencesBetween([meeting],'2026-10-19','2026-10-19')[0]
+    const proposal=proposeAllDayChange(state,original,'2026-10-22','2026-10-24')
+    expect(proposal.collisionCount).toBe(1)
+    const next=applyAllDayChange(state,proposal,()=> 'unused')
+    expect(next.records[0].id).toBe('meeting')
+    expect(next.records[0].startDate).toBe('2026-10-22')
+    expect(next.records[0].endDateExclusive).toBe('2026-10-25')
+    expect(next.records[1]).toEqual(ics)
+  })
+  it('creates linked all-day exception without rewriting its repeating parent',()=>{
+    const p=record({allDay:true,startDate:'2026-10-19',endDateExclusive:'2026-10-20',
+      start:fromLocalDateTime('2026-10-19T00:00'),end:fromLocalDateTime('2026-10-20T00:00'),
+      repeat:{frequency:'daily',interval:1}})
+    const state:CalendarState={schemaVersion:1,records:[p]}
+    const item=occurrencesBetween([p],'2026-10-21','2026-10-21')[0]
+    const next=applyAllDayChange(state,proposeAllDayChange(state,item,'2026-10-23','2026-10-24'),()=> 'day-override')
+    expect(validateState(next).records[0].repeat?.frequency).toBe('daily')
+    expect(next.records[0].excludedDates).toContain('2026-10-21')
+    expect(next.records[1].recurrenceParentId).toBe('test')
+    expect(next.records[1].recurrenceDate).toBe('2026-10-21')
   })
 })
