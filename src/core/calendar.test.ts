@@ -513,8 +513,10 @@ describe('C9 local reminders and finite ICS interoperability',()=>{
       'DTSTART:20261019T100000Z','DTEND:20261019T110000Z',
       'RRULE:FREQ=WEEKLY;COUNT=4','END:VEVENT','END:VCALENDAR'].join('\r\n')
     const parsed=previewIcs(input)
-    expect(parsed.records).toHaveLength(0)
-    expect(parsed.warnings).toContain('External timed: Timed ICS RRULE requires external source expansion; only finite all-day recurrence is supported')
+    expect(parsed.records).toHaveLength(4)
+    expect(parsed.records.map(r=>r.start)).toEqual(['2026-10-19T10:00:00.000Z','2026-10-26T10:00:00.000Z','2026-11-02T10:00:00.000Z','2026-11-09T10:00:00.000Z'])
+    expect(parsed.records.every(r=>r.source==='ics'&&!r.allDay&&!r.repeat)).toBe(true)
+    expect(parsed.warnings).toContain('External timed: finite timed RRULE materialized into 4 read-only instance(s); source timezone and UID remain authoritative')
   })
   it('exports the chosen reminder as a standard DISPLAY VALARM without changing read-only ICS',()=>{
     const mine=record({id:'alarm',reminderMinutes:30})
@@ -539,5 +541,63 @@ describe('C9 long-lead reminder completeness',()=>{
     expect(result).toHaveLength(1)
     expect(result[0].status).toBe('upcoming')
     expect(result[0].dueAt).toBe(fromLocalDateTime('2026-10-27T12:00'))
+  })
+})
+
+describe('C10 finite timed ICS source clocks, identity, and safe rejection',()=>{
+  it('keeps recurring named TZID wall-clock time constant across autumn DST',()=>{
+    if(Intl.DateTimeFormat().resolvedOptions().timeZone!=='Europe/Berlin')return
+    const input=['BEGIN:VCALENDAR','X-WR-CALNAME:Lab',
+      'BEGIN:VEVENT','UID:tz-lab','SUMMARY:German lab',
+      'DTSTART;TZID=Europe/Berlin:20261019T100000',
+      'DTEND;TZID=Europe/Berlin:20261019T110000',
+      'RRULE:FREQ=WEEKLY;COUNT=3','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const parsed=previewIcs(input)
+    expect(parsed.records.map(r=>r.start)).toEqual([
+      '2026-10-19T08:00:00.000Z','2026-10-26T09:00:00.000Z','2026-11-02T09:00:00.000Z'])
+    expect(parsed.records.map(r=>r.end)).toEqual([
+      '2026-10-19T09:00:00.000Z','2026-10-26T10:00:00.000Z','2026-11-02T10:00:00.000Z'])
+    expect(parsed.records.every(r=>r.source==='ics'&&!r.repeat)).toBe(true)
+  })
+  it('materializes a timed exception by the original UTC source instance key, regardless of file order',()=>{
+    const input=['BEGIN:VCALENDAR','X-WR-CALNAME:School',
+      'BEGIN:VEVENT','UID:weekly-1','RECURRENCE-ID;TZID=Europe/Berlin:20261026T100000',
+      'DTSTART;TZID=Europe/Berlin:20261027T113000','DTEND;TZID=Europe/Berlin:20261027T123000',
+      'SUMMARY:Rescheduled class','END:VEVENT',
+      'BEGIN:VEVENT','UID:weekly-1','SUMMARY:Class',
+      'DTSTART;TZID=Europe/Berlin:20261019T100000','DTEND;TZID=Europe/Berlin:20261019T110000',
+      'RRULE:FREQ=WEEKLY;COUNT=3','EXDATE;TZID=Europe/Berlin:20261102T100000',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const parsed=previewIcs(input)
+    expect(parsed.records).toHaveLength(2)
+    expect(parsed.records[0].start).toBe('2026-10-19T08:00:00.000Z')
+    expect(parsed.records[1].start).toBe('2026-10-27T10:30:00.000Z')
+    expect(parsed.records[1].sourceKey).toBe('School|weekly-1|2026-10-26T09:00:00.000Z')
+    const merged=mergeIcs({schemaVersion:1,records:[record({id:'original'})]},parsed)
+    const refreshed=mergeIcs(merged.state,previewIcs(input))
+    expect(refreshed.duplicates).toBe(2)
+    expect(refreshed.state.records[0].id).toBe('original')
+    expect(refreshed.state.records.slice(1).map(r=>r.id)).toEqual(merged.state.records.slice(1).map(r=>r.id))
+  })
+  it('rejects an entire source master when a recurrence crosses nonexistent local time',()=>{
+    const text=['BEGIN:VCALENDAR','X-WR-CALNAME:DST','BEGIN:VEVENT',
+      'UID:dst-gap','SUMMARY:Nonexistent week',
+      'DTSTART;TZID=Europe/Berlin:20260322T023000',
+      'DTEND;TZID=Europe/Berlin:20260322T033000',
+      'RRULE:FREQ=WEEKLY;COUNT=3','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const preview=previewIcs(text)
+    expect(preview.records).toHaveLength(0)
+    expect(preview.warnings.some(w=>/DST|Nonexistent local time/.test(w))).toBe(true)
+  })
+  it('rejects unbounded timed masters and handles UTC UNTIL inclusively',()=>{
+    const unbounded=['BEGIN:VCALENDAR','BEGIN:VEVENT','UID:indefinite','SUMMARY:Forever',
+      'DTSTART:20261019T100000Z','DTEND:20261019T103000Z',
+      'RRULE:FREQ=DAILY','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const missing=previewIcs(unbounded)
+    expect(missing.records).toHaveLength(0)
+    expect(missing.warnings.some(w=>w.includes('Finite RRULE'))).toBe(true)
+    const bounded=unbounded.replace('RRULE:FREQ=DAILY','RRULE:FREQ=DAILY;UNTIL=20261021T100000Z')
+    expect(previewIcs(bounded).records.map(r=>r.start)).toEqual([
+      '2026-10-19T10:00:00.000Z','2026-10-20T10:00:00.000Z','2026-10-21T10:00:00.000Z'])
   })
 })
