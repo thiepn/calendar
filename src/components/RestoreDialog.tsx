@@ -1,4 +1,5 @@
-import {useState} from 'react'
+import {useMemo,useState} from 'react'
+import {previewMissingPersonal} from '../core/recover-missing'
 import {AlertTriangle,X,DatabaseBackup} from 'lucide-react'
 import type {CalendarRecord,CalendarState} from '../types'
 
@@ -9,10 +10,16 @@ function stats(records:CalendarRecord[]){
     overrides:records.filter(r=>Boolean(r.recurrenceParentId)).length,
     sources:Array.from(new Set(records.filter(r=>r.source==='ics').map(r=>r.sourceCalendar??'Imported'))).sort()}
 }
-export function RestoreDialog({current,candidate,origin,unreadableCurrent=false,onClose,onConfirm}:{
-  current:CalendarState;candidate:CalendarState;origin:string;unreadableCurrent?:boolean;onClose:()=>void;onConfirm:()=>void
+export function RestoreDialog({current,candidate,origin,unreadableCurrent=false,onClose,onConfirm,onRecoverMissing}:{
+  current:CalendarState;candidate:CalendarState;origin:string;unreadableCurrent?:boolean;onClose:()=>void;onConfirm:()=>void;onRecoverMissing?:()=>void
 }){
   const [confirmed,setConfirmed]=useState(false)
+  const [confirmedMissing,setConfirmedMissing]=useState(false)
+  const missingReview=useMemo(()=>{
+    if(unreadableCurrent||!onRecoverMissing)return {added:[] as CalendarRecord[],error:''}
+    try{return {added:previewMissingPersonal(current,candidate).added,error:''}}
+    catch(error){return {added:[] as CalendarRecord[],error:error instanceof Error?error.message:String(error)}}
+  },[current,candidate,unreadableCurrent,onRecoverMissing])
   const before=stats(current.records),after=stats(candidate.records)
   const currentIds=new Set(current.records.map(r=>r.id))
   const candidateIds=new Set(candidate.records.map(r=>r.id))
@@ -41,6 +48,20 @@ export function RestoreDialog({current,candidate,origin,unreadableCurrent=false,
         {removed.length>0&&<p>Not in backup: {removed.slice(0,4).map(r=>r.title).join(' · ')}{removed.length>4?' …':''}</p>}
         {introduced.length>0&&<p>Introduced: {introduced.slice(0,4).map(r=>r.title).join(' · ')}{introduced.length>4?' …':''}</p>}
       </div>}
+      {onRecoverMissing&&!unreadableCurrent&&<section className="restore-additive" aria-label="Selective personal recovery">
+        <h3>Recover missing personal events only</h3>
+        <p className="fine-print">This alternative appends only personal records whose original IDs are absent on this device. Every existing event, imported snapshot and recurring source remains unchanged. It never adopts imported provider copies, and it cannot repair an unreadable original.</p>
+        {missingReview.error?<p className="error" role="alert">Selective recovery unavailable: {missingReview.error}. Keep the original data and use the full restoration preview only if appropriate.</p>:
+          missingReview.added.length===0?<p className="empty-note">No missing personal records in this backup.</p>:<>
+            <p><strong>{missingReview.added.length} personal record{missingReview.added.length===1?'':'s'}</strong> can be recovered, including {missingReview.added.filter(r=>Boolean(r.recurrenceParentId)).length} detached occurrence edit(s).</p>
+            <p className="fine-print">First entries: {missingReview.added.slice(0,4).map(r=>r.title).join(' · ')}{missingReview.added.length>4?' …':''}</p>
+            <label className="restore-ack"><input type="checkbox" checked={confirmedMissing} onChange={e=>setConfirmedMissing(e.target.checked)}/>
+              Append only these missing personal records; keep all currently saved and imported entries.</label>
+            <button className="secondary" type="button" disabled={!confirmedMissing} onClick={onRecoverMissing}>
+              Recover {missingReview.added.length} missing personal record{missingReview.added.length===1?'':'s'}
+            </button>
+          </>}
+      </section>}
       <p className="readonly-note"><AlertTriangle size={15}/> Save a full JSON backup first if you need a durable copy. The app also maintains a single device-local previous-version checkpoint, which may be overwritten by later edits.</p>
       <label className="restore-ack"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
         I understand that restoring replaces this Calendar's locally saved events and imported copies.</label>
