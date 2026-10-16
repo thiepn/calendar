@@ -348,7 +348,7 @@ export default function App(){
             <option value={14}>14 days</option><option value={30}>30 days</option>
           </select></label>
           <label><input type="checkbox" checked={agendaBusyOnly} onChange={e=>setAgendaBusyOnly(e.target.checked)}/> Only days with commitments</label>
-        </div>}}
+        </div>}
         <div className="content-grid">
           <div className="calendar-surface"><CalendarViews mode={mode} days={days} selected={selected} records={visible} onSelect={setSelected} onOpen={open} onCreate={create} onCreateAt={(date,start,end)=>startSlot({date,start,end})}
               onAdjust={requestAdjustment} onAllDaySlot={startAllDay} onAllDayAdjust={requestAllDayAdjustment}
