@@ -5,6 +5,7 @@ import {addDays,addMonths,dateLabel,dateSeries,friendlyRange,localDate,monday,mo
 import {dayOccurrences,excludeOccurrence,occurrencesBetween} from './core/occurrences'
 import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,splitSeriesAt,endSeriesAt} from './core/series'
 import {findFreeSlots,type FreeSlot} from './core/availability'
+import {adjacentBusyDay,exportAgendaCsv} from './core/agenda'
 import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
 import {exportBackup,importBackup,loadState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCalendar,restoreUnreadableCalendar,STORAGE_KEY,type RecoverySnapshot} from './core/storage'
 import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
@@ -14,7 +15,7 @@ import {RestoreDialog} from './components/RestoreDialog'
 import {ReminderCenter} from './components/ReminderCenter'
 import {OfflineReadiness} from './components/OfflineReadiness'
 import {loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY,type ViewPreferences} from './core/view-preferences'
-import {reminderItems,readReminderActions,saveReminderActions,actionForReminder,deliverableReminders,proposedSnooze,REMINDER_ACTIONS_KEY,REMINDER_DELIVERED_KEY,type ReminderItem,type ReminderActions} from './core/reminders'
+import {reminderItems,readReminderActions,saveReminderActions,actionForReminder,deliverableReminders,proposedSnooze,dismissReminderBatch,REMINDER_ACTIONS_KEY,REMINDER_DELIVERED_KEY,type ReminderItem,type ReminderActions} from './core/reminders'
 import {DEFAULT_REMINDER_SETTINGS,loadReminderSettings,saveReminderSettings,inQuietHours,REMINDER_SETTINGS_KEY,type ReminderSettings} from './core/reminder-settings'
 import {applyAllDayChange,type AllDayProposal} from './core/all-day'
 import {CalendarViews,type Mode} from './components/CalendarViews'
@@ -31,6 +32,7 @@ const initialView=(()=>{try{return loadViewPreferences()}catch{return {mode:'wee
 export default function App(){
   const [calendar,setCalendar]=useState<CalendarState>(initial.state)
   const [remindersOpen,setRemindersOpen]=useState(false)
+  const [overdueDays,setOverdueDays]=useState<1|7>(1)
   const [reminderSettings,setReminderSettings]=useState<ReminderSettings>(()=>{try{return loadReminderSettings()}catch{return DEFAULT_REMINDER_SETTINGS}})
   const [reminderActions,setReminderActions]=useState<ReminderActions>(()=>{try{return readReminderActions()}catch{return {}}})
   const [reminderNow,setReminderNow]=useState(()=>new Date().toISOString())
@@ -91,9 +93,25 @@ export default function App(){
     document.addEventListener('visibilitychange',visibility)
     return ()=>{window.clearInterval(timer);document.removeEventListener('visibilitychange',visibility)}
   },[])
-  const reminders=useMemo(()=>reminderItems(calendar,reminderNow,reminderActions),[calendar,reminderNow,reminderActions])
+  const reminders=useMemo(()=>reminderItems(calendar,reminderNow,reminderActions,14,overdueDays),[calendar,reminderNow,reminderActions,overdueDays])
   const dueReminderCount=reminders.filter(x=>x.status==='due').length
-  const dismissedReminders=useMemo(()=>reminderItems(calendar,reminderNow,{}).filter(x=>reminderActions[x.key]?.kind==='dismiss'),[calendar,reminderNow,reminderActions])
+  const dismissedReminders=useMemo(()=>reminderItems(calendar,reminderNow,{},14,overdueDays).filter(x=>reminderActions[x.key]?.kind==='dismiss'),[calendar,reminderNow,reminderActions,overdueDays])
+  function dismissDueReminders(items:ReminderItem[]){
+    if(items.length<2||!window.confirm('Dismiss '+items.length+' currently reviewed due reminders on this device? This does not change any event. Each can be restored in the Dismissed reminders section.'))return
+    try{
+      const current=loadState()
+      if(current.error||JSON.stringify(current.state)!==JSON.stringify(calendar))
+        throw new Error('Calendar changed in another tab; reopen reminders before dismissing')
+      const latest=readReminderActions()
+      const stillDue=reminderItems(current.state,new Date().toISOString(),latest,14,overdueDays)
+        .filter(item=>item.status==='due')
+      const ids=new Set(stillDue.map(item=>item.key))
+      if(items.some(item=>!ids.has(item.key)))throw new Error('Reminder list changed; review it again')
+      const next=dismissReminderBatch(latest,items)
+      saveReminderActions(next);setReminderActions(next);setReminderNow(new Date().toISOString())
+      setNotice('Dismissed '+items.length+' reviewed reminders. Original events were not changed.')
+    }catch(error){setNotice('Reminder batch not saved: '+String(error))}
+  }
   function undoReminderDismissal(item:ReminderItem){
     try{
       const next=readReminderActions();delete next[item.key]
@@ -355,6 +373,23 @@ export default function App(){
       }
     }catch(error){setNotice('Move failed: '+String(error))}
   }
+  function jumpBusy(direction:-1|1){
+    try{
+      // Search the same visible source/search filter as the rendered calendar.
+      const target=adjacentBusyDay(visible,selected,direction)
+      if(target){setSelected(target);setMode('day');setNotice('Jumped to '+dateLabel(target,{weekday:'long',month:'short',day:'numeric'}))}
+      else setNotice('No visible commitments found in '+(direction===1?'the next':'the previous')+' 365 days')
+    }catch(error){setNotice('Busy-day navigation unavailable: '+String(error))}
+  }
+  function saveDisplayedAgenda(){
+    try{
+      const start=days[0],end=days[days.length-1]
+      if(days.length>31)throw new Error('Switch to Week, Day or List to export at most 30 days')
+      const contents=exportAgendaCsv(visible,start,end)
+      download('thiepn-calendar-agenda-'+start+'.csv',contents,'text/csv;charset=utf-8')
+      setNotice('Downloaded visible '+days.length+'-day agenda with event titles and locations, including imported copies when shown. No data was uploaded.')
+    }catch(error){setNotice('Agenda export rejected: '+String(error))}
+  }
   function step(direction:number){
     setSelected(s=>mode==='month'?addMonths(s,direction):addDays(s,direction*(mode==='week'?7:mode==='agenda'?agendaSpan:1)))
   }
@@ -461,6 +496,10 @@ export default function App(){
             <button className="icon-button" aria-label="Previous period" onClick={()=>step(-1)}><ChevronLeft size={19}/></button>
             <button className="icon-button" aria-label="Next period" onClick={()=>step(1)}><ChevronRight size={19}/></button>
             <h2>{title}</h2>
+            <div className="busy-day-navigation">
+              <button className="secondary compact" type="button" aria-label="Previous busy day" onClick={()=>jumpBusy(-1)}>Previous busy</button>
+              <button className="secondary compact" type="button" aria-label="Next busy day" onClick={()=>jumpBusy(1)}>Next busy</button>
+            </div>
             <label className="date-jump">Jump <input ref={jumpInput} aria-label="Jump to date" type="date" value={selected} onChange={e=>{if(e.target.value)setSelected(e.target.value)}}/></label></div>
           <div className="view-switch">{(['month','week','day','agenda'] as const).map(m=><button key={m} onClick={()=>setMode(m)} className={mode===m?'active':''}>{m==='agenda'?'List':m[0].toUpperCase()+m.slice(1)}</button>)}</div>
           <details className="calendar-shortcuts"><summary>Keyboard</summary><p>n — new event · t — today · g — jump to date · / — search · j/k — next/previous period · 1–4 — change view. When editing timed blocks, Alt+arrows move and Alt+Shift+vertical arrows resize; for all-day blocks use Alt+Left/Right and add Shift to resize.</p></details>
@@ -481,6 +520,7 @@ export default function App(){
             <option value={14}>14 days</option><option value={30}>30 days</option>
           </select></label>
           <label><input type="checkbox" checked={agendaBusyOnly} onChange={e=>setAgendaBusyOnly(e.target.checked)}/> Only days with commitments</label>
+          <button className="secondary compact" type="button" onClick={saveDisplayedAgenda} aria-label="Download visible agenda CSV"><Download size={14}/> Download visible agenda CSV</button>
         </div>}
         <div className="content-grid">
           <div className="calendar-surface"><CalendarViews mode={mode} days={days} selected={selected} records={visible} onSelect={setSelected} onOpen={open} onCreate={create} onCreateAt={(date,start,end)=>startSlot({date,start,end})}
@@ -507,6 +547,7 @@ export default function App(){
     {restoreCandidate&&<RestoreDialog current={calendar} candidate={restoreCandidate.state} origin={restoreCandidate.origin} unreadableCurrent={unreadable}
       onClose={()=>setRestoreCandidate(null)} onConfirm={confirmRestore}/>}
     {remindersOpen&&<ReminderCenter items={reminders} dismissed={dismissedReminders}
+      lookBackDays={overdueDays} onLookBackChange={setOverdueDays} onDismissDue={dismissDueReminders}
       snoozedKeys={new Set(Object.entries(reminderActions).filter(([,action])=>action.kind==='snooze').map(([key])=>key))}
       onCancelSnooze={undoReminderDismissal} settings={reminderSettings} onSettingsChange={changeReminderSettings} onUndoDismiss={undoReminderDismissal} onClose={()=>setRemindersOpen(false)}
       onOpen={item=>{setRemindersOpen(false);setMode('day');open(item.occurrence)}}
@@ -650,6 +691,14 @@ export default function App(){
           <button className="secondary" onClick={()=>download('thiepn-calendar-backup.json',exportBackup(calendar),'application/json')}><Download size={16}/> Save full JSON backup</button>
           <button className="secondary" onClick={()=>restoreInput.current?.click()}><Upload size={16}/> Review JSON backup restoration</button>
           <button className="secondary" disabled={!recovery} onClick={proposeRecovery}><RotateCcw size={16}/> Review previous-version checkpoint</button>
+          <button className="secondary" disabled={!recovery} onClick={()=>{
+            try{
+              const latest=readRecovery()
+              if(!latest)throw new Error('Recovery checkpoint no longer exists')
+              download('thiepn-calendar-recovery-'+latest.savedAt.slice(0,10)+'.json',exportBackup(latest.state),'application/json')
+              setNotice('Exported the validated previous-version checkpoint as a portable JSON backup')
+            }catch(error){setNotice('Checkpoint export failed: '+String(error))}
+          }}><Download size={16}/> Export previous-version checkpoint JSON</button>
           {recovery&&<p className="fine-print">Checkpoint: {new Date(recovery.savedAt).toLocaleString()} — {recovery.label}. Stores one prior complete version on this device.</p>}
           {unreadable&&<button className="danger" onClick={downloadUnreadable}><Download size={16}/> Download unreadable original bytes</button>}
           {rescuedUnparsedCalendar()!==null&&<button className="secondary" onClick={()=>{
