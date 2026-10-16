@@ -619,7 +619,7 @@ async function exerciseC9RemindersAndIcs(){
   assert.equal(Object.values(actions)[0].kind,'snooze')
   await panel.getByRole('button',{name:'Dismiss C9 local due alert'}).click()
   assert.equal(await panel.getByRole('button',{name:/C9 local due alert/}).count(),0)
-  await panel.getByRole('button',{name:'Close'}).click()
+  await panel.getByRole('button',{name:'Close',exact:true}).click()
   console.log('BROWSER_C9_REMINDER_DUE_SNOOZE_DISMISS_PASS')
 
   const recurrence=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C9 all-day class',
