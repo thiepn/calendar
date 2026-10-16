@@ -1,5 +1,5 @@
 import type {CalendarRecord,CalendarState} from '../types'
-import {addDays,day,daysBetween} from './dates'
+import {addDays,day,daysBetween,localInstantOptions} from './dates'
 import {occurrencesBetween} from './occurrences'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {finiteTimedDates,timedWallTemplate,wallValueOn} from './ics-timed'
@@ -43,7 +43,10 @@ function zonedInstant(values:number[],tz:string):string {
   for(let i=0;i<4;i++){const seen=zonePieces(new Date(guess),tz);const wall=Date.UTC(seen[0],seen[1]-1,seen[2],seen[3],seen[4],seen[5]);guess+=target-wall}
   const same=(ms:number)=>zonePieces(new Date(ms),tz).every((x,i)=>x===values[i])
   if(!same(guess))throw new Error('Nonexistent local time (DST)')
-  if(same(guess-3600000)||same(guess+3600000))throw new Error('Ambiguous local time (DST)')
+  // Offsets can change by 30 minutes (e.g. Lord Howe), not just one hour.
+  for(let minutes=-180;minutes<=180;minutes+=15){
+    if(minutes!==0&&same(guess+minutes*60000))throw new Error('Ambiguous local time (DST)')
+  }
   return new Date(guess).toISOString()
 }
 function parseInstant(p:Property):{iso:string;date?:string} {
@@ -56,10 +59,14 @@ function parseInstant(p:Property):{iso:string;date?:string} {
   const values=[+m[1],+m[2],+m[3],+m[4],+m[5],+(m[6]??0)]
   const proposed=new Date(Date.UTC(values[0],values[1]-1,values[2],values[3],values[4],values[5]))
   if([proposed.getUTCFullYear(),proposed.getUTCMonth()+1,proposed.getUTCDate(),proposed.getUTCHours(),proposed.getUTCMinutes(),proposed.getUTCSeconds()].some((n,i)=>n!==values[i]))throw new Error('Invalid calendar time')
+  if(m[7]&&p.params.TZID)throw new Error('Mixed UTC suffix and TZID are unsupported')
   if(m[7])return {iso:proposed.toISOString()}
   if(p.params.TZID)return {iso:zonedInstant(values,p.params.TZID)}
   const local=new Date(values[0],values[1]-1,values[2],values[3],values[4],values[5])
   if([local.getFullYear(),local.getMonth()+1,local.getDate(),local.getHours(),local.getMinutes(),local.getSeconds()].some((n,i)=>n!==values[i]))throw new Error('Nonexistent local time')
+  if(localInstantOptions([String(values[0]).padStart(4,'0'),String(values[1]).padStart(2,'0'),String(values[2]).padStart(2,'0')].join('-')+
+    'T'+String(values[3]).padStart(2,'0')+':'+String(values[4]).padStart(2,'0')).length>1)
+    throw new Error('Ambiguous floating local time (DST)')
   return {iso:local.toISOString()}
 }
 export function previewIcs(text:string):IcsPreview {

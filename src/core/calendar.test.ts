@@ -632,3 +632,23 @@ describe('C10 source-key preserving ICS replace',()=>{
     expect(updated.state.records.find(r=>r.id==='private')).toEqual(initial.records[0])
   })
 })
+
+describe('C10 source timezone safety on short DST shifts and floating times',()=>{
+  it('does not guess a TZID fold when daylight saving changes by thirty minutes',()=>{
+    const input=['BEGIN:VCALENDAR','BEGIN:VEVENT','UID:half-hour','SUMMARY:Ambiguous',
+      'DTSTART;TZID=Australia/Lord_Howe:20260405T014500',
+      'DTEND;TZID=Australia/Lord_Howe:20260405T023000',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const parsed=previewIcs(input)
+    expect(parsed.records).toHaveLength(0)
+    expect(parsed.warnings.some(x=>x.includes('Ambiguous local time'))).toBe(true)
+  })
+  it('rejects mixed UTC/TZID specifications without creating a source record',()=>{
+    const input=['BEGIN:VCALENDAR','BEGIN:VEVENT','UID:mixed','SUMMARY:Mixed',
+      'DTSTART;TZID=Europe/Berlin:20261019T100000Z',
+      'DTEND:20261019T110000Z','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const parsed=previewIcs(input)
+    expect(parsed.records).toHaveLength(0)
+    expect(parsed.warnings.some(x=>x.includes('Mixed UTC suffix'))).toBe(true)
+  })
+})
