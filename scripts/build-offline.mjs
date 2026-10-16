@@ -24,7 +24,9 @@ const script=[
   "    return;",
   "  }",
   "  if(!FILES.includes(url.pathname))return;",
-  "  event.respondWith(caches.match(request).then(cached=>cached||fetch(request)));",
+  "  // Exact allowlisted build assets are immutable. Ignore Vary (module scripts send Origin",
+  "  // whereas precache requests may not), but never ignore URL path or origin.",
+  "  event.respondWith(caches.match(request,{ignoreVary:true}).then(cached=>cached||fetch(request)));",
   "});"
 ].join('\n')+'\n'
 await writeFile(join(root,'sw.js'),script,'utf8')
