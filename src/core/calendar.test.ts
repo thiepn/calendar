@@ -12,8 +12,9 @@ import {layoutTimedDay,slotRange,dayAxis,slotAt} from './timeline'
 import {findFreeSlots} from './availability'
 import {DEFAULT_REMINDER_SETTINGS,validateReminderSettings,inQuietHours} from './reminder-settings'
 import {validateViewPreferences,loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY} from './view-preferences'
-import {reminderItems,reminderKey,actionForReminder,deliverableReminders,proposedSnooze} from './reminders'
+import {reminderItems,reminderKey,actionForReminder,deliverableReminders,proposedSnooze,dismissReminderBatch} from './reminders'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
+import {adjacentBusyDay,exportAgendaCsv} from './agenda'
 const record=(patch:Partial<CalendarRecord>={}):CalendarRecord=>({
   id:'test',title:'Study',description:'',location:'',source:'personal',
   start:fromLocalDateTime('2026-10-12T10:00'),end:fromLocalDateTime('2026-10-12T11:00'),
@@ -729,5 +730,101 @@ describe('C10+ snooze does not move future alerts earlier',()=>{
     const delayed=proposedSnooze(upcoming,15,dueNow)
     expect(delayed.until).toBe(fromLocalDateTime('2026-10-12T10:05'))
     expect(()=>proposedSnooze(upcoming,7 as 5,now)).toThrow('Invalid snooze')
+  })
+})
+
+describe('C11 source-owned RDATE, agenda and reminder triage',()=>{
+  it('unions finite all-day recurrence RDATE, EXDATE and source UID stable replacement',()=>{
+    const source=['BEGIN:VCALENDAR','X-WR-CALNAME:Seminars','BEGIN:VEVENT','UID:lab-a','SUMMARY:Course',
+      'DTSTART;VALUE=DATE:20261019','DTEND;VALUE=DATE:20261020','RRULE:FREQ=WEEKLY;COUNT=3',
+      'RDATE;VALUE=DATE:20261022,20261030','EXDATE;VALUE=DATE:20261026',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const parsed=previewIcs(source)
+    expect(parsed.skippedEvents).toBe(0)
+    expect(parsed.records.map(x=>x.startDate)).toEqual(['2026-10-19','2026-10-22','2026-10-30','2026-11-02'])
+    const prior=mergeIcs({schemaVersion:1,records:[record({id:'owner'})]},parsed).state
+    const replace=mergeIcs(prior,previewIcs(source),'replace')
+    expect(replace.duplicates).toBe(4)
+    expect(replace.removed).toBe(0)
+    expect(replace.state.records.map(r=>r.id)).toEqual(prior.records.map(r=>r.id))
+  })
+  it('imports finite all-day RDATE-only with an original-date recurring exception preceding master',()=>{
+    const v=['BEGIN:VCALENDAR','X-WR-CALNAME:Study days',
+      'BEGIN:VEVENT','UID:extra','RECURRENCE-ID;VALUE=DATE:20261103','SUMMARY:Moved',
+      'DTSTART;VALUE=DATE:20261104','DTEND;VALUE=DATE:20261105','END:VEVENT',
+      'BEGIN:VEVENT','UID:extra','SUMMARY:Study','DTSTART;VALUE=DATE:20261101',
+      'DTEND;VALUE=DATE:20261102','RDATE;VALUE=DATE:20261103,20261106',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const p=previewIcs(v)
+    expect(p.skippedEvents).toBe(0)
+    expect(p.records.map(x=>x.startDate)).toEqual(['2026-11-01','2026-11-04','2026-11-06'])
+    expect(p.records[1].sourceKey).toBe('Study days|extra|20261103')
+  })
+  it('handles source-zone timed RDATE independent of RRULE UNTIL, matching source EXDATE',()=>{
+    const t=['BEGIN:VCALENDAR','X-WR-CALNAME:Berlin course','BEGIN:VEVENT','UID:tz-extra','SUMMARY:Lecture',
+      'DTSTART;TZID=Europe/Berlin:20261019T100000','DTEND;TZID=Europe/Berlin:20261019T110000',
+      'RRULE:FREQ=WEEKLY;UNTIL=20261019T080000Z',
+      'RDATE;TZID=Europe/Berlin:20261021T123000,20261028T123000',
+      'EXDATE;TZID=Europe/Berlin:20261021T123000','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const p=previewIcs(t)
+    expect(p.skippedEvents).toBe(0)
+    expect(p.records.map(r=>r.start)).toEqual(['2026-10-19T08:00:00.000Z','2026-10-28T11:30:00.000Z'])
+    expect(p.records[1].sourceKey).toBe('Berlin course|tz-extra|2026-10-28T11:30:00.000Z')
+  })
+  it('handles RDATE-only explicit UTC timed instances',()=>{
+    const t=['BEGIN:VCALENDAR','BEGIN:VEVENT','UID:utc-extra','SUMMARY:Morning',
+      'DTSTART:20261019T100000Z','DTEND:20261019T110000Z',
+      'RDATE:20261020T143000Z,20261021T100000Z','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    expect(previewIcs(t).records.map(r=>r.start)).toEqual([
+      '2026-10-19T10:00:00.000Z','2026-10-20T14:30:00.000Z','2026-10-21T10:00:00.000Z'])
+  })
+  it('rejects mixed clocks, RDATE PERIOD and orphan all-day overrides without partial import',()=>{
+    const base=['BEGIN:VCALENDAR','X-WR-CALNAME:Authority','BEGIN:VEVENT','UID:master','SUMMARY:Safe',
+      'DTSTART;TZID=Europe/Berlin:20261019T100000','DTEND;TZID=Europe/Berlin:20261019T110000','RRULE:FREQ=WEEKLY;COUNT=3']
+    for(const extra of ['RDATE;TZID=Europe/Berlin:20261020T100000/20261020T110000',
+      'RDATE:20261020T100000Z','RDATE;TZID=Europe/Berlin:20291020T100000']){
+      const p=previewIcs([...base,extra,'END:VEVENT','END:VCALENDAR'].join('\r\n'))
+      expect(p.records).toHaveLength(0)
+      expect(p.skippedEvents).toBe(1)
+      expect(()=>mergeIcs({schemaVersion:1,records:[]},p,'replace')).toThrow('incomplete')
+    }
+    const a=['BEGIN:VCALENDAR','BEGIN:VEVENT','UID:a','SUMMARY:Course',
+      'DTSTART;VALUE=DATE:20261019','DTEND;VALUE=DATE:20261020','RRULE:FREQ=WEEKLY;COUNT=2',
+      'END:VEVENT','BEGIN:VEVENT','UID:a','RECURRENCE-ID;VALUE=DATE:20261119',
+      'SUMMARY:Orphan','DTSTART;VALUE=DATE:20261120','DTEND;VALUE=DATE:20261121',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    expect(previewIcs(a).records).toHaveLength(0)
+  })
+  it('finds adjacent busy dates including a spanning all-day entry',()=>{
+    const trip=record({id:'trip',allDay:true,startDate:'2026-10-19',endDateExclusive:'2026-10-22',
+      start:fromLocalDateTime('2026-10-19T00:00'),end:fromLocalDateTime('2026-10-22T00:00')})
+    expect(adjacentBusyDay([trip],'2026-10-19',1)).toBe('2026-10-20')
+    expect(adjacentBusyDay([trip],'2026-10-23',-1)).toBe('2026-10-21')
+    expect(adjacentBusyDay([],'2026-10-19',1)).toBeNull()
+  })
+  it('exports only selected source records and neutralizes spreadsheet formulas',()=>{
+    const event=record({id:'private',title:'=HYPERLINK("evil")',location:'@attacker',description:'PRIVATE NOTES'})
+    const imported=record({id:'import',title:'=IMPORT',source:'ics',sourceCalendar:'School',sourceKey:'id'})
+    const csv=exportAgendaCsv([event],'2026-10-12','2026-10-12')
+    expect(csv).toContain('"\'=HYPERLINK(""evil"")"')
+    expect(csv).toContain('"\'@attacker"')
+    expect(csv).not.toContain('PRIVATE NOTES')
+    expect(csv).not.toContain('School')
+    expect(exportAgendaCsv([event,imported],'2026-10-12','2026-10-12')).toContain('Imported: School')
+    expect(()=>exportAgendaCsv([],'2026-10-12','2026-11-30')).toThrow('Agenda export')
+  })
+  it('reviews seven days overdue and dismisses only an explicit due batch',()=>{
+    const r=record({id:'due',start:fromLocalDateTime('2026-10-12T10:00'),
+      end:fromLocalDateTime('2026-10-12T11:00'),reminderMinutes:15})
+    const state:CalendarState={schemaVersion:1,records:[r]},now=fromLocalDateTime('2026-10-17T10:00')
+    expect(reminderItems(state,now,{},14,1)).toHaveLength(0)
+    const due=reminderItems(state,now,{},14,7)
+    expect(due).toHaveLength(1)
+    expect(due[0].status).toBe('due')
+    const next=dismissReminderBatch({},due)
+    expect(next[due[0].key]).toEqual({kind:'dismiss'})
+    expect(reminderItems(state,now,next,14,7)).toHaveLength(0)
+    expect(()=>dismissReminderBatch({},[])).toThrow('Review')
+    expect(()=>reminderItems(state,now,{},14,8)).toThrow('Invalid')
   })
 })
