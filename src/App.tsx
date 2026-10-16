@@ -433,7 +433,7 @@ export default function App(){
         <button className={'source-entry '+(filter==='all'?'active':'')} onClick={()=>setFilter('all')}><span className="source-swatch all"/>All calendars <b>{counts.all}</b></button>
         <button className={'source-entry '+(filter==='personal'?'active':'')} onClick={()=>setFilter('personal')}><span className="source-swatch personal"/>Personal <b>{counts.personal}</b></button>
         <button className={'source-entry '+(filter==='ics'?'active':'')} onClick={()=>setFilter('ics')}><span className="source-swatch ics"/>Imported snapshots <b>{counts.ics}</b></button>
-        <button className="text-action" onClick={()=>setSourcePanel(true)}>Manage sources <ChevronRight size={14}/></button>
+        <button className="text-action" onClick={()=>{setSourcePanel(true);setMobileNav(false)}}>Manage sources <ChevronRight size={14}/></button>
       </div>
       <div className="sidebar-bottom"><div className="privacy-label"><Database size={15}/><span>Device-local workspace<small>No account or remote sync</small></span></div>
         <a href="https://github.com/thiepn/folio" target="_blank" rel="noopener noreferrer" className="sidebar-link">Open Folio <ExternalLink size={13}/></a></div>
