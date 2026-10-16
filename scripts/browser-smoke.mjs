@@ -455,6 +455,104 @@ async function exerciseC7HeldEdgeScrolling(){
   await context.close()
 }
 
+
+async function exerciseC8RecoverySearchAndAgenda(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB',acceptDownloads:true})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const create=async(title)=>{
+    await page.getByRole('button',{name:'New event'}).click()
+    const form=page.getByRole('dialog',{name:'New event'})
+    await form.getByLabel('Event name').fill(title)
+    await form.getByRole('button',{name:'Create event'}).click()
+    await form.waitFor({state:'hidden'})
+  }
+  await create('C8 Original')
+  await create('C8 Later')
+  const original=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.find(x=>x.title==='C8 Original'))
+  await page.getByRole('button',{name:/Manage sources/}).click()
+  const sources=page.getByRole('dialog',{name:'Calendar data management'})
+  await sources.getByRole('button',{name:'Review previous-version checkpoint'}).click()
+  const preview=page.getByRole('dialog',{name:'Review calendar restoration'})
+  await preview.waitFor()
+  assert.match(await preview.innerText(),/Saved now[\s\S]*2 records/)
+  assert.match(await preview.innerText(),/In proposed backup[\s\S]*1 records/)
+  assert.equal(await preview.getByRole('button',{name:'Restore this version'}).isDisabled(),true)
+  await preview.getByLabel(/I understand that restoring replaces/).check()
+  await preview.getByRole('button',{name:'Restore this version'}).click()
+  const after=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(after.length,1)
+  assert.equal(after[0].id,original.id)
+  console.log('BROWSER_C8_PREVIEWED_RECOVERY_RESTORE_PASS')
+
+  const date=await page.getByLabel('Jump to date').inputValue()
+  const future=new Date(Date.parse(date+'T00:00:00Z')+21*86400000).toISOString().slice(0,10)
+  await page.getByLabel('Jump to date').fill(future)
+  await create('C8 Future Search Match')
+  await page.getByLabel('Jump to date').fill(date)
+  await page.getByLabel('Search calendar events').fill('Future Search Match')
+  const results=page.getByRole('region',{name:'Calendar search results'})
+  await results.getByRole('button',{name:/C8 Future Search Match/}).waitFor()
+  await results.getByRole('button',{name:/C8 Future Search Match/}).click()
+  await page.getByRole('dialog',{name:'Event details'}).waitFor()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),future)
+  await page.getByRole('button',{name:'Close event'}).click()
+  await page.getByRole('button',{name:'Clear search'}).click()
+  await page.getByRole('button',{name:'List'}).click()
+  await page.getByLabel('Agenda range').selectOption('30')
+  assert.equal(await page.locator('.agenda-row').count(),30)
+  await page.getByLabel('Only days with commitments').check()
+  assert.ok(await page.locator('.agenda-row').count()<30)
+  console.log('BROWSER_C8_GLOBAL_SEARCH_JUMP_AGENDA_PASS')
+
+  const ics='BEGIN:VCALENDAR\nVERSION:2.0\nX-WR-CALNAME:C8 Classroom\nBEGIN:VEVENT\nUID:c8-class-a\nDTSTART:20261109T120000Z\nDTEND:20261109T130000Z\nSUMMARY:C8 ICS Class\nEND:VEVENT\nEND:VCALENDAR'
+  await page.locator('input[accept=".ics,text/calendar"]').setInputFiles({name:'classes.ics',mimeType:'text/calendar',buffer:Buffer.from(ics)})
+  const importer=page.getByRole('dialog',{name:'ICS import review'})
+  await importer.waitFor()
+  assert.match(await importer.getByLabel('Import change preview').innerText(),/1 new/)
+  await importer.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const imported=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(imported.find(x=>x.title==='C8 ICS Class').source,'ics')
+  assert.equal(imported.find(x=>x.title==='C8 Original').id,original.id)
+  await page.locator('input[accept=".ics,text/calendar"]').setInputFiles({name:'classes.ics',mimeType:'text/calendar',buffer:Buffer.from(ics)})
+  const second=page.getByRole('dialog',{name:'ICS import review'})
+  await second.waitFor()
+  assert.match(await second.getByLabel('Import change preview').innerText(),/1 unchanged/)
+  await second.getByRole('button',{name:'Cancel'}).click()
+  console.log('BROWSER_C8_ICS_PREVIEW_SOURCE_INTEGRITY_PASS')
+
+  const beforeRestore=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  const file={schemaVersion:1,records:[original]}
+  await page.locator('input[accept=".json,application/json"]').setInputFiles({name:'earlier.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(file))})
+  const restore=page.getByRole('dialog',{name:'Review calendar restoration'})
+  await restore.waitFor()
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),beforeRestore)
+  await restore.getByRole('button',{name:'Cancel'}).click()
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),beforeRestore)
+  console.log('BROWSER_C8_BACKUP_PREVIEW_NONDESTRUCTIVE_CANCEL_PASS')
+  assert.equal(errors.length,0,errors.join(';'))
+  await context.close()
+}
+async function exerciseC8MobileNavigation(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.getByRole('button',{name:'List'}).click()
+  await page.getByLabel('Agenda range').selectOption('30')
+  assert.equal(await page.locator('.agenda-row').count(),30)
+  await page.getByLabel('Only days with commitments').check()
+  await page.getByText('No commitments in this period').waitFor()
+  await page.getByLabel('Only days with commitments').uncheck()
+  await page.getByRole('button',{name:'Today'}).click()
+  const content=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(content.scroll<=content.width+2,'C8 mobile navigation page overflow: '+JSON.stringify(content))
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_C8_MOBILE_AGENDA_NAVIGATION_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -468,6 +566,8 @@ try{
   await exerciseC7DstAndRange()
   await exerciseC7AllDayResize()
   await exerciseC7HeldEdgeScrolling()
+  await exerciseC8RecoverySearchAndAgenda()
+  await exerciseC8MobileNavigation()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
