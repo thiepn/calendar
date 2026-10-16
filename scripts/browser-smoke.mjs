@@ -781,6 +781,16 @@ async function exerciseC10OfflineShell(){
   await page.locator('.timeline-block').filter({hasText:'C10 offline personal'}).waitFor()
   await context.setOffline(true)
   await page.reload({waitUntil:'load'})
+  await page.waitForTimeout(800)
+  const offlineStatus=await page.evaluate(async()=>({
+    body:document.body.innerText.slice(0,180),
+    records:JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')||'{"records":[]}').records.map(x=>({title:x.title,start:x.start})),
+    weekBlocks:document.querySelectorAll('.timeline-block').length,
+    script:Array.from(document.scripts).map(x=>x.src),
+    controller:navigator.serviceWorker.controller?.scriptURL,
+    caches:await caches.keys()
+  }))
+  console.log('BROWSER_C10_OFFLINE_DIAGNOSTIC',JSON.stringify(offlineStatus))
   await page.locator('.timeline-block').filter({hasText:'C10 offline personal'}).waitFor()
   const stats=await page.evaluate(async()=>{
     const cache=await caches.keys()
