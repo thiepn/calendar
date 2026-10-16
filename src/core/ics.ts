@@ -96,7 +96,7 @@ export function previewIcs(text:string):IcsPreview {
     if(uid&&original&&/^\d{8}$/.test(original.value))
       replacements.set(uid+'|'+original.value,props)
   }
-  const recurrenceMasterUids=new Set(items.filter(props=>props.some(p=>p.name==='RRULE'))
+  const recurrenceMasterUids=new Set(items.filter(props=>props.some(p=>p.name==='RRULE'||p.name==='RDATE'))
     .map(props=>props.find(p=>p.name==='UID')?.value).filter((uid):uid is string=>Boolean(uid)))
   const consumed=new Set<Property[]>()
   const coveredUids=new Set<string>()
@@ -204,7 +204,9 @@ export function previewIcs(text:string):IcsPreview {
           records.push(...generated)
           coveredUids.add(uid)
           warnings.push(title+': finite timed RRULE materialized into '+generated.length+
-            ' read-only RRULE/RDATE instance(s); source timezone and UID remain authoritative')
+            (props.some(p=>p.name==='RDATE')?
+              ' read-only RRULE/RDATE instance(s); source timezone and UID remain authoritative':
+              ' read-only instance(s); source timezone and UID remain authoritative'))
           continue
         }
         const end=rawEnd?parseInstant(rawEnd):{date:addDays(start.date,1),iso:new Date(addDays(start.date,1)+'T00:00:00').toISOString()}
