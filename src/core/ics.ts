@@ -2,6 +2,7 @@ import type {CalendarRecord,CalendarState} from '../types'
 import {addDays,day,daysBetween} from './dates'
 import {occurrencesBetween} from './occurrences'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
+import {finiteTimedDates,timedWallTemplate,wallValueOn} from './ics-timed'
 
 export interface IcsPreview {records:CalendarRecord[];warnings:string[];name:string}
 type Property={name:string;params:Record<string,string>;value:string}
@@ -107,7 +108,71 @@ export function previewIcs(text:string):IcsPreview {
         const rawStart=get('DTSTART'),rawEnd=get('DTEND')
         if(!rawStart)throw new Error('Missing DTSTART')
         const start=parseInstant(rawStart)
-        if(!start.date)throw new Error('Timed ICS RRULE requires external source expansion; only finite all-day recurrence is supported')
+        if(!start.date){
+          const template=timedWallTemplate(rawStart.value)
+          const finish=timedWallTemplate(rawEnd?.value??'')
+          if(!rawEnd||finish.suffix!==template.suffix||
+            (rawStart.params.TZID??'')!==(rawEnd.params.TZID??'')||
+            (rawStart.params.VALUE??'')!==(rawEnd.params.VALUE??''))
+            throw new Error('Mixed DTSTART/DTEND clock systems are unsupported for recurring timed entries')
+          const startIso=start.iso,endIso=rawEnd?parseInstant(rawEnd).iso:''
+          const duration=Date.parse(endIso)-Date.parse(startIso)
+          if(duration<=0||duration>7*86400000)throw new Error('Invalid timed recurrence duration')
+          const plan=finiteTimedDates(get('RRULE')!.value,template.anchor)
+          const candidates=plan.dates.map(date=>{
+            const original=parseInstant({...rawStart,value:wallValueOn(date,template)})
+            return {date,original}
+          }).filter(item=>!plan.untilInstant||item.original.iso<=plan.untilInstant)
+          if(!candidates.length)throw new Error('Timed recurrence has no qualifying instances')
+          if(records.length+candidates.length>5000)throw new Error('ICS expansion exceeds maximum snapshot size')
+          const generated:CalendarRecord[]=[]
+          const excluded=new Set<string>()
+          for(const ex of props.filter(p=>p.name==='EXDATE')){
+            if(ex.params.VALUE==='DATE')throw new Error('Timed EXDATE cannot be date-only')
+            for(const value of ex.value.split(','))excluded.add(parseInstant({...ex,value}).iso)
+          }
+          const overrides=new Map<string,Property[]>()
+          for(const child of items){
+            if(child.find(p=>p.name==='UID')?.value!==uid)continue
+            const originalId=child.find(p=>p.name==='RECURRENCE-ID')
+            if(!originalId)continue
+            if(originalId.params.VALUE==='DATE')throw new Error('Timed RECURRENCE-ID cannot be date-only')
+            const target=parseInstant(originalId).iso
+            if(overrides.has(target))throw new Error('Duplicate timed RECURRENCE-ID override')
+            overrides.set(target,child)
+          }
+          const generatedKeys=new Set<string>()
+          for(const candidate of candidates){
+            const original=candidate.original.iso
+            generatedKeys.add(original)
+            const override=overrides.get(original)
+            if(override)consumed.add(override)
+            if(override?.find(p=>p.name==='STATUS')?.value.toUpperCase()==='CANCELLED')continue
+            if(excluded.has(original)&&!override)continue
+            const fromProp=override?.find(p=>p.name==='DTSTART')
+            const toProp=override?.find(p=>p.name==='DTEND')
+            const from=fromProp?parseInstant(fromProp):candidate.original
+            const to=toProp?parseInstant(toProp):{iso:new Date(Date.parse(from.iso)+duration).toISOString()}
+            if(from.date||to.date||Date.parse(to.iso)<=Date.parse(from.iso))
+              throw new Error('Invalid timed occurrence override')
+            const read=(key:string)=>override?.find(p=>p.name===key)?.value??get(key)?.value??''
+            const updatedTitle=unescapeText(read('SUMMARY')).trim()||'Untitled'
+            const description=unescapeText(read('DESCRIPTION')),location=unescapeText(read('LOCATION'))
+            if(updatedTitle.length>240||description.length>4000||location.length>500)
+              throw new Error('Timed recurrence content exceeds field bounds')
+            const sourceKey=name+'|'+uid+'|'+original
+            generated.push({id:'ics-'+hash(sourceKey),source:'ics',sourceCalendar:name,sourceKey,
+              title:updatedTitle,description,location,start:from.iso,end:to.iso,allDay:false,
+              updatedAt:new Date().toISOString()})
+          }
+          if(Array.from(overrides.keys()).some(key=>!generatedKeys.has(key)))
+            throw new Error('Timed recurrence contains an override outside the supported bounded series')
+          records.push(...generated)
+          coveredUids.add(uid)
+          warnings.push(title+': finite timed RRULE materialized into '+generated.length+
+            ' read-only instance(s); source timezone and UID remain authoritative')
+          continue
+        }
         const end=rawEnd?parseInstant(rawEnd):{date:addDays(start.date,1),iso:new Date(addDays(start.date,1)+'T00:00:00').toISOString()}
         if(!end.date||end.date<=start.date)throw new Error('Invalid finite all-day range')
         const duration=daysBetween(start.date,end.date)
