@@ -1,5 +1,6 @@
 import type {CalendarRecord,CalendarState} from '../types'
 import {day} from './dates'
+import {validReminderLead} from './reminders'
 const KEY='thiepn.calendar.local.v1'
 const RECOVERY_KEY='thiepn.calendar.recovery.v1'
 const RAW_RESCUE_KEY='thiepn.calendar.raw-rescue.v1'
@@ -11,6 +12,8 @@ export function validateRecord(value:unknown):CalendarRecord {
   if(typeof r.start!=='string'||typeof r.end!=='string'||!Number.isFinite(Date.parse(r.start))||!Number.isFinite(Date.parse(r.end))||Date.parse(r.end)<=Date.parse(r.start)) throw new Error('Invalid event time range')
   if(typeof r.description!=='string'||r.description.length>4000||typeof r.location!=='string'||r.location.length>500)throw new Error('Invalid event details')
   if(typeof r.allDay!=='boolean'||!['personal','ics'].includes(r.source))throw new Error('Invalid event source')
+  if(r.reminderMinutes!==undefined&&(!validReminderLead(r.reminderMinutes)||r.source!=='personal'))
+    throw new Error('Invalid personal reminder lead time')
   if(r.allDay){day(r.startDate!);day(r.endDateExclusive!);if(r.endDateExclusive!<=r.startDate!)throw new Error('Invalid all-day dates')}
   if(r.recurrenceParentId!==undefined||r.recurrenceDate!==undefined){
     if(r.source!=='personal'||r.repeat||!r.recurrenceParentId||!r.recurrenceDate)throw new Error('Invalid detached occurrence')

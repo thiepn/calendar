@@ -25,6 +25,8 @@ export interface CalendarRecord {
   recurrenceDate?: LocalDate
   repeat?: RepeatRule
   excludedDates?: LocalDate[]
+  /** Optional local-only reminder lead time for personal events; imported ICS never owns reminders. */
+  reminderMinutes?: number
   updatedAt: string
 }
 export interface CalendarOccurrence {
