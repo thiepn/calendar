@@ -328,13 +328,31 @@ export default function App(){
           <div className="date-navigation"><button className="secondary compact" onClick={()=>setSelected(localDate())}>Today</button>
             <button className="icon-button" aria-label="Previous period" onClick={()=>step(-1)}><ChevronLeft size={19}/></button>
             <button className="icon-button" aria-label="Next period" onClick={()=>step(1)}><ChevronRight size={19}/></button>
-            <h2>{title}</h2></div>
+            <h2>{title}</h2>
+            <label className="date-jump">Jump <input ref={jumpInput} aria-label="Jump to date" type="date" value={selected} onChange={e=>{if(e.target.value)setSelected(e.target.value)}}/></label></div>
           <div className="view-switch">{(['month','week','day','agenda'] as const).map(m=><button key={m} onClick={()=>setMode(m)} className={mode===m?'active':''}>{m==='agenda'?'List':m[0].toUpperCase()+m.slice(1)}</button>)}</div>
         </div>
         {notice&&<div className={'notice '+(/failed|rejected|not saved|could not/i.test(notice)?'notice-error':'')} role="status">{notice}<button onClick={()=>setNotice('')} aria-label="Dismiss message"><X size={14}/></button></div>}
+        {unreadable&&<div className="recovery-danger" role="alert">The saved calendar could not be read. No replacement has been written. <button className="secondary compact" onClick={downloadUnreadable}>Download original raw data</button> before attempting recovery.</div>}
+        {query.trim()&&<section className="search-results-panel" aria-label="Calendar search results">
+          <header><strong>Search across the next 365 days</strong><span>{searchMatches.length} match{searchMatches.length===1?'':'es'} shown (maximum 30)</span></header>
+          <div className="search-results-items">{searchMatches.map(item=><button key={item.key} type="button" onClick={()=>{setMode('day');open(item)}}>
+            <span className="search-result-date">{dateLabel(item.startDate,{month:'short',day:'numeric',year:'numeric'})}</span>
+            <span className="search-result-title">{item.title}</span>
+            <small>{item.source==='ics'?'Imported · read only':'Personal'} · {item.allDay?'All day':new Date(item.start).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small>
+          </button>)}
+          {!searchMatches.length&&<p className="empty-note">No matching saved events during this 365-day window. Change the selected date to search another period.</p>}</div>
+        </section>}
+        {mode==='agenda'&&<div className="agenda-options">
+          <label>Agenda range<select aria-label="Agenda range" value={agendaSpan} onChange={e=>setAgendaSpan(Number(e.target.value) as 14|30)}>
+            <option value={14}>14 days</option><option value={30}>30 days</option>
+          </select></label>
+          <label><input type="checkbox" checked={agendaBusyOnly} onChange={e=>setAgendaBusyOnly(e.target.checked)}/> Only days with commitments</label>
+        </div>}}
         <div className="content-grid">
           <div className="calendar-surface"><CalendarViews mode={mode} days={days} selected={selected} records={visible} onSelect={setSelected} onOpen={open} onCreate={create} onCreateAt={(date,start,end)=>startSlot({date,start,end})}
-              onAdjust={requestAdjustment} onAllDaySlot={startAllDay} onAllDayAdjust={requestAllDayAdjustment}/></div>
+              onAdjust={requestAdjustment} onAllDaySlot={startAllDay} onAllDayAdjust={requestAllDayAdjustment}
+              hideEmptyAgenda={agendaBusyOnly}/></div>
           <aside className="inspector">
             <div className="inspector-heading"><span className="eyebrow">SELECTED DAY</span><h3>{dateLabel(selected,{weekday:'long',month:'short',day:'numeric'})}</h3>
               <p>{selectedEvents.length} visible commitment{selectedEvents.length===1?'':'s'}</p></div>
@@ -353,6 +371,8 @@ export default function App(){
       ignoreOccurrence={editInstance?{id:editInstance.parentId,date:editInstance.date}:undefined}
       ignoreParentFrom={editFuture?{id:editFuture.parentId,date:editFuture.date}:undefined}
       scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)}}/>}
+    {restoreCandidate&&<RestoreDialog current={calendar} candidate={restoreCandidate.state} origin={restoreCandidate.origin}
+      onClose={()=>setRestoreCandidate(null)} onConfirm={confirmRestore}/>}
     {finderOpen&&<div className="modal-backdrop" onMouseDown={ev=>{if(ev.target===ev.currentTarget)setFinderOpen(false)}}>
       <section className="finder-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Find an available time">
         <header className="editor-head"><div className="heading-inline"><Clock3 size={20}/><h2>Find time</h2></div><button className="icon-button" aria-label="Close time finder" onClick={()=>setFinderOpen(false)}><X size={19}/></button></header>
@@ -466,8 +486,12 @@ export default function App(){
         <label><input type="radio" checked={importMode==='update'} onChange={()=>setImportMode('update')}/> Add new entries and refresh matching event UIDs; keep others</label>
         <label><input type="radio" checked={importMode==='replace'} onChange={()=>setImportMode('replace')}/> Replace the earlier imported snapshot named “{pending.name}” entirely</label>
       </fieldset>
+      {importReview?.error&&<p role="alert" className="error">Import cannot be applied: {importReview.error}</p>}
+      {importReview?.result&&<p className="import-delta" aria-label="Import change preview">
+        Preview: <strong>{importReview.result.added} new</strong> · {importReview.result.updated} updated · {importReview.result.duplicates} unchanged · {importReview.result.removed} removed from this local snapshot.
+      </p>}
       <p className="fine-print">Read-only local snapshot; not live sync. Unsupported RRULE masters are skipped with warnings. Neither method modifies Google, Folio, KLIPS or personal events.</p>
-      <footer className="editor-actions"><button className="secondary" onClick={()=>setPending(null)}>Cancel</button><button className="primary" onClick={applyImport}>Apply {pending.records.length} entries</button></footer>
+      <footer className="editor-actions"><button className="secondary" onClick={()=>setPending(null)}>Cancel</button><button className="primary" onClick={applyImport} disabled={!importReview?.result}>Apply reviewed changes</button></footer>
     </section></div>}
     {sourcePanel&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setSourcePanel(false)}}>
       <section className="sources-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Calendar data management">
@@ -478,7 +502,10 @@ export default function App(){
         <hr/><h3>Backups & interop</h3><div className="button-stack">
           <button className="secondary" onClick={()=>importInput.current?.click()}><Upload size={16}/> Import ICS snapshot</button>
           <button className="secondary" onClick={()=>download('thiepn-calendar-backup.json',exportBackup(calendar),'application/json')}><Download size={16}/> Save full JSON backup</button>
-          <button className="secondary" onClick={()=>restoreInput.current?.click()}><Upload size={16}/> Restore JSON backup</button>
+          <button className="secondary" onClick={()=>restoreInput.current?.click()}><Upload size={16}/> Review JSON backup restoration</button>
+          <button className="secondary" disabled={!recovery} onClick={proposeRecovery}><RotateCcw size={16}/> Review previous-version checkpoint</button>
+          {recovery&&<p className="fine-print">Checkpoint: {new Date(recovery.savedAt).toLocaleString()} — {recovery.label}. Stores one prior complete version on this device.</p>}
+          {unreadable&&<button className="danger" onClick={downloadUnreadable}><Download size={16}/> Download unreadable original bytes</button>}
         </div><div className="readonly-note"><AlertTriangle size={16}/> No Account, Google or Folio sync is connected. Keep a backup before clearing browser data.</div>
         <a target="_blank" rel="noopener noreferrer" href="https://github.com/thiepn/folio" className="external-inline">Open source-owned Folio <ExternalLink size={14}/></a>
       </section></div>}
