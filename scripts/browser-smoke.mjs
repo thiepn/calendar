@@ -217,6 +217,123 @@ async function exerciseTouchDragMobile(){
   await context.close()
 }
 
+
+async function exerciseC6Desktop(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage()
+  const errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const allDayCols=page.locator('.timeline-all-day-col')
+  const a=await allDayCols.nth(0).locator('.timeline-all-day-create').boundingBox()
+  const b=await allDayCols.nth(2).locator('.timeline-all-day-create').boundingBox()
+  assert.ok(a&&b,'Graphical all-day row must expose selectable day columns')
+  await page.mouse.move(a.x+a.width/2,a.y+a.height/2)
+  await page.mouse.down()
+  await page.mouse.move(b.x+b.width/2,b.y+b.height/2,{steps:12})
+  await page.mouse.up()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.waitFor()
+  assert.equal(await editor.getByLabel('All-day event').isChecked(),true)
+  const from=await editor.locator('input[type="date"]').first().inputValue()
+  const through=await editor.locator('input[type="date"]').nth(1).inputValue()
+  const plus=(d,n)=>new Date(Date.parse(d+'T00:00:00Z')+n*86400000).toISOString().slice(0,10)
+  assert.equal(through,plus(from,2),'Pointer-selected multi-day range should span 3 days')
+  await editor.getByLabel('Event name').fill('C6 vacation span')
+  await editor.getByRole('button',{name:'Create event'}).click()
+  const original=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.find(x=>x.title==='C6 vacation span'))
+  assert.equal(original.startDate,from)
+  assert.equal(original.endDateExclusive,plus(from,3))
+  console.log('BROWSER_C6_DESKTOP_ALLDAY_DRAG_CREATE_PASS')
+
+  const moveButton=allDayCols.nth(0).locator('.timeline-all-day-event').filter({hasText:'C6 vacation span'})
+  const move=await moveButton.boundingBox()
+  const destination=await allDayCols.nth(1).locator('.timeline-all-day-create').boundingBox()
+  assert.ok(move&&destination,'All-day move needs source and destination')
+  await page.mouse.move(move.x+move.width/2,move.y+move.height/2)
+  await page.mouse.down()
+  await page.mouse.move(destination.x+destination.width/2,move.y+move.height/2,{steps:12})
+  await page.mouse.up()
+  const confirm=page.getByRole('dialog',{name:'Confirm all-day adjustment'})
+  await confirm.waitFor()
+  assert.equal(await confirm.locator('input[type="date"]').first().inputValue(),plus(from,1))
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records[0].startDate)
+  assert.equal(before,from,'Drag should not save without explicit confirmation')
+  await confirm.getByRole('button',{name:'Confirm all-day change'}).click()
+  const after=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.find(x=>x.title==='C6 vacation span'))
+  assert.equal(after.id,original.id,'Moving must preserve original canonical record ID')
+  assert.equal(after.startDate,plus(from,1))
+  assert.equal(after.endDateExclusive,plus(from,4))
+  console.log('BROWSER_C6_DESKTOP_ALLDAY_DRAG_MOVE_PASS')
+
+  // Seed a read-only snapshot, hide it with the Personal source filter and check draft review.
+  const imported=await page.evaluate(()=>{
+    const key='thiepn.calendar.local.v1', state=JSON.parse(localStorage.getItem(key))
+    const d=new Date(),local=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-')
+    const ics={id:'c6-read-only-ics',title:'C6 hidden ICS lecture',description:'',location:'',
+      start:new Date(local+'T09:30:00').toISOString(),end:new Date(local+'T10:30:00').toISOString(),
+      allDay:false,source:'ics',sourceCalendar:'C6 hidden',sourceKey:'C6 hidden|lecture',updatedAt:new Date().toISOString()}
+    state.records.push(ics);localStorage.setItem(key,JSON.stringify(state));return ics
+  })
+  await page.reload({waitUntil:'networkidle'})
+  await page.locator('.source-entry').filter({hasText:'Personal'}).first().click()
+  await page.locator('.top-create').click()
+  const newEditor=page.getByRole('dialog',{name:'New event'})
+  await newEditor.getByLabel('Event name').fill('C6 explicit overlap')
+  await newEditor.getByText('C6 hidden ICS lecture').waitFor()
+  const reviewText=await newEditor.getByLabel('Calendar conflict review').innerText()
+  assert.match(reviewText,/imported, read-only/)
+  await newEditor.getByRole('button',{name:'Create event'}).click()
+  await newEditor.getByText(/Acknowledge overlapping events/).waitFor()
+  await newEditor.getByLabel('Save despite these overlaps or recurrence time warnings').check()
+  await newEditor.getByRole('button',{name:'Create event'}).click()
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(saved.find(x=>x.id==='c6-read-only-ics').start,imported.start)
+  assert.ok(saved.some(x=>x.title==='C6 explicit overlap'))
+  console.log('BROWSER_C6_HIDDEN_SOURCE_DRAFT_CONFIRM_PASS')
+
+  await page.locator('.top-create').click()
+  const dst=page.getByRole('dialog',{name:'New event'})
+  await dst.getByLabel('Starts').fill('2026-10-25T02:30')
+  await dst.getByLabel('Ends').fill('2026-10-25T03:30')
+  await dst.getByText(/occurs twice/).waitFor()
+  assert.equal(await dst.getByRole('button',{name:'Create event'}).isDisabled(),true)
+  await dst.getByRole('button',{name:'Cancel'}).click()
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_C6_EDITOR_DST_GUARD_PASS')
+  await context.close()
+}
+
+async function exerciseC6Mobile(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage()
+  const errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.locator('.timeline-all-day-create').first().click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.waitFor()
+  assert.equal(await editor.getByLabel('All-day event').isChecked(),true)
+  await editor.getByLabel('Event name').fill('Mobile all-day dates')
+  await editor.getByRole('button',{name:'Create event'}).click()
+  await page.locator('.timeline-all-day-event').filter({hasText:'Mobile all-day dates'}).first().click()
+  await page.getByRole('button',{name:'Adjust all-day dates'}).click()
+  const dlg=page.getByRole('dialog',{name:'Confirm all-day adjustment'})
+  await dlg.waitFor()
+  const first=await dlg.locator('input[type="date"]').first().inputValue()
+  const last=new Date(Date.parse(first+'T00:00:00Z')+86400000).toISOString().slice(0,10)
+  await dlg.getByLabel('Last day (inclusive)').fill(last)
+  await dlg.getByRole('button',{name:'Confirm all-day change'}).click()
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.find(x=>x.title==='Mobile all-day dates'))
+  assert.equal(saved.startDate,first)
+  assert.equal(saved.endDateExclusive,new Date(Date.parse(last+'T00:00:00Z')+86400000).toISOString().slice(0,10))
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_C6_MOBILE_ALLDAY_DATE_EDIT_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -225,6 +342,8 @@ try{
   await exerciseMobile()
   await exerciseGesturesDesktop()
   await exerciseTouchDragMobile()
+  await exerciseC6Desktop()
+  await exerciseC6Mobile()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
