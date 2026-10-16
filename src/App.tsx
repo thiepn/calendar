@@ -44,6 +44,7 @@ export default function App(){
   const [filter,setFilter]=useState<Filter>('all')
   const [query,setQuery]=useState('')
   const [editing,setEditing]=useState<CalendarRecord|null>(null)
+  const [copyDraft,setCopyDraft]=useState(false)
   const [editInstance,setEditInstance]=useState<{parentId:string;date:LocalDate}|null>(null)
   const [editFuture,setEditFuture]=useState<{parentId:string;date:LocalDate;newId:string}|null>(null)
   const [moveDate,setMoveDate]=useState<LocalDate>(localDate())
@@ -190,14 +191,14 @@ export default function App(){
     blockAllDay:finderBlockAllDay,maxResults:18
   }):[],[finderOpen,calendar,selected,finderDays,finderDuration,finderWindow,finderBlockAllDay])
 
-  function create(date:LocalDate){setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setEditorDate(date)}
+  function create(date:LocalDate){setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setEditorDate(date)}
   function startSlot(slot:FreeSlot){
-    setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null)
+    setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null)
     setNewAllDay(null);setNewEventRange({start:slot.start,end:slot.end});setEditorDate(slot.date)
     setSelected(slot.date);setFinderOpen(false)
   }
   function startAllDay(from:LocalDate,through:LocalDate){
-    setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null)
+    setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null)
     setNewAllDay({from,through});setEditorDate(from);setSelected(from)
   }
   function requestAllDayAdjustment(item:CalendarOccurrence,from:LocalDate,through:LocalDate){
@@ -229,6 +230,7 @@ export default function App(){
     }catch(error){setNotice('Reschedule rejected: '+String(error))}
   }
   function edit(item:CalendarOccurrence,scope:'series'|'instance'|'future'='series'){
+    setCopyDraft(false)
     const record=calendar.records.find(x=>x.id===item.recordId)
     if(!record||record.source!=='personal')return
     setEditFuture(null)
@@ -247,6 +249,26 @@ export default function App(){
     }else{setEditing(record);setEditInstance(null)}
     setEditorDate(item.date);setActive(null)
   }
+  function duplicateToDate(item:CalendarOccurrence){
+    const original=calendar.records.find(r=>r.id===item.recordId)
+    if(!original||original.source!=='personal')return
+    try{
+      const proposed=shiftOccurrence(original,item,moveDate)
+      setEditing({...proposed,id:crypto.randomUUID(),title:item.title+' copy',
+        description:item.description,location:item.location,repeat:undefined,excludedDates:undefined,
+        recurrenceParentId:undefined,recurrenceDate:undefined})
+      setCopyDraft(true);setEditInstance(null);setEditFuture(null)
+      setNewEventRange(null);setNewAllDay(null);setEditorDate(moveDate);setActive(null)
+    }catch(error){setNotice('Duplicate preparation failed: '+String(error))}
+  }
+  function nextRecurring(item:CalendarOccurrence){
+    const record=calendar.records.find(r=>r.id===item.recordId)
+    if(!record?.repeat)return
+    const candidates=occurrencesBetween([record],addDays(item.date,1),addDays(item.date,365))
+    const next=candidates.find(x=>x.date>item.date)
+    if(!next){setNotice('No later active occurrence found in the next 365 days');return}
+    setActive(next);setSelected(next.date);setMoveDate(next.startDate)
+  }
   function save(record:CalendarRecord){
     try{
       const next=editFuture?saveWholeEvent(splitSeriesAt(calendar,editFuture.parentId,editFuture.date,editFuture.newId),record):
@@ -254,7 +276,7 @@ export default function App(){
         calendar.records.some(r=>r.id===record.id)?saveWholeEvent(calendar,record):
         {schemaVersion:1 as const,records:[...calendar.records,record]}
       if(commit(next,'Event saved locally')){
-        setEditorDate(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)
+        setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)
       }
     }catch(error){setNotice('Not saved: '+String(error))}
   }
@@ -442,10 +464,10 @@ export default function App(){
     </div>
     <input ref={importInput} type="file" accept=".ics,text/calendar" hidden onChange={readIcs}/>
     <input ref={restoreInput} type="file" accept=".json,application/json" hidden onChange={readBackup}/>
-    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate+(newEventRange?.start??'')+(newAllDay?.through??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} initialAllDay={newAllDay??undefined} records={calendar.records}
+    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate+(newEventRange?.start??'')+(newAllDay?.through??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} initialAllDay={newAllDay??undefined} records={calendar.records} isCopy={copyDraft}
       ignoreOccurrence={editInstance?{id:editInstance.parentId,date:editInstance.date}:undefined}
       ignoreParentFrom={editFuture?{id:editFuture.parentId,date:editFuture.date}:undefined}
-      scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)}}/>}
+      scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)}}/>}
     {restoreCandidate&&<RestoreDialog current={calendar} candidate={restoreCandidate.state} origin={restoreCandidate.origin} unreadableCurrent={unreadable}
       onClose={()=>setRestoreCandidate(null)} onConfirm={confirmRestore}/>}
     {remindersOpen&&<ReminderCenter items={reminders} onClose={()=>setRemindersOpen(false)}
@@ -533,9 +555,11 @@ export default function App(){
         {activeRecord?.recurrenceParentId&&<div className="readonly-note">Edited occurrence from a recurring series. Original series date: {activeRecord.recurrenceDate}.</div>}
         {active.source==='personal'&&<div className="move-control"><label>Move to date<input type="date" value={moveDate} onChange={ev=>setMoveDate(ev.target.value)}/></label>
           <button className="secondary" type="button" disabled={!moveDate||moveDate===active.startDate} onClick={()=>move(active)}>Move event</button>
+          <button className="secondary" type="button" onClick={()=>duplicateToDate(active)}>Duplicate to selected date</button>
           <p className="fine-print">Moving one repeating occurrence keeps the remaining series unchanged. All changes remain on this device.</p>
         </div>}
         <footer className="editor-actions">
+          {activeRecord?.repeat&&<button className="secondary" onClick={()=>nextRecurring(active)}><ChevronRight size={15}/> Next occurrence</button>}
           {activeRecord?.repeat&&<button className="secondary" onClick={()=>skip(active)}><RotateCcw size={15}/> Skip this date</button>}
           {activeRecord?.recurrenceParentId&&<button className="secondary" onClick={()=>restore(active)}><RotateCcw size={15}/> Restore original date</button>}
           {active.source==='personal'&&activeRecord?.repeat&&<button className="secondary" onClick={()=>edit(active,'instance')}><Pencil size={15}/> Edit this occurrence</button>}

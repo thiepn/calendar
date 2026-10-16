@@ -4,8 +4,8 @@ import type {CalendarRecord,Frequency,LocalDate,RepeatRule} from '../types'
 import {addDays,day,localDateTime,dateLabel,localInstantOptions,offsetLabel} from '../core/dates'
 import {draftTimedRange,reviewDraft} from '../core/draft'
 const weekdays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
-type Props={date:LocalDate;event?:CalendarRecord;initialRange?:{start:string;end:string};initialAllDay?:{from:LocalDate;through:LocalDate};records:CalendarRecord[];ignoreOccurrence?:{id:string;date:LocalDate};ignoreParentFrom?:{id:string;date:LocalDate};scope?:'instance'|'future';onSave:(record:CalendarRecord)=>void;onClose:()=>void}
-export function EventEditor({date,event,initialRange,initialAllDay,records,ignoreOccurrence,ignoreParentFrom,scope,onSave,onClose}:Props){
+type Props={date:LocalDate;event?:CalendarRecord;initialRange?:{start:string;end:string};initialAllDay?:{from:LocalDate;through:LocalDate};records:CalendarRecord[];ignoreOccurrence?:{id:string;date:LocalDate};ignoreParentFrom?:{id:string;date:LocalDate};scope?:'instance'|'future';isCopy?:boolean;onSave:(record:CalendarRecord)=>void;onClose:()=>void}
+export function EventEditor({date,event,initialRange,initialAllDay,records,ignoreOccurrence,ignoreParentFrom,scope,isCopy=false,onSave,onClose}:Props){
   const [title,setTitle]=useState(event?.title??'')
   const [description,setDescription]=useState(event?.description??'')
   const [location,setLocation]=useState(event?.location??'')
@@ -91,8 +91,8 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
     }catch(err){setError(err instanceof Error?err.message:String(err))}
   }
   return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
-    <section className="editor dialog-surface" role="dialog" aria-modal="true" aria-label={scope==='instance'?'Edit one occurrence':scope==='future'?'Edit this and future':event?'Edit event':'New event'}>
-      <header className="editor-head"><div className="heading-inline"><CalendarPlus size={20}/><h2>{scope==='instance'?'Edit one occurrence':scope==='future'?'Edit this and future':event?'Edit event':'New event'}</h2></div>
+    <section className="editor dialog-surface" role="dialog" aria-modal="true" aria-label={isCopy?'Duplicate event':scope==='instance'?'Edit one occurrence':scope==='future'?'Edit this and future':event?'Edit event':'New event'}>
+      <header className="editor-head"><div className="heading-inline"><CalendarPlus size={20}/><h2>{isCopy?'Duplicate event':scope==='instance'?'Edit one occurrence':scope==='future'?'Edit this and future':event?'Edit event':'New event'}</h2></div>
         <button className="icon-button" onClick={onClose} aria-label="Close editor"><X size={19}/></button></header>
       <form onSubmit={submit} className="editor-form">
         <label>Event name<input autoFocus required maxLength={240} value={title} onChange={e=>setTitle(e.target.value)} placeholder="What are you planning?"/></label>
@@ -157,7 +157,7 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
         </div>
         <p className="fine-print">Times use this device's local time zone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Start/end local times that do not exist or occur twice are rejected. Recurring collision review uses the selected 90–365-day horizon; conflicts beyond it remain unchecked.</p>
         {error&&<div className="error" role="alert">{error}</div>}
-        <footer className="editor-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" type="submit" disabled={Boolean(inspection.error)}>{scope==='instance'?'Save this occurrence':scope==='future'?'Save future series':event?'Save changes':'Create event'}</button></footer>
+        <footer className="editor-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" type="submit" disabled={Boolean(inspection.error)}>{isCopy?'Create duplicate':scope==='instance'?'Save this occurrence':scope==='future'?'Save future series':event?'Save changes':'Create event'}</button></footer>
       </form>
     </section>
   </div>
