@@ -29,6 +29,8 @@ export function reviewDraft(records:CalendarRecord[],candidate:CalendarRecord,op
   if(!Number.isInteger(horizon)||horizon<1||horizon>366)throw new Error('Invalid conflict review window')
   const startDate=candidate.allDay?candidate.startDate!:localDate(new Date(candidate.start))
   const until=addDays(startDate,horizon-1)
+  // A year is deliberately capped to avoid unbounded iteration. This is a preview,
+  // not evidence that events beyond checkedThrough are conflict-free.
   const candidates=occurrencesBetween([candidate],startDate,until)
   const earliest=addDays(startDate,-31)
   const existing=occurrencesBetween(records,earliest,addDays(until,31)).filter(x=>{

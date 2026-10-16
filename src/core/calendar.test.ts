@@ -1,6 +1,6 @@
 import {describe,it,expect} from 'vitest'
 import type {CalendarRecord,CalendarState} from '../types'
-import {addDays,daysBetween,fromLocalDateTime,fromUnambiguousLocalDateTime} from './dates'
+import {addDays,daysBetween,fromLocalDateTime,fromUnambiguousLocalDateTime,localInstantOptions,resolveLocalInstant} from './dates'
 import {proposeTimedChange,applyTimedChange,nudgeTimed} from './reschedule'
 import {draftTimedRange,reviewDraft} from './draft'
 import {proposeAllDayChange,applyAllDayChange} from './all-day'
@@ -8,7 +8,7 @@ import {occurrencesBetween,excludeOccurrence,conflictsOnDay} from './occurrences
 import {previewIcs,mergeIcs,exportIcs} from './ics'
 import {validateState} from './storage'
 import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent,splitSeriesAt,endSeriesAt} from './series'
-import {layoutTimedDay,slotRange} from './timeline'
+import {layoutTimedDay,slotRange,dayAxis,slotAt} from './timeline'
 import {findFreeSlots} from './availability'
 const record=(patch:Partial<CalendarRecord>={}):CalendarRecord=>({
   id:'test',title:'Study',description:'',location:'',source:'personal',
@@ -304,5 +304,53 @@ describe('C6 candidate review and all-day integrity',()=>{
     expect(next.records[0].excludedDates).toContain('2026-10-21')
     expect(next.records[1].recurrenceParentId).toBe('test')
     expect(next.records[1].recurrenceDate).toBe('2026-10-21')
+  })
+})
+
+describe('C7 real elapsed-time DST graphical axis and fold selection',()=>{
+  it('renders both fall-back 02:00 slots with distinct ISO timestamps and offset labels',()=>{
+    if(Intl.DateTimeFormat().resolvedOptions().timeZone!=='Europe/Berlin')return
+    const axis=dayAxis('2026-10-25')
+    expect(axis.minutes).toBe(1500)
+    expect(axis.slots).toHaveLength(50)
+    const twos=axis.slots.filter(s=>s.label==='02:00')
+    expect(twos).toHaveLength(2)
+    expect(twos[0].start).not.toBe(twos[1].start)
+    expect(twos.map(x=>x.offset)).toEqual(['UTC+02:00','UTC+01:00'])
+    expect(twos.every(x=>x.repeated)).toBe(true)
+    expect(slotAt(axis,twos[1].minute,30).start).toBe(twos[1].start)
+    const candidates=localInstantOptions('2026-10-25T02:30')
+    expect(candidates).toHaveLength(2)
+    expect(resolveLocalInstant('2026-10-25T02:30','earlier')).toBe(candidates[0])
+    expect(resolveLocalInstant('2026-10-25T02:30','later')).toBe(candidates[1])
+  })
+  it('renders the missing spring hour as 23 physical hours with no imaginary slot',()=>{
+    if(Intl.DateTimeFormat().resolvedOptions().timeZone!=='Europe/Berlin')return
+    const axis=dayAxis('2026-03-29')
+    expect(axis.minutes).toBe(1380)
+    expect(axis.slots).toHaveLength(46)
+    expect(axis.slots.some(x=>x.label==='02:00')).toBe(false)
+    expect(()=>localInstantOptions('2026-03-29T02:30')).toThrow('does not exist')
+  })
+  it('positions already-imported absolute fold events in distinct timeline rows',()=>{
+    if(Intl.DateTimeFormat().resolvedOptions().timeZone!=='Europe/Berlin')return
+    const pair=localInstantOptions('2026-10-25T02:00')
+    const start=new Date(pair[0]).getTime()
+    const early=record({id:'fold-first',start:new Date(start).toISOString(),end:new Date(start+1800000).toISOString()})
+    const later=record({id:'fold-second',start:pair[1],end:new Date(Date.parse(pair[1])+1800000).toISOString()})
+    const blocks=layoutTimedDay(occurrencesBetween([early,later],'2026-10-25','2026-10-25'),'2026-10-25')
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0].startMinute).toBe(120)
+    expect(blocks[1].startMinute).toBe(180)
+    expect(blocks[0].lanes).toBe(1)
+    expect(blocks[1].lanes).toBe(1)
+  })
+  it('supports full-year conflict review without claiming a lifetime clean series',()=>{
+    const future=record({id:'hidden',source:'ics',start:fromLocalDateTime('2027-09-06T09:00'),end:fromLocalDateTime('2027-09-06T10:00')})
+    const daily=record({id:'candidate',repeat:{frequency:'weekly',interval:1}})
+    const check=reviewDraft([future],daily,{horizonDays:365})
+    expect(check.checkedThrough).toBe('2027-10-11')
+    expect(check.collisionCount).toBeGreaterThan(0)
+    expect(check.collisions.some(x=>x.existing.recordId==='hidden')).toBe(true)
   })
 })

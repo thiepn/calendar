@@ -39,6 +39,31 @@ export function fromLocalDateTime(value:string):string {
   if (!Number.isFinite(d.getTime()) || localDateTime(d.toISOString())!==value) throw new Error('Time does not exist in this time zone')
   return d.toISOString()
 }
+/** Resolve unique physical instants for a local wall-clock minute.
+ * Explicit UTC instants are canonical; ambiguous wall times require a choice. */
+export function localInstantOptions(value:string):string[] {
+  if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value))throw new Error('Invalid local date/time')
+  const initial=fromLocalDateTime(value)
+  const base=Date.parse(initial)
+  const found=new Set<string>([initial])
+  for(let minutes=-180;minutes<=180;minutes+=15){
+    const candidate=new Date(base+minutes*60000).toISOString()
+    if(localDateTime(candidate)===value)found.add(candidate)
+  }
+  return Array.from(found).sort()
+}
+export function resolveLocalInstant(value:string,fold?:'earlier'|'later'):string {
+  const options=localInstantOptions(value)
+  if(options.length===1)return options[0]
+  if(!fold)throw new Error('This local time occurs twice during a daylight-saving transition. Choose the first or second occurrence.')
+  return fold==='earlier'?options[0]:options[options.length-1]
+}
+export function offsetLabel(iso:string):string {
+  const offset=-new Date(iso).getTimezoneOffset()
+  const hours=String(Math.floor(Math.abs(offset)/60)).padStart(2,'0')
+  const minutes=String(Math.abs(offset)%60).padStart(2,'0')
+  return 'UTC'+(offset>=0?'+':'-')+hours+':'+minutes
+}
 /** Reject nonexistent and duplicated local clock times on DST transitions.
  * Device zone is authoritative for this standalone local-only planner. */
 export function fromUnambiguousLocalDateTime(value:string):string {
