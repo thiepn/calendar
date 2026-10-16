@@ -3,7 +3,7 @@ import {CalendarDays,ChevronLeft,ChevronRight,Plus,Upload,Download,Search,Databa
 import type {CalendarOccurrence,CalendarRecord,CalendarState,LocalDate} from './types'
 import {addDays,addMonths,dateLabel,dateSeries,friendlyRange,localDate,monday,monthGridStart} from './core/dates'
 import {dayOccurrences,excludeOccurrence} from './core/occurrences'
-import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence} from './core/series'
+import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,splitSeriesAt,endSeriesAt} from './core/series'
 import {findFreeSlots,type FreeSlot} from './core/availability'
 import {exportBackup,importBackup,loadState,saveState,STORAGE_KEY} from './core/storage'
 import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
@@ -27,6 +27,7 @@ export default function App(){
   const [query,setQuery]=useState('')
   const [editing,setEditing]=useState<CalendarRecord|null>(null)
   const [editInstance,setEditInstance]=useState<{parentId:string;date:LocalDate}|null>(null)
+  const [editFuture,setEditFuture]=useState<{parentId:string;date:LocalDate;newId:string}|null>(null)
   const [moveDate,setMoveDate]=useState<LocalDate>(localDate())
   const [importMode,setImportMode]=useState<'update'|'replace'>('update')
   const [finderOpen,setFinderOpen]=useState(false)
@@ -90,31 +91,40 @@ export default function App(){
     blockAllDay:finderBlockAllDay,maxResults:18
   }):[],[finderOpen,calendar,selected,finderDays,finderDuration,finderWindow,finderBlockAllDay])
 
-  function create(date:LocalDate){setActive(null);setEditing(null);setEditInstance(null);setNewEventRange(null);setEditorDate(date)}
+  function create(date:LocalDate){setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setEditorDate(date)}
   function startSlot(slot:FreeSlot){
-    setActive(null);setEditing(null);setEditInstance(null)
+    setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null)
     setNewEventRange({start:slot.start,end:slot.end});setEditorDate(slot.date)
     setSelected(slot.date);setFinderOpen(false)
   }
   function open(item:CalendarOccurrence){setActive(item);setSelected(item.date);setMoveDate(item.startDate)}
-  function edit(item:CalendarOccurrence,scope:'series'|'instance'='series'){
+  function edit(item:CalendarOccurrence,scope:'series'|'instance'|'future'='series'){
     const record=calendar.records.find(x=>x.id===item.recordId)
     if(!record||record.source!=='personal')return
+    setEditFuture(null)
     if(scope==='instance'&&record.repeat){
       setEditing({...record,id:crypto.randomUUID(),start:item.start,end:item.end,
         startDate:item.allDay?item.startDate:undefined,endDateExclusive:item.allDay?item.endDateExclusive:undefined,
         allDay:item.allDay,repeat:undefined,excludedDates:undefined})
       setEditInstance({parentId:record.id,date:item.date})
+    }else if(scope==='future'&&record.repeat){
+      const newId=crypto.randomUUID()
+      try{
+        const preview=splitSeriesAt(calendar,record.id,item.date,newId)
+        setEditing(preview.records.find(r=>r.id===newId)!)
+        setEditInstance(null);setEditFuture({parentId:record.id,date:item.date,newId})
+      }catch(error){setNotice('Future-series edit unavailable: '+String(error));return}
     }else{setEditing(record);setEditInstance(null)}
     setEditorDate(item.date);setActive(null)
   }
   function save(record:CalendarRecord){
     try{
-      const next=editInstance?replaceOccurrence(calendar,editInstance.parentId,editInstance.date,record):
+      const next=editFuture?saveWholeEvent(splitSeriesAt(calendar,editFuture.parentId,editFuture.date,editFuture.newId),record):
+        editInstance?replaceOccurrence(calendar,editInstance.parentId,editInstance.date,record):
         calendar.records.some(r=>r.id===record.id)?saveWholeEvent(calendar,record):
         {schemaVersion:1 as const,records:[...calendar.records,record]}
       if(commit(next,'Event saved locally')){
-        setEditorDate(null);setEditing(null);setEditInstance(null);setNewEventRange(null)
+        setEditorDate(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null)
       }
     }catch(error){setNotice('Not saved: '+String(error))}
   }
@@ -131,6 +141,12 @@ export default function App(){
     if(!r?.repeat)return
     const next=excludeOccurrence(r,item.date)
     if(commit({schemaVersion:1,records:calendar.records.map(x=>x.id===r.id?next:x)},'This occurrence was skipped'))setActive(null)
+  }
+  function stopAfter(item:CalendarOccurrence){
+    if(!window.confirm('End future repetitions after '+item.date+'? Already edited future instances will remain standalone events.'))return
+    try{
+      if(commit(endSeriesAt(calendar,item.recordId,item.date),'Future repetitions ended after '+item.date))setActive(null)
+    }catch(error){setNotice('Could not end series: '+String(error))}
   }
   function restore(item:CalendarOccurrence){
     try{
@@ -220,7 +236,7 @@ export default function App(){
         </div>
         {notice&&<div className={'notice '+(/failed|rejected|not saved|could not/i.test(notice)?'notice-error':'')} role="status">{notice}<button onClick={()=>setNotice('')} aria-label="Dismiss message"><X size={14}/></button></div>}
         <div className="content-grid">
-          <div className="calendar-surface"><CalendarViews mode={mode} days={days} selected={selected} records={visible} onSelect={setSelected} onOpen={open} onCreate={create}/></div>
+          <div className="calendar-surface"><CalendarViews mode={mode} days={days} selected={selected} records={visible} onSelect={setSelected} onOpen={open} onCreate={create} onCreateAt={(date,start,end)=>startSlot({date,start,end})}/></div>
           <aside className="inspector">
             <div className="inspector-heading"><span className="eyebrow">SELECTED DAY</span><h3>{dateLabel(selected,{weekday:'long',month:'short',day:'numeric'})}</h3>
               <p>{selectedEvents.length} visible commitment{selectedEvents.length===1?'':'s'}</p></div>
@@ -235,7 +251,7 @@ export default function App(){
     </div>
     <input ref={importInput} type="file" accept=".ics,text/calendar" hidden onChange={readIcs}/>
     <input ref={restoreInput} type="file" accept=".json,application/json" hidden onChange={readBackup}/>
-    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate+(newEventRange?.start??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} scope={editInstance?'instance':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setEditInstance(null);setNewEventRange(null)}}/>}
+    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate+(newEventRange?.start??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null)}}/>}
     {finderOpen&&<div className="modal-backdrop" onMouseDown={ev=>{if(ev.target===ev.currentTarget)setFinderOpen(false)}}>
       <section className="finder-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Find an available time">
         <header className="editor-head"><div className="heading-inline"><Clock3 size={20}/><h2>Find time</h2></div><button className="icon-button" aria-label="Close time finder" onClick={()=>setFinderOpen(false)}><X size={19}/></button></header>
@@ -269,6 +285,8 @@ export default function App(){
           {activeRecord?.repeat&&<button className="secondary" onClick={()=>skip(active)}><RotateCcw size={15}/> Skip this date</button>}
           {activeRecord?.recurrenceParentId&&<button className="secondary" onClick={()=>restore(active)}><RotateCcw size={15}/> Restore original date</button>}
           {active.source==='personal'&&activeRecord?.repeat&&<button className="secondary" onClick={()=>edit(active,'instance')}><Pencil size={15}/> Edit this occurrence</button>}
+          {active.source==='personal'&&activeRecord?.repeat&&<button className="secondary" onClick={()=>edit(active,'future')}><Pencil size={15}/> Edit this and future</button>}
+          {active.source==='personal'&&activeRecord?.repeat&&<button className="secondary" onClick={()=>stopAfter(active)}><RotateCcw size={15}/> End after this date</button>
           {active.source==='personal'&&<button className="secondary" onClick={()=>edit(active)}><Pencil size={15}/> {activeRecord?.repeat?'Edit whole series':'Edit event'}</button>}
           <button className="danger" onClick={()=>remove(active.recordId)}><Trash2 size={15}/> {active.source==='ics'?'Remove copy':activeRecord?.repeat?'Delete series':'Delete'}</button>
         </footer>
