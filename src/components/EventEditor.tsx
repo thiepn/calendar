@@ -3,8 +3,8 @@ import {X,CalendarPlus} from 'lucide-react'
 import type {CalendarRecord,Frequency,LocalDate,RepeatRule} from '../types'
 import {addDays,fromLocalDateTime,localDateTime} from '../core/dates'
 const weekdays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
-type Props={date:LocalDate;event?:CalendarRecord;onSave:(record:CalendarRecord)=>void;onClose:()=>void}
-export function EventEditor({date,event,onSave,onClose}:Props){
+type Props={date:LocalDate;event?:CalendarRecord;scope?:'instance';onSave:(record:CalendarRecord)=>void;onClose:()=>void}
+export function EventEditor({date,event,scope,onSave,onClose}:Props){
   const [title,setTitle]=useState(event?.title??'')
   const [description,setDescription]=useState(event?.description??'')
   const [location,setLocation]=useState(event?.location??'')
@@ -34,7 +34,7 @@ export function EventEditor({date,event,onSave,onClose}:Props){
       const endIso=allDay ? new Date(endExclusive+'T00:00:00').toISOString() : fromLocalDateTime(end)
       if(Date.parse(endIso)<=Date.parse(startIso))throw new Error('End must follow start')
       if(allDay && endDay<startDay)throw new Error('End day must not precede start')
-      const repeat:RepeatRule|undefined=frequency==='none'?undefined:{
+      const repeat:RepeatRule|undefined=scope||frequency==='none'?undefined:{
         frequency,interval:Math.floor(interval),...(until?{until}:{}),
         ...(frequency==='weekly'&&weekdaysSet.length?{weekdays:weekdaysSet}:{}),
       }
@@ -49,8 +49,8 @@ export function EventEditor({date,event,onSave,onClose}:Props){
     }catch(err){setError(err instanceof Error?err.message:String(err))}
   }
   return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
-    <section className="editor dialog-surface" role="dialog" aria-modal="true" aria-label={event?'Edit event':'New event'}>
-      <header className="editor-head"><div className="heading-inline"><CalendarPlus size={20}/><h2>{event?'Edit event':'New event'}</h2></div>
+    <section className="editor dialog-surface" role="dialog" aria-modal="true" aria-label={scope?'Edit one occurrence':event?'Edit event':'New event'}>
+      <header className="editor-head"><div className="heading-inline"><CalendarPlus size={20}/><h2>{scope?'Edit one occurrence':event?'Edit event':'New event'}</h2></div>
         <button className="icon-button" onClick={onClose} aria-label="Close editor"><X size={19}/></button></header>
       <form onSubmit={submit} className="editor-form">
         <label>Event name<input autoFocus required maxLength={240} value={title} onChange={e=>setTitle(e.target.value)} placeholder="What are you planning?"/></label>
@@ -59,21 +59,22 @@ export function EventEditor({date,event,onSave,onClose}:Props){
           <label>Starts<input required type={allDay?'date':'datetime-local'} value={start} onChange={e=>setStart(e.target.value)}/></label>
           <label>{allDay?'Last day (inclusive)':'Ends'}<input required type={allDay?'date':'datetime-local'} value={end} onChange={e=>setEnd(e.target.value)}/></label>
         </div>
-        <div className="editor-grid">
+        {scope&&<p className="fine-print">Only this instance changes. The original date will be skipped in its series; other occurrences keep their schedule.</p>}
+        {!scope&&<div className="editor-grid">
           <label>Repeats<select value={frequency} onChange={e=>setFrequency(e.target.value as 'none'|Frequency)}>
             <option value="none">Does not repeat</option><option value="daily">Daily</option>
             <option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
           {frequency!=='none'&&<label>Every (interval)<input type="number" min={1} max={30} required value={interval} onChange={e=>setInterval(Number(e.target.value))}/></label>}
         </div>
-        {frequency==='weekly'&&<fieldset className="weekday-fields"><legend>On weekdays (none = start weekday)</legend>
+        {!scope&&frequency==='weekly'&&<fieldset className="weekday-fields"><legend>On weekdays (none = start weekday)</legend>
           {weekdays.map((w,i)=><label key={w}><input type="checkbox" checked={weekdaysSet.includes(i)} onChange={e=>setWeekdaysSet(old=>e.target.checked?[...old,i]:old.filter(x=>x!==i))}/>{w}</label>)}
         </fieldset>}
-        {frequency!=='none'&&<label>Repeat until (optional)<input type="date" min={start.slice(0,10)} value={until} onChange={e=>setUntil(e.target.value)}/></label>}
+        {!scope&&frequency!=='none'&&<label>Repeat until (optional)<input type="date" min={start.slice(0,10)} value={until} onChange={e=>setUntil(e.target.value)}/></label>}
         <label>Location<input value={location} maxLength={500} onChange={e=>setLocation(e.target.value)} placeholder="Optional"/></label>
         <label>Notes<textarea rows={3} maxLength={4000} value={description} onChange={e=>setDescription(e.target.value)} placeholder="Optional details"/></label>
         <p className="fine-print">Times use this device's local time zone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Repeating timed events preserve local clock time across daylight saving changes.</p>
         {error&&<div className="error" role="alert">{error}</div>}
-        <footer className="editor-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" type="submit">{event?'Save changes':'Create event'}</button></footer>
+        <footer className="editor-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" type="submit">{scope?'Save this occurrence':event?'Save changes':'Create event'}</button></footer>
       </form>
     </section>
   </div>

@@ -3,6 +3,7 @@ import {CalendarDays,ChevronLeft,ChevronRight,Plus,Upload,Download,Search,Databa
 import type {CalendarOccurrence,CalendarRecord,CalendarState,LocalDate} from './types'
 import {addDays,addMonths,dateLabel,dateSeries,friendlyRange,localDate,monday,monthGridStart} from './core/dates'
 import {dayOccurrences,excludeOccurrence} from './core/occurrences'
+import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence} from './core/series'
 import {exportBackup,importBackup,loadState,saveState,STORAGE_KEY} from './core/storage'
 import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
 import {EventEditor} from './components/EventEditor'
@@ -24,6 +25,9 @@ export default function App(){
   const [filter,setFilter]=useState<Filter>('all')
   const [query,setQuery]=useState('')
   const [editing,setEditing]=useState<CalendarRecord|null>(null)
+  const [editInstance,setEditInstance]=useState<{parentId:string;date:LocalDate}|null>(null)
+  const [moveDate,setMoveDate]=useState<LocalDate>(localDate())
+  const [importMode,setImportMode]=useState<'update'|'replace'>('update')
   const [editorDate,setEditorDate]=useState<LocalDate|null>(null)
   const [active,setActive]=useState<CalendarOccurrence|null>(null)
   const [pending,setPending]=useState<IcsPreview|null>(null)
@@ -67,23 +71,38 @@ export default function App(){
     const key=x.sourceCalendar??'Imported';a[key]=(a[key]??0)+1;return a
   },{})
   const personalCount=calendar.records.filter(x=>x.source==='personal').length
+  const activeRecord=active?calendar.records.find(x=>x.id===active.recordId):undefined
 
-  function create(date:LocalDate){setActive(null);setEditing(null);setEditorDate(date)}
-  function open(item:CalendarOccurrence){setActive(item);setSelected(item.date)}
-  function edit(item:CalendarOccurrence){
+  function create(date:LocalDate){setActive(null);setEditing(null);setEditInstance(null);setEditorDate(date)}
+  function open(item:CalendarOccurrence){setActive(item);setSelected(item.date);setMoveDate(item.startDate)}
+  function edit(item:CalendarOccurrence,scope:'series'|'instance'='series'){
     const record=calendar.records.find(x=>x.id===item.recordId)
     if(!record||record.source!=='personal')return
-    setEditing(record);setEditorDate(item.date);setActive(null)
+    if(scope==='instance'&&record.repeat){
+      setEditing({...record,id:crypto.randomUUID(),start:item.start,end:item.end,
+        startDate:item.allDay?item.startDate:undefined,endDateExclusive:item.allDay?item.endDateExclusive:undefined,
+        allDay:item.allDay,repeat:undefined,excludedDates:undefined})
+      setEditInstance({parentId:record.id,date:item.date})
+    }else{setEditing(record);setEditInstance(null)}
+    setEditorDate(item.date);setActive(null)
   }
   function save(record:CalendarRecord){
-    if(commit({schemaVersion:1,records:[...calendar.records.filter(r=>r.id!==record.id),record]},'Event saved locally')){
-      setEditorDate(null);setEditing(null)
-    }
+    try{
+      const next=editInstance?replaceOccurrence(calendar,editInstance.parentId,editInstance.date,record):
+        calendar.records.some(r=>r.id===record.id)?saveWholeEvent(calendar,record):
+        {schemaVersion:1 as const,records:[...calendar.records,record]}
+      if(commit(next,'Event saved locally')){
+        setEditorDate(null);setEditing(null);setEditInstance(null)
+      }
+    }catch(error){setNotice('Not saved: '+String(error))}
   }
   function remove(recordId:string) {
     const record=calendar.records.find(r=>r.id===recordId)
-    if(!record || !window.confirm(record.repeat?'Delete the entire repeating series?':'Remove this calendar event?'))return
-    if(commit({schemaVersion:1,records:calendar.records.filter(x=>x.id!==recordId)},'Event removed locally'))setActive(null)
+    const description=record?.repeat?'Delete this series and all edited occurrences?':
+      record?.recurrenceParentId?'Delete this edited occurrence? The original date remains skipped.':'Remove this calendar event?'
+    if(!record || !window.confirm(description))return
+    const next=calendar.records.filter(x=>x.id!==recordId&&x.recurrenceParentId!==recordId)
+    if(commit({schemaVersion:1,records:next},'Event removed locally'))setActive(null)
   }
   function skip(item:CalendarOccurrence){
     const r=calendar.records.find(x=>x.id===item.recordId)
@@ -91,12 +110,31 @@ export default function App(){
     const next=excludeOccurrence(r,item.date)
     if(commit({schemaVersion:1,records:calendar.records.map(x=>x.id===r.id?next:x)},'This occurrence was skipped'))setActive(null)
   }
+  function restore(item:CalendarOccurrence){
+    try{
+      const next=restoreOccurrence(calendar,item.recordId)
+      if(commit(next,'Original recurring occurrence restored'))setActive(null)
+    }catch(error){setNotice('Restore failed: '+String(error))}
+  }
+  function move(item:CalendarOccurrence){
+    const record=calendar.records.find(x=>x.id===item.recordId)
+    if(!record||record.source!=='personal')return
+    try{
+      const shifted=shiftOccurrence(record,item,moveDate)
+      const next=record.repeat?
+        replaceOccurrence(calendar,record.id,item.date,{...shifted,id:crypto.randomUUID()}):
+        saveWholeEvent(calendar,shifted)
+      if(commit(next,'Event moved to '+moveDate)){
+        setActive(null);setSelected(moveDate)
+      }
+    }catch(error){setNotice('Move failed: '+String(error))}
+  }
   function step(direction:number){
     setSelected(s=>mode==='month'?addMonths(s,direction):addDays(s,direction*(mode==='week'?7:mode==='agenda'?14:1)))
   }
   async function readIcs(e:ChangeEvent<HTMLInputElement>){
     const f=e.target.files?.[0];e.target.value='';if(!f)return
-    try{setPending(previewIcs(await f.text()));setNotice('Review the import before applying')}
+    try{setPending(previewIcs(await f.text()));setImportMode('update');setNotice('Review the import before applying')}
     catch(error){setNotice('ICS import failed: '+String(error))}
   }
   async function readBackup(e:ChangeEvent<HTMLInputElement>){
@@ -108,8 +146,10 @@ export default function App(){
   }
   function applyImport(){
     if(!pending)return
-    const result=mergeIcs(calendar,pending)
-    if(commit(result.state,`Imported ${result.added} events; ${result.duplicates} duplicates skipped`))setPending(null)
+    const count=calendar.records.filter(x=>x.source==='ics'&&x.sourceCalendar===pending.name).length
+    if(importMode==='replace'&&count>0&&!window.confirm('Replace all '+count+' imported copies from '+pending.name+' with this file? Personal events will be preserved.'))return
+    const result=mergeIcs(calendar,pending,importMode)
+    if(commit(result.state,`Imported ${result.added}; updated ${result.updated}; unchanged ${result.duplicates}; removed from prior snapshot ${result.removed}`))setPending(null)
   }
   function removeSource(name:string){
     if(!window.confirm('Remove all local imported snapshots from '+name+'? Original source data are not modified.'))return
@@ -172,17 +212,24 @@ export default function App(){
     </div>
     <input ref={importInput} type="file" accept=".ics,text/calendar" hidden onChange={readIcs}/>
     <input ref={restoreInput} type="file" accept=".json,application/json" hidden onChange={readBackup}/>
-    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate} date={editorDate} event={editing??undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null)}}/>}
+    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate} date={editorDate} event={editing??undefined} scope={editInstance?'instance':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setEditInstance(null)}}/>}
     {active&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setActive(null)}}>
       <section className="details dialog-surface" role="dialog" aria-modal="true" aria-label="Event details">
         <header className="editor-head"><span className="eyebrow">{active.source==='ics'?'IMPORTED SNAPSHOT — READ ONLY':'PERSONAL EVENT'}</span><button className="icon-button" aria-label="Close event" onClick={()=>setActive(null)}><X size={19}/></button></header>
         <h2>{active.title}</h2><p className="details-dates">{active.allDay?'All day · '+friendlyRange(active.startDate,addDays(active.endDateExclusive,-1)):new Date(active.start).toLocaleString()+' – '+new Date(active.end).toLocaleString()}</p>
         {active.location&&<p><strong>Location:</strong> {active.location}</p>}{active.description&&<p className="description">{active.description}</p>}
         {active.source==='ics'&&<div className="readonly-note"><AlertTriangle size={16}/> Imported from {active.sourceCalendar}. Editing the original requires the source calendar. This is only a local copy.</div>}
+        {activeRecord?.recurrenceParentId&&<div className="readonly-note">Edited occurrence from a recurring series. Original series date: {activeRecord.recurrenceDate}.</div>}
+        {active.source==='personal'&&<div className="move-control"><label>Move to date<input type="date" value={moveDate} onChange={ev=>setMoveDate(ev.target.value)}/></label>
+          <button className="secondary" type="button" disabled={!moveDate||moveDate===active.startDate} onClick={()=>move(active)}>Move event</button>
+          <p className="fine-print">Moving one repeating occurrence keeps the remaining series unchanged. All changes remain on this device.</p>
+        </div>}
         <footer className="editor-actions">
-          {calendar.records.find(r=>r.id===active.recordId)?.repeat&&<button className="secondary" onClick={()=>skip(active)}><RotateCcw size={15}/> Skip occurrence</button>}
-          {active.source==='personal'&&<button className="secondary" onClick={()=>edit(active)}><Pencil size={15}/> Edit series/event</button>}
-          <button className="danger" onClick={()=>remove(active.recordId)}><Trash2 size={15}/> {active.source==='ics'?'Remove copy':'Delete'}</button>
+          {activeRecord?.repeat&&<button className="secondary" onClick={()=>skip(active)}><RotateCcw size={15}/> Skip this date</button>}
+          {activeRecord?.recurrenceParentId&&<button className="secondary" onClick={()=>restore(active)}><RotateCcw size={15}/> Restore original date</button>}
+          {active.source==='personal'&&activeRecord?.repeat&&<button className="secondary" onClick={()=>edit(active,'instance')}><Pencil size={15}/> Edit this occurrence</button>}
+          {active.source==='personal'&&<button className="secondary" onClick={()=>edit(active)}><Pencil size={15}/> {activeRecord?.repeat?'Edit whole series':'Edit event'}</button>}
+          <button className="danger" onClick={()=>remove(active.recordId)}><Trash2 size={15}/> {active.source==='ics'?'Remove copy':activeRecord?.repeat?'Delete series':'Delete'}</button>
         </footer>
       </section>
     </div>}
@@ -191,8 +238,12 @@ export default function App(){
       <p><strong>{pending.name}</strong> · {pending.records.length} supported events</p>
       <div className="import-preview">{pending.records.slice(0,7).map(r=><div key={r.id}><span>{r.title}</span><small>{r.startDate??new Date(r.start).toLocaleString()}</small></div>)}{pending.records.length>7&&<p>+{pending.records.length-7} additional entries</p>}</div>
       {pending.warnings.length>0&&<div className="import-warnings"><b>{pending.warnings.length} skipped or warned events</b>{pending.warnings.slice(0,12).map((w,i)=><p key={i}>{w}</p>)}</div>}
-      <p className="fine-print">This is a read-only local snapshot. Recurring RRULE masters are not silently expanded. Import does not connect to Google, Folio or KLIPS.</p>
-      <footer className="editor-actions"><button className="secondary" onClick={()=>setPending(null)}>Cancel</button><button className="primary" onClick={applyImport}>Import {pending.records.length} entries</button></footer>
+      <fieldset className="import-options"><legend>How to handle this calendar</legend>
+        <label><input type="radio" checked={importMode==='update'} onChange={()=>setImportMode('update')}/> Add new entries and refresh matching event UIDs; keep others</label>
+        <label><input type="radio" checked={importMode==='replace'} onChange={()=>setImportMode('replace')}/> Replace the earlier imported snapshot named “{pending.name}” entirely</label>
+      </fieldset>
+      <p className="fine-print">Read-only local snapshot; not live sync. Unsupported RRULE masters are skipped with warnings. Neither method modifies Google, Folio, KLIPS or personal events.</p>
+      <footer className="editor-actions"><button className="secondary" onClick={()=>setPending(null)}>Cancel</button><button className="primary" onClick={applyImport}>Apply {pending.records.length} entries</button></footer>
     </section></div>}
     {sourcePanel&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setSourcePanel(false)}}>
       <section className="sources-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Calendar data management">

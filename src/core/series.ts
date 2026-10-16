@@ -46,7 +46,7 @@ export function saveWholeEvent(state:CalendarState,record:CalendarRecord):Calend
   if(!old||old.source!=='personal')throw new Error('Original personal event missing')
   const removingRepeat=Boolean(old.repeat&&!record.repeat)
   return {schemaVersion:1,records:state.records.map(r=>{
-    if(r.id===record.id)return record
+    if(r.id===record.id)return old.recurrenceParentId?{...record,recurrenceParentId:old.recurrenceParentId,recurrenceDate:old.recurrenceDate}:record
     if(removingRepeat&&r.recurrenceParentId===record.id)return {...r,recurrenceParentId:undefined,recurrenceDate:undefined}
     return r
   })}
