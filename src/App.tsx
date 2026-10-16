@@ -354,7 +354,7 @@ export default function App(){
             requestAdjustment(active,'move',localDate(date),date.getHours()*60+date.getMinutes(),
               Math.round((Date.parse(active.end)-Date.parse(active.start))/60000))
           }}><Clock3 size={15}/> Adjust time & duration</button>}
-          {active.source==='personal'&&<button className="secondary" onClick={()=>edit(active)}><Pencil size={15}/> {activeRecord?.repeat?'Edit whole series':'Edit event'}</button>
+          {active.source==='personal'&&<button className="secondary" onClick={()=>edit(active)}><Pencil size={15}/> {activeRecord?.repeat?'Edit whole series':'Edit event'}</button>}
           <button className="danger" onClick={()=>remove(active.recordId)}><Trash2 size={15}/> {active.source==='ics'?'Remove copy':activeRecord?.repeat?'Delete series':'Delete'}</button>
         </footer>
       </section>
