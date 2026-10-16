@@ -49,6 +49,15 @@ export function reminderItems(state:CalendarState,nowIso:string,actions:Reminder
   }
   return result.sort((a,b)=>Date.parse(a.dueAt)-Date.parse(b.dueAt)||a.occurrence.title.localeCompare(b.occurrence.title)).slice(0,150)
 }
+/** Snoozing an upcoming event postpones its original due time; it must never
+ * silently pull a future reminder forward to now+5 minutes. */
+export function proposedSnooze(item:ReminderItem,minutes:5|15|60,nowIso:string):ReminderAction{
+  const now=Date.parse(nowIso),scheduled=Date.parse(item.dueAt)
+  if(!Number.isFinite(now)||!Number.isFinite(scheduled)||![5,15,60].includes(minutes))
+    throw new Error('Invalid snooze request')
+  return actionForReminder(item.key,{kind:'snooze',
+    until:new Date(Math.max(now,scheduled)+minutes*60000).toISOString()},nowIso)
+}
 export function actionForReminder(key:string,action:ReminderAction,nowIso:string):ReminderAction{
   if(!key||key.length>600)throw new Error('Invalid reminder key')
   if(action.kind==='dismiss')return {kind:'dismiss'}

@@ -14,7 +14,7 @@ import {RestoreDialog} from './components/RestoreDialog'
 import {ReminderCenter} from './components/ReminderCenter'
 import {OfflineReadiness} from './components/OfflineReadiness'
 import {loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY,type ViewPreferences} from './core/view-preferences'
-import {reminderItems,readReminderActions,saveReminderActions,actionForReminder,deliverableReminders,REMINDER_ACTIONS_KEY,REMINDER_DELIVERED_KEY,type ReminderItem,type ReminderActions} from './core/reminders'
+import {reminderItems,readReminderActions,saveReminderActions,actionForReminder,deliverableReminders,proposedSnooze,REMINDER_ACTIONS_KEY,REMINDER_DELIVERED_KEY,type ReminderItem,type ReminderActions} from './core/reminders'
 import {DEFAULT_REMINDER_SETTINGS,loadReminderSettings,saveReminderSettings,inQuietHours,REMINDER_SETTINGS_KEY,type ReminderSettings} from './core/reminder-settings'
 import {applyAllDayChange,type AllDayProposal} from './core/all-day'
 import {CalendarViews,type Mode} from './components/CalendarViews'
@@ -108,9 +108,10 @@ export default function App(){
     try{
       // Re-read right before changing independent reminder preferences, so other-tab changes are retained.
       const latest=readReminderActions()
-      const raw=kind==='dismiss'?{kind:'dismiss' as const}:
-        {kind:'snooze' as const,until:new Date(Date.now()+minutes*60000).toISOString()}
-      const next={...latest,[item.key]:actionForReminder(item.key,raw,new Date().toISOString())}
+      const now=new Date().toISOString()
+      const action=kind==='dismiss'?actionForReminder(item.key,{kind:'dismiss'},now):
+        proposedSnooze(item,minutes as 5|15|60,now)
+      const next={...latest,[item.key]:action}
       saveReminderActions(next);setReminderActions(next)
       setReminderNow(new Date().toISOString())
     }catch(error){setNotice('Reminder preference not saved: '+String(error))}

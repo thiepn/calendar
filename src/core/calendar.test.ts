@@ -12,7 +12,7 @@ import {layoutTimedDay,slotRange,dayAxis,slotAt} from './timeline'
 import {findFreeSlots} from './availability'
 import {DEFAULT_REMINDER_SETTINGS,validateReminderSettings,inQuietHours} from './reminder-settings'
 import {validateViewPreferences,loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY} from './view-preferences'
-import {reminderItems,reminderKey,actionForReminder,deliverableReminders} from './reminders'
+import {reminderItems,reminderKey,actionForReminder,deliverableReminders,proposedSnooze} from './reminders'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 const record=(patch:Partial<CalendarRecord>={}):CalendarRecord=>({
   id:'test',title:'Study',description:'',location:'',source:'personal',
@@ -713,5 +713,21 @@ describe('C10+ destructive import guard and local display preferences',()=>{
       if(previous)Object.defineProperty(globalThis,'localStorage',{configurable:true,value:previous})
       else Reflect.deleteProperty(globalThis,'localStorage')
     }
+  })
+})
+
+describe('C10+ snooze does not move future alerts earlier',()=>{
+  it('snoozes upcoming reminders relative to their actual due time, overdue relative to now',()=>{
+    const recordItem=record({id:'one',reminderMinutes:15})
+    const now=fromLocalDateTime('2026-10-12T08:00')
+    const upcoming=reminderItems({schemaVersion:1,records:[recordItem]},now)[0]
+    expect(upcoming.status).toBe('upcoming')
+    const next=proposedSnooze(upcoming,5,now)
+    expect(next.kind).toBe('snooze')
+    expect(next.until).toBe(fromLocalDateTime('2026-10-12T09:50'))
+    const dueNow=fromLocalDateTime('2026-10-12T09:50')
+    const delayed=proposedSnooze(upcoming,15,dueNow)
+    expect(delayed.until).toBe(fromLocalDateTime('2026-10-12T10:05'))
+    expect(()=>proposedSnooze(upcoming,7 as 5,now)).toThrow('Invalid snooze')
   })
 })
