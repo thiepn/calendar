@@ -23,11 +23,12 @@ export function reminderKey(item:CalendarOccurrence,lead:number):string{
   return [item.recordId,item.date,item.start,lead].join('|')
 }
 export function reminderItems(state:CalendarState,nowIso:string,actions:ReminderActions={},
-  lookAheadDays=14):ReminderItem[]{
+  lookAheadDays=14,lookBackDays=1):ReminderItem[]{
   const now=Date.parse(nowIso)
-  if(!Number.isFinite(now)||!Number.isInteger(lookAheadDays)||lookAheadDays<1||lookAheadDays>31)
+  if(!Number.isFinite(now)||!Number.isInteger(lookAheadDays)||lookAheadDays<1||lookAheadDays>31||
+     !Number.isInteger(lookBackDays)||lookBackDays<1||lookBackDays>7)
     throw new Error('Invalid reminder planning range')
-  const from=localDate(new Date(now-86400000))
+  const from=localDate(new Date(now-lookBackDays*86400000))
   // A seven-day lead may become due inside the review window for an event
   // scheduled one further week ahead. Expand source occurrence lookup only.
   const to=addDays(localDate(new Date(now+lookAheadDays*86400000)),8)
@@ -43,7 +44,7 @@ export function reminderItems(state:CalendarState,nowIso:string,actions:Reminder
     const action=actions[key]
     if(action?.kind==='dismiss')continue
     const activeDue=action?.kind==='snooze'&&action.until?Date.parse(action.until):due
-    if(!Number.isFinite(activeDue)||activeDue<now-86400000||activeDue>now+lookAheadDays*86400000)continue
+    if(!Number.isFinite(activeDue)||activeDue<now-lookBackDays*86400000||activeDue>now+lookAheadDays*86400000)continue
     result.push({key,recordId:occ.recordId,occurrence:occ,dueAt:new Date(activeDue).toISOString(),
       leadMinutes:record.reminderMinutes,status:activeDue<=now?'due':'upcoming'})
   }
@@ -93,4 +94,14 @@ export function deliverableReminders(items:ReminderItem[],nowIso:string,delivere
 }
 export function reminderForRecord(record:CalendarRecord):number|undefined {
   return record.source==='personal'&&validReminderLead(record.reminderMinutes)?record.reminderMinutes:undefined
+}
+
+/** Single atomic local preference update for deliberately reviewed reminders.
+ * Never mutates source calendar records or silently dismisses unseen items. */
+export function dismissReminderBatch(current:ReminderActions,items:ReminderItem[]):ReminderActions {
+  if(items.length===0||items.length>150||items.some(item=>item.status!=='due'))
+    throw new Error('Review due reminders before dismissing this batch')
+  const next={...current}
+  for(const item of items)next[item.key]={kind:'dismiss'}
+  return next
 }
