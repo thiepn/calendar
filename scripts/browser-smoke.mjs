@@ -126,7 +126,7 @@ async function exerciseGesturesDesktop(){
   assert.match(await adjust.locator('input[type="datetime-local"]').inputValue(),/T10:00$/)
   await adjust.getByRole('button',{name:'Confirm change'}).click()
   const moved=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.find(r=>r.title==='Pointer base'))
-  assert.equal(new Date(moved.start).getHours(),10)
+  assert.equal(await page.evaluate(iso=>new Date(iso).getHours(),moved.start),10)
   console.log('BROWSER_DESKTOP_DRAG_MOVE_PASS')
 
   // Resize with the dedicated pointer handle; the editor confirms before persisting.
