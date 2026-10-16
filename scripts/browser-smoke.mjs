@@ -588,6 +588,97 @@ async function exerciseC8UnreadableOriginalRescue(){
   await context.close()
 }
 
+
+async function exerciseC9RemindersAndIcs(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.getByRole('button',{name:'New event'}).click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  const times=await page.evaluate(()=>{
+    const fmt=(d)=>{const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes())}
+    return [fmt(new Date(Date.now()+10*60000)),fmt(new Date(Date.now()+70*60000))]
+  })
+  await editor.getByLabel('Starts').fill(times[0])
+  await editor.getByLabel('Ends').fill(times[1])
+  await editor.getByLabel('Event name').fill('C9 local due alert')
+  await editor.getByLabel('Local reminder').selectOption('15')
+  await editor.getByRole('button',{name:'Create event'}).click()
+  const original=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.find(r=>r.title==='C9 local due alert'))
+  assert.equal(original.reminderMinutes,15)
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const panel=page.getByRole('dialog',{name:'Local reminders'})
+  await panel.waitFor()
+  assert.match(await panel.innerText(),/C9 local due alert/)
+  assert.match(await panel.innerText(),/Due now or overdue/)
+  assert.match(await panel.innerText(),/only while Calendar is open/i)
+  await panel.getByRole('button',{name:'Snooze C9 local due alert for 15 minutes'}).click()
+  assert.match(await panel.innerText(),/Upcoming/)
+  const actions=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.reminder-actions.v1')))
+  assert.equal(Object.values(actions)[0].kind,'snooze')
+  await panel.getByRole('button',{name:'Dismiss C9 local due alert'}).click()
+  assert.equal(await panel.getByRole('button',{name:/C9 local due alert/}).count(),0)
+  await panel.getByRole('button',{name:'Close'}).click()
+  console.log('BROWSER_C9_REMINDER_DUE_SNOOZE_DISMISS_PASS')
+
+  const recurrence=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C9 all-day class',
+    'BEGIN:VEVENT','UID:holiday-1','SUMMARY:C9 recurrent lecture','DTSTART;VALUE=DATE:20261019',
+    'DTEND;VALUE=DATE:20261020','RRULE:FREQ=DAILY;COUNT=4','EXDATE;VALUE=DATE:20261020',
+    'END:VEVENT','END:VCALENDAR'].join('\r\n')
+  await page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'recurring.ics',mimeType:'text/calendar',buffer:Buffer.from(recurrence)})
+  const importDialog=page.getByRole('dialog',{name:'ICS import review'})
+  await importDialog.waitFor()
+  assert.match(await importDialog.getByLabel('Import change preview').innerText(),/3 new/)
+  assert.match(await importDialog.innerText(),/materialized into 3 read-only instance/)
+  await importDialog.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const imports=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.filter(r=>r.source==='ics'))
+  assert.equal(imports.length,3)
+  assert.ok(imports.every(r=>r.repeat===undefined&&r.reminderMinutes===undefined))
+  await page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'recurring.ics',mimeType:'text/calendar',buffer:Buffer.from(recurrence)})
+  const reviewAgain=page.getByRole('dialog',{name:'ICS import review'})
+  await reviewAgain.waitFor()
+  assert.match(await reviewAgain.getByLabel('Import change preview').innerText(),/3 unchanged/)
+  await reviewAgain.getByRole('button',{name:'Cancel'}).click()
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_C9_FINITE_READONLY_ICS_IMPORT_PASS')
+  await context.close()
+}
+async function exerciseC9MobileDuplicate(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.getByRole('button',{name:'New event'}).click()
+  const form=page.getByRole('dialog',{name:'New event'})
+  await form.getByLabel('Event name').fill('C9 mobile class')
+  await form.getByLabel('Local reminder').selectOption('60')
+  await form.getByRole('button',{name:'Create event'}).click()
+  await page.locator('.timeline-block').filter({hasText:'C9 mobile class'}).first().click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  const from=await details.getByLabel('Move to date').inputValue()
+  const next=new Date(Date.parse(from+'T00:00:00Z')+86400000).toISOString().slice(0,10)
+  await details.getByLabel('Move to date').fill(next)
+  await details.getByRole('button',{name:'Duplicate to selected date'}).click()
+  const duplicate=page.getByRole('dialog',{name:'Duplicate event'})
+  await duplicate.waitFor()
+  assert.equal(await duplicate.getByLabel('Local reminder').inputValue(),'60')
+  assert.match(await duplicate.getByLabel('Starts').inputValue(),new RegExp('^'+next))
+  await duplicate.getByRole('button',{name:'Create duplicate'}).click()
+  const state=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(state.length,2)
+  const original=state.find(x=>x.title==='C9 mobile class')
+  const copy=state.find(x=>x.title==='C9 mobile class copy')
+  assert.ok(original&&copy&&original.id!==copy.id)
+  assert.equal(copy.reminderMinutes,60)
+  assert.equal(errors.length,0,errors.join(';'))
+  console.log('BROWSER_C9_MOBILE_DUPLICATE_REMINDER_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -604,6 +695,8 @@ try{
   await exerciseC8RecoverySearchAndAgenda()
   await exerciseC8MobileNavigation()
   await exerciseC8UnreadableOriginalRescue()
+  await exerciseC9RemindersAndIcs()
+  await exerciseC9MobileDuplicate()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true

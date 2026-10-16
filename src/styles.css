@@ -171,3 +171,24 @@
 .calendar-shortcuts summary:focus-visible{outline:2px solid #3f8157}
 .calendar-shortcuts p{padding:9px 12px;margin:5px 0;border:1px solid #cfdbd0;background:#f8faf7;line-height:1.6;color:#46624d;max-width:650px}
 .restore-corrupt{font-size:12px;color:#873b24;background:#fff3e9;border:1px solid #e8c6ab;padding:10px;line-height:1.5}
+
+/* C9 foreground local reminder inbox and touch-friendly event duplication */
+.reminder-setting{display:grid;gap:5px}
+.reminder-setting select{border:1px solid #cddfd0;background:#fff;padding:9px;color:#254a36}
+.reminder-launch{position:relative}
+.reminder-count{display:inline-grid;place-items:center;min-width:19px;min-height:19px;border-radius:50%;background:#a84c33;color:white;font-weight:700;font-size:10px;padding:1px 4px}
+.reminder-dialog{max-width:680px;max-height:90dvh;overflow-y:auto}
+.reminder-notification-settings{display:flex;align-items:center;gap:10px;padding:12px;margin:12px 0;background:#f5f9f5;border:1px solid #dce7dc;font-size:12px;flex-wrap:wrap}
+.reminder-notification-settings p{margin:0;flex:1 1 250px;line-height:1.45}
+.reminder-groups{display:grid;gap:8px}
+.reminder-groups h3{margin:12px 0 2px;font-size:13px;display:flex;align-items:center;justify-content:space-between;color:#365d43}
+.reminder-groups h3 span{font-variant-numeric:tabular-nums;color:#617969}
+.reminder-entry{border:1px solid #dce7dc;padding:10px;display:flex;align-items:center;gap:8px;justify-content:space-between;background:#fff}
+.reminder-entry.reminder-due{border-left:3px solid #b35e3f}
+.reminder-visit{border:0;background:none;cursor:pointer;text-align:left;display:grid;gap:4px;color:inherit;min-width:0;flex:1}
+.reminder-visit strong{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reminder-visit span,.reminder-visit small{font-size:11px;color:#6b7f70}
+.reminder-actions{display:flex;flex-wrap:wrap;gap:5px}
+.reminder-actions button{background:#f3f8f3;border:1px solid #cbdccc;color:#486f51;padding:7px;cursor:pointer;min-height:34px}
+.reminder-actions button:focus-visible,.reminder-visit:focus-visible{outline:2px solid #387c4c}
+@media(max-width:740px){.reminder-dialog{width:min(96vw,680px);padding:14px}.reminder-entry{flex-direction:column;align-items:stretch}.reminder-actions button{flex:1;min-height:42px}.reminder-launch .desktop-text{display:none}}
