@@ -42,6 +42,8 @@ export interface CalendarOccurrence {
   endDateExclusive: LocalDate
   title: string
   source: Source
+  /** Imported transparent occurrences are visible, but do not block time. */
+  transparent?: boolean
   sourceCalendar?: string
   location: string
   description: string
