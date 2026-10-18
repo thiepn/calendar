@@ -1740,6 +1740,7 @@ describe('C20 conflict-free one-occurrence rescheduling alternatives',()=>{
     expect(proposed.conflicts.map(x=>x.recordId)).toEqual(['imported-unavailable'])
     const alternatives=findAdjustmentAlternatives(state,proposed,options)
     expect(alternatives.length).toBeGreaterThan(0)
+    expect(alternatives.some(slot=>slot.start===own.start&&slot.end===own.end)).toBe(false)
     expect(alternatives.every(slot=>slot.date>=future)).toBe(true)
     expect(alternatives.every(slot=>{
       const reviewed=proposeTimedChange(state,instance,'move',slot.date,slot.minute,slot.lengthMinutes)
