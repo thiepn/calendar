@@ -19,6 +19,7 @@ import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {parseIcsDuration} from './ics-duration'
 import {sevenDayWorkload} from './planning'
 import {focusDaySummary,focusScrollMinute} from './mobile-focus'
+import {mobileTimedChange,mobileAllDayShift} from './mobile-editor'
 import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './source-visibility'
 import {adjacentBusyDay,exportAgendaCsv} from './agenda'
 import {previewMissingPersonal} from './recover-missing'
@@ -1961,5 +1962,67 @@ describe('C22 device-local focused-week original-event navigation',()=>{
     expect(focusDaySummary([spring,allDay],'2026-03-29')).toEqual({
       count:2,allDay:1,firstTimedMinute:150})
     expect(focusScrollMinute([spring,allDay],'2026-03-29')).toBe(105)
+  })
+})
+
+describe('C23 local-only mobile draft schedule actions',()=>{
+  const wall=(start:string,end:string)=>({start,end,startFold:'' as const,endFold:'' as const})
+  it('preserves a 90-minute physical span when shifting an unsaved draft',()=>{
+    const first=wall('2026-10-19T09:00','2026-10-19T10:30')
+    const later=mobileTimedChange(first,{kind:'shift',minutes:30})
+    expect(later).toEqual(wall('2026-10-19T09:30','2026-10-19T11:00'))
+    expect(mobileTimedChange(later,{kind:'shift',minutes:-30})).toEqual(first)
+    expect(first).toEqual(wall('2026-10-19T09:00','2026-10-19T10:30'))
+  })
+  it('sets duration from a valid start even if original end is an invalid draft',()=>{
+    const result=mobileTimedChange(wall('2026-10-19T09:00','2026-10-19T08:00'),
+      {kind:'duration',minutes:120})
+    expect(result).toEqual(wall('2026-10-19T09:00','2026-10-19T11:00'))
+    expect(()=>mobileTimedChange(wall('2026-03-29T02:30','2026-03-29T03:30'),
+      {kind:'duration',minutes:30})).toThrow('does not exist')
+  })
+  it('moves across midnight while preserving inclusive multi-day all-day length',()=>{
+    expect(mobileTimedChange(wall('2026-10-19T23:30','2026-10-20T01:00'),
+      {kind:'day',days:1})).toEqual(wall('2026-10-20T23:30','2026-10-21T01:00'))
+    expect(mobileAllDayShift('2026-10-30','2026-11-02',1)).toEqual({
+      start:'2026-10-31',end:'2026-11-03'})
+    expect(mobileAllDayShift('2026-10-30','2026-11-02',-1)).toEqual({
+      start:'2026-10-29',end:'2026-11-01'})
+    expect(()=>mobileAllDayShift('2026-11-02','2026-10-30',1)).toThrow('last date')
+  })
+  it('rejects a day shift into spring missing wall time rather than creating a substituted instant',()=>{
+    const before=wall('2026-03-28T02:30','2026-03-28T03:30')
+    expect(()=>mobileTimedChange(before,{kind:'day',days:1})).toThrow('does not exist')
+    expect(before.start).toBe('2026-03-28T02:30')
+  })
+  it('rejects a day shift into repeated fall clock without silently choosing a fold',()=>{
+    const before=wall('2026-10-24T02:30','2026-10-24T03:30')
+    expect(()=>mobileTimedChange(before,{kind:'day',days:1})).toThrow('occurs twice')
+  })
+  it('retains both exact fall-back physical folds when nudging across the repeated hour',()=>{
+    const first={start:'2026-10-25T02:45',end:'2026-10-25T03:15',
+      startFold:'earlier' as const,endFold:'' as const}
+    const later=mobileTimedChange(first,{kind:'shift',minutes:30})
+    expect(later).toEqual({start:'2026-10-25T02:15',end:'2026-10-25T03:45',
+      startFold:'later',endFold:''})
+    const original=mobileTimedChange(later,{kind:'shift',minutes:-30})
+    expect(original).toEqual(first)
+    const oneHour=mobileTimedChange({...first,end:'2026-10-25T02:50',endFold:'earlier'},
+      {kind:'duration',minutes:60})
+    expect(oneHour).toEqual({start:'2026-10-25T02:45',end:'2026-10-25T02:45',
+      startFold:'earlier',endFold:'later'})
+  })
+  it('makes no authority claim from time shortcuts: canonical source review still sees hidden ICS',()=>{
+    const hidden=record({id:'c23-source',source:'ics',sourceCalendar:'Private',
+      sourceKey:'source-original',transparent:false,
+      start:fromLocalDateTime('2026-10-19T09:30'),
+      end:fromLocalDateTime('2026-10-19T10:30')})
+    const revised=mobileTimedChange(wall('2026-10-19T08:30','2026-10-19T09:30'),
+      {kind:'shift',minutes:30})
+    const draft=record({id:'original-personal-id',start:fromLocalDateTime(revised.start),
+      end:fromLocalDateTime(revised.end)})
+    expect(reviewDraft([hidden],draft).collisionCount).toBe(1)
+    expect(hidden.sourceKey).toBe('source-original')
+    expect(draft.id).toBe('original-personal-id')
   })
 })
