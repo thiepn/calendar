@@ -322,3 +322,43 @@
   .import-change-items{max-height:33dvh}
   .import-change-review>button{justify-self:stretch;justify-content:center;min-height:44px}
 }
+
+
+/* C18 — reviewed, privacy-first personal ICS exchange (never a calendar store). */
+.personal-export-dialog{width:min(690px,100%)}
+.personal-export-dialog .editor-head h2{font-size:22px}
+.personal-export-dialog>.fine-print{margin-bottom:13px}
+.personal-export-range{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:15px 0}
+.personal-export-range label{display:grid;gap:7px;font-size:12px;font-weight:650;color:#526b58;min-width:0}
+.personal-export-range input{width:100%;min-width:0;padding:10px;border:1px solid #cfdcd0;background:#fff;color:#30493b;border-radius:4px;min-height:42px}
+.personal-export-levels{border:1px solid #dbe5da;padding:9px 12px;margin:15px 0;display:grid;gap:6px;min-width:0}
+.personal-export-levels legend{font-size:12px;font-weight:700;color:#385742;padding:0 5px}
+.personal-export-levels label{display:flex;align-items:flex-start;gap:11px;min-height:53px;padding:9px 8px;cursor:pointer;border-radius:4px}
+.personal-export-levels label:has(input:checked){background:#eef6ee}
+.personal-export-levels input,.personal-export-alarm input{flex:none;accent-color:#32745d;width:17px;height:17px;margin-top:3px}
+.personal-export-levels label>span{display:grid;gap:4px;min-width:0}
+.personal-export-levels strong{font-size:12px;color:#345443}
+.personal-export-levels small{font-size:11px;color:#67806c;line-height:1.5}
+.personal-export-alarm{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid #dbe5da;font-size:12px;color:#4f6c59}
+.personal-export-preview{margin:16px 0;padding:12px;border:1px solid #d3e0d5;background:#f9fbf9;display:grid;gap:9px;min-width:0}
+.personal-export-preview header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:7px}
+.personal-export-preview header strong{font-size:13px;color:#395c43}
+.personal-export-preview header small{font-size:11px;color:#617c67}
+.personal-export-counts{display:grid;gap:4px;color:#4b6956;font-size:12px}
+.personal-export-counts strong{font-size:15px}
+.personal-export-counts small{font-size:11px;color:#6c8372}
+.personal-export-items{display:grid;gap:3px;max-height:195px;overflow-y:auto}
+.personal-export-items>div{display:grid;grid-template-columns:minmax(85px,1fr) minmax(100px,2fr) auto;gap:9px;padding:8px;background:#fff;border:1px solid #e1e9e0;font-size:11px;align-items:center}
+.personal-export-items time{color:#5b795f;white-space:nowrap}
+.personal-export-items span{color:#395744;overflow-wrap:anywhere;font-weight:650}
+.personal-export-items small{color:#6b8070}
+@media(max-width:740px){
+ .personal-export-dialog{padding:16px}
+ .personal-export-dialog .editor-head h2{font-size:19px}
+ .personal-export-range{grid-template-columns:1fr;gap:11px}
+ .personal-export-levels label{min-height:62px}
+ .personal-export-items>div{grid-template-columns:1fr auto;gap:5px}
+ .personal-export-items>div span{grid-column:1/3}
+ .personal-export-dialog .editor-actions{display:grid;grid-template-columns:1fr;gap:9px}
+ .personal-export-dialog .editor-actions button{min-height:45px;width:100%}
+}
