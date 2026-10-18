@@ -1,4 +1,6 @@
+import {useState} from 'react'
 import {Bell,Clock3,X} from 'lucide-react'
+import {localDateTime} from '../core/dates'
 import type {ReminderItem} from '../core/reminders'
 import type {ReminderSettings} from '../core/reminder-settings'
 type Props={
@@ -16,12 +18,15 @@ type Props={
   onOpen:(item:ReminderItem)=>void
   onDismiss:(item:ReminderItem)=>void
   onSnooze:(item:ReminderItem,minutes:number)=>void
+  onSnoozeUntil:(item:ReminderItem,localWall:string)=>boolean
   onEnableNotifications:()=>void
   permission:'unsupported'|'default'|'denied'|'granted'
   foregroundEnabled:boolean
   onDisableNotifications:()=>void
 }
-export function ReminderCenter({items,dismissed,snoozedKeys,settings,onSettingsChange,onUndoDismiss,onCancelSnooze,lookBackDays,onLookBackChange,onDismissDue,onClose,onOpen,onDismiss,onSnooze,onEnableNotifications,permission,foregroundEnabled,onDisableNotifications}:Props){
+export function ReminderCenter({items,dismissed,snoozedKeys,settings,onSettingsChange,onUndoDismiss,onCancelSnooze,lookBackDays,onLookBackChange,onDismissDue,onClose,onOpen,onDismiss,onSnooze,onSnoozeUntil,onEnableNotifications,permission,foregroundEnabled,onDisableNotifications}:Props){
+  const [customKey,setCustomKey]=useState<string|null>(null)
+  const [customLocal,setCustomLocal]=useState('')
   const due=items.filter(x=>x.status==='due')
   const upcoming=items.filter(x=>x.status==='upcoming')
   const time=(iso:string)=>new Date(iso).toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})
@@ -35,15 +40,35 @@ export function ReminderCenter({items,dismissed,snoozedKeys,settings,onSettingsC
       <button type="button" onClick={()=>onSnooze(item,5)} aria-label={'Snooze '+item.occurrence.title+' for 5 minutes'}>5m</button>
       <button type="button" onClick={()=>onSnooze(item,15)} aria-label={'Snooze '+item.occurrence.title+' for 15 minutes'}>15m</button>
       <button type="button" onClick={()=>onSnooze(item,60)} aria-label={'Snooze '+item.occurrence.title+' for 1 hour'}>1h</button>
+      <button type="button" aria-expanded={customKey===item.key}
+        aria-label={'Choose snooze time for '+item.occurrence.title}
+        onClick={()=>{
+          if(customKey===item.key){setCustomKey(null);return}
+          const earliest=Math.max(Date.now(),Date.parse(item.dueAt))+15*60000
+          setCustomLocal(localDateTime(new Date(earliest).toISOString()))
+          setCustomKey(item.key)
+        }}>Until…</button>
       {snoozedKeys.has(item.key)&&<button type="button" onClick={()=>onCancelSnooze(item)} aria-label={'Cancel snooze '+item.occurrence.title}>Undo snooze</button>}
       <button type="button" onClick={()=>onDismiss(item)} aria-label={'Dismiss '+item.occurrence.title}>Dismiss</button>
     </div>
+    {customKey===item.key&&<div className="reminder-custom-snooze" role="group" aria-label={'Custom snooze for '+item.occurrence.title}>
+      <label>Remind me at
+        <input type="datetime-local" aria-label={'Snooze until date and time for '+item.occurrence.title}
+          value={customLocal} onChange={event=>setCustomLocal(event.target.value)}/>
+      </label>
+      <p className="fine-print">Device-local time, up to 7 days ahead. A time that does not exist or occurs twice during daylight-saving transitions is refused. This does not change the original event.</p>
+      <div className="reminder-custom-actions">
+        <button type="button" className="secondary small" onClick={()=>setCustomKey(null)}>Cancel custom snooze</button>
+        <button type="button" className="primary" disabled={!customLocal}
+          onClick={()=>{if(onSnoozeUntil(item,customLocal))setCustomKey(null)}}>Save snooze time</button>
+      </div>
+    </div>}
   </div>
   return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
     <section className="reminder-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Local reminders">
       <header className="editor-head"><div className="heading-inline"><Bell size={19}/><h2>Local reminders</h2></div>
         <button type="button" className="icon-button" aria-label="Close reminders" onClick={onClose}><X size={19}/></button></header>
-      <p className="fine-print">Personal-event reminders are calculated from your saved calendar in this browser. This center shows due reminders from the selected last 24 hours or 7 days, and upcoming reminders in the next 14 days; it is not remote scheduling. Dismissals and snoozes stay local. Choose 5 minutes, 15 minutes or 1 hour to snooze; undo a snooze to restore the original due time.</p>
+      <p className="fine-print">Personal-event reminders are calculated from your saved calendar in this browser. This center shows due reminders from the selected last 24 hours or 7 days, and upcoming reminders in the next 14 days; it is not remote scheduling. Dismissals and snoozes stay local. Choose 5 minutes, 15 minutes, 1 hour or an exact local date and time up to seven days ahead; undo a snooze to restore the original due time. Snoozed items remain in this list even after the original event leaves the selected overdue review range.</p>
       <div className="reminder-notification-settings">
         <Clock3 size={16}/>
         {permission==='unsupported'?<p>Desktop notifications are unavailable in this browser. The in-app reminder center still works.</p>:
