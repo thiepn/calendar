@@ -3,6 +3,7 @@ import {addDays,day,daysBetween,localInstantOptions} from './dates'
 import {occurrencesBetween} from './occurrences'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {finiteTimedDates,timedWallTemplate,wallValueOn} from './ics-timed'
+import {endFromIcsDuration} from './ics-duration'
 
 export interface IcsPreview {records:CalendarRecord[];warnings:string[];name:string;skippedEvents:number}
 type Property={name:string;params:Record<string,string>;value:string}
@@ -90,11 +91,15 @@ export function previewIcs(text:string):IcsPreview {
   }
   // Resolve all-day recurrence overrides regardless of their position in the ICS file.
   const replacements=new Map<string,Property[]>()
+  const duplicateAllDayOverrides=new Set<string>()
   for(const props of items){
     const uid=props.find(p=>p.name==='UID')?.value
     const original=props.find(p=>p.name==='RECURRENCE-ID')
-    if(uid&&original&&/^\d{8}$/.test(original.value))
-      replacements.set(uid+'|'+original.value,props)
+    if(uid&&original&&/^\d{8}$/.test(original.value)){
+      const key=uid+'|'+original.value
+      if(replacements.has(key))duplicateAllDayOverrides.add(key)
+      replacements.set(key,props)
+    }
   }
   const recurrenceMasterUids=new Set(items.filter(props=>props.some(p=>p.name==='RRULE'||p.name==='RDATE'))
     .map(props=>props.find(p=>p.name==='UID')?.value).filter((uid):uid is string=>Boolean(uid)))
@@ -108,22 +113,33 @@ export function previewIcs(text:string):IcsPreview {
     const get=(key:string)=>props.find(p=>p.name===key)
     const title=unescapeText(get('SUMMARY')?.value??'Untitled').trim()||'Untitled'
     try{
+      for(const unique of ['DTSTART','DTEND','DURATION','RRULE','UID','RECURRENCE-ID']){
+        if(props.filter(p=>p.name===unique).length>1)
+          throw new Error('Duplicate '+unique+' property in source event')
+      }
+      if(get('RECURRENCE-ID')?.params.RANGE)
+        throw new Error('RECURRENCE-ID RANGE is unsupported without changing other instances')
       if(get('STATUS')?.value.toUpperCase()==='CANCELLED')continue
       if(get('RRULE')||get('RDATE')||get('EXDATE')){
         if(!get('RRULE')&&!get('RDATE'))throw new Error('Unsupported EXDATE without a recurring master; no partial series imported')
         const uid=get('UID')?.value
         if(!uid)throw new Error('Finite recurring event requires UID')
-        const rawStart=get('DTSTART'),rawEnd=get('DTEND')
+        const rawStart=get('DTSTART'),rawEnd=get('DTEND'),rawDuration=get('DURATION')
         if(!rawStart)throw new Error('Missing DTSTART')
+        if(rawEnd&&rawDuration)throw new Error('DTEND and DURATION cannot coexist')
         const start=parseInstant(rawStart)
         if(!start.date){
           const template=timedWallTemplate(rawStart.value)
-          const finish=timedWallTemplate(rawEnd?.value??'')
-          if(!rawEnd||finish.suffix!==template.suffix||
-            (rawStart.params.TZID??'')!==(rawEnd.params.TZID??'')||
-            (rawStart.params.VALUE??'')!==(rawEnd.params.VALUE??''))
-            throw new Error('Mixed DTSTART/DTEND clock systems are unsupported for recurring timed entries')
-          const startIso=start.iso,endIso=rawEnd?parseInstant(rawEnd).iso:''
+          if(rawEnd){
+            const finish=timedWallTemplate(rawEnd.value)
+            if(finish.suffix!==template.suffix||
+              (rawStart.params.TZID??'')!==(rawEnd.params.TZID??'')||
+              (rawStart.params.VALUE??'')!==(rawEnd.params.VALUE??''))
+              throw new Error('Mixed DTSTART/DTEND clock systems are unsupported for recurring timed entries')
+          }
+          if(!rawEnd&&!rawDuration)throw new Error('Missing DTEND or DURATION')
+          const startIso=start.iso
+          const endIso=rawEnd?parseInstant(rawEnd).iso:endFromIcsDuration(start,rawDuration!.value).iso
           const duration=Date.parse(endIso)-Date.parse(startIso)
           if(duration<=0||duration>7*86400000)throw new Error('Invalid timed recurrence duration')
           const plan=get('RRULE')?finiteTimedDates(get('RRULE')!.value,template.anchor):
@@ -170,6 +186,11 @@ export function previewIcs(text:string):IcsPreview {
             if(child.find(p=>p.name==='UID')?.value!==uid)continue
             const originalId=child.find(p=>p.name==='RECURRENCE-ID')
             if(!originalId)continue
+            if(originalId.params.RANGE)throw new Error('Timed RECURRENCE-ID RANGE is unsupported')
+            if(child.filter(p=>p.name==='RECURRENCE-ID').length!==1||
+               child.filter(p=>p.name==='DTEND').length>1||
+               child.filter(p=>p.name==='DURATION').length>1)
+              throw new Error('Duplicate timed override properties')
             if(originalId.params.VALUE==='DATE')throw new Error('Timed RECURRENCE-ID cannot be date-only')
             const target=parseInstant(originalId).iso
             if(overrides.has(target))throw new Error('Duplicate timed RECURRENCE-ID override')
@@ -185,8 +206,11 @@ export function previewIcs(text:string):IcsPreview {
             if(excluded.has(original)&&!override)continue
             const fromProp=override?.find(p=>p.name==='DTSTART')
             const toProp=override?.find(p=>p.name==='DTEND')
+            const spanProp=override?.find(p=>p.name==='DURATION')
+            if(toProp&&spanProp)throw new Error('Timed override DTEND and DURATION cannot coexist')
             const from=fromProp?parseInstant(fromProp):candidate.original
-            const to=toProp?parseInstant(toProp):{iso:new Date(Date.parse(from.iso)+duration).toISOString()}
+            const to=toProp?parseInstant(toProp):spanProp?endFromIcsDuration(from,spanProp.value):
+              {iso:new Date(Date.parse(from.iso)+duration).toISOString()}
             if(from.date||to.date||Date.parse(to.iso)<=Date.parse(from.iso))
               throw new Error('Invalid timed occurrence override')
             const read=(key:string)=>override?.find(p=>p.name===key)?.value??get(key)?.value??''
@@ -209,7 +233,8 @@ export function previewIcs(text:string):IcsPreview {
               ' read-only instance(s); source timezone and UID remain authoritative'))
           continue
         }
-        const end=rawEnd?parseInstant(rawEnd):{date:addDays(start.date,1),iso:new Date(addDays(start.date,1)+'T00:00:00').toISOString()}
+        const end=rawEnd?parseInstant(rawEnd):rawDuration?endFromIcsDuration(start,rawDuration.value):
+          {date:addDays(start.date,1),iso:new Date(addDays(start.date,1)+'T00:00:00').toISOString()}
         if(!end.date||end.date<=start.date)throw new Error('Invalid finite all-day range')
         const duration=daysBetween(start.date,end.date)
         const rules=get('RRULE')?parseFiniteAllDayRule(get('RRULE')!.value,start.date):null
@@ -239,6 +264,11 @@ export function previewIcs(text:string):IcsPreview {
         const recurOverrides=new Map<string,Property[]>()
         for(const [key,replacement] of replacements){
           if(!key.startsWith(uid+'|'))continue
+          if(duplicateAllDayOverrides.has(key))throw new Error('Duplicate all-day RECURRENCE-ID override')
+          if(replacement.find(p=>p.name==='RECURRENCE-ID')?.params.RANGE)
+            throw new Error('All-day RECURRENCE-ID RANGE is unsupported')
+          if(['DTSTART','DTEND','DURATION'].some(field=>replacement.filter(p=>p.name===field).length>1))
+            throw new Error('Duplicate all-day override properties')
           const originalDate=dateOnly(key.slice(uid.length+1))
           if(!eligible.has(originalDate))
             throw new Error('All-day RECURRENCE-ID override outside the supported source series')
@@ -260,9 +290,13 @@ export function previewIcs(text:string):IcsPreview {
           const overrideValue=(field:string)=>replacement?.find(p=>p.name===field)?.value
           const adjustedStart=replacement?.find(p=>p.name==='DTSTART')
           const adjustedEnd=replacement?.find(p=>p.name==='DTEND')
+          const adjustedDuration=replacement?.find(p=>p.name==='DURATION')
+          if(adjustedEnd&&adjustedDuration)throw new Error('All-day override DTEND and DURATION cannot coexist')
           const startDate=adjustedStart?parseInstant(adjustedStart).date:originalDate
           if(!startDate)throw new Error('Timed recurrence overrides are unsupported')
-          const finalDate=adjustedEnd?parseInstant(adjustedEnd).date:addDays(startDate,duration)
+          const finalDate=adjustedEnd?parseInstant(adjustedEnd).date:adjustedDuration?
+            endFromIcsDuration({iso:new Date(startDate+'T00:00:00').toISOString(),date:startDate},adjustedDuration.value).date:
+            addDays(startDate,duration)
           if(!finalDate||finalDate<=startDate)throw new Error('Invalid all-day override')
           const finalTitle=unescapeText(overrideValue('SUMMARY')??get('SUMMARY')?.value??'Untitled').trim()||'Untitled'
           const finalDescription=unescapeText(overrideValue('DESCRIPTION')??get('DESCRIPTION')?.value??'')
@@ -281,11 +315,13 @@ export function previewIcs(text:string):IcsPreview {
         continue
       }
       if(get('RECURRENCE-ID')&&coveredUids.has(get('UID')?.value??''))continue
+      if(get('RECURRENCE-ID'))throw new Error('Orphan RECURRENCE-ID without a supported source master')
       const rawStart=get('DTSTART')
       if(!rawStart)throw new Error('Missing DTSTART')
-      const rawEnd=get('DTEND')
+      const rawEnd=get('DTEND'),rawDuration=get('DURATION')
+      if(rawEnd&&rawDuration)throw new Error('DTEND and DURATION cannot coexist')
       const start=parseInstant(rawStart)
-      const end=rawEnd?parseInstant(rawEnd):
+      const end=rawEnd?parseInstant(rawEnd):rawDuration?endFromIcsDuration(start,rawDuration.value):
         start.date?{date:addDays(start.date,1),iso:new Date(addDays(start.date,1)+'T00:00:00').toISOString()}:null
       if(!end)throw new Error('Missing DTEND')
       if(Boolean(start.date)!==Boolean(end.date))throw new Error('Inconsistent all-day fields')

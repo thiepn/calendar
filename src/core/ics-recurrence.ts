@@ -1,7 +1,7 @@
 import type {LocalDate} from '../types'
 import {addDays,day,daysBetween,dateSeries} from './dates'
 
-export interface FiniteAllDayRule {frequency:'DAILY'|'WEEKLY'|'MONTHLY';interval:number;count?:number;until?:LocalDate;weekdays?:number[];monthdays?:number[]}
+export interface FiniteAllDayRule {frequency:'DAILY'|'WEEKLY'|'MONTHLY';interval:number;count?:number;until?:LocalDate;weekdays?:number[];monthdays?:number[];monthlyWeekdays?:{ordinal:number;weekday:number}[]}
 const weekdays:Record<string,number>={SU:0,MO:1,TU:2,WE:3,TH:4,FR:5,SA:6}
 export function parseFiniteAllDayRule(value:string,start:LocalDate):FiniteAllDayRule {
   day(start)
@@ -11,7 +11,9 @@ export function parseFiniteAllDayRule(value:string,start:LocalDate):FiniteAllDay
   if(Object.keys(map).some(x=>!['FREQ','INTERVAL','COUNT','UNTIL','BYDAY','BYMONTHDAY'].includes(x)))throw new Error('Unsupported RRULE qualifier')
   if(!['DAILY','WEEKLY','MONTHLY'].includes(map.FREQ))throw new Error('Unsupported RRULE frequency')
   const freq=map.FREQ as FiniteAllDayRule['frequency']
-  if(map.BYDAY&&freq!=='WEEKLY')throw new Error('BYDAY currently supports weekly all-day only')
+  if(map.BYDAY&&freq!=='WEEKLY'&&freq!=='MONTHLY')throw new Error('BYDAY requires weekly or monthly recurrence')
+  if(freq==='MONTHLY'&&map.BYDAY&&map.BYMONTHDAY)
+    throw new Error('Combined monthly BYDAY and BYMONTHDAY are not supported in a bounded snapshot')
   if(map.BYMONTHDAY&&freq!=='MONTHLY')throw new Error('BYMONTHDAY currently supports monthly only')
   const interval=map.INTERVAL?Number(map.INTERVAL):1
   if(!Number.isInteger(interval)||interval<1||interval>12)throw new Error('Unsupported recurrence interval')
@@ -25,11 +27,25 @@ export function parseFiniteAllDayRule(value:string,start:LocalDate):FiniteAllDay
     if(until<start||daysBetween(start,until)>730)throw new Error('Recurring date window exceeds 730-day import limit')
   }
   let selected:number[]|undefined
+  let monthlyWeekdays:{ordinal:number;weekday:number}[]|undefined
   if(map.BYDAY){
     const values=map.BYDAY.split(',')
-    if(values.some(x=>!(x in weekdays))||new Set(values).size!==values.length)throw new Error('Unsupported BYDAY rule')
-    selected=values.map(x=>weekdays[x])
-    if(!selected.includes(day(start).getDay()))throw new Error('DTSTART weekday is not in BYDAY')
+    if(!values.length||values.length>7||new Set(values).size!==values.length)
+      throw new Error('Unsupported or duplicate BYDAY list')
+    if(freq==='WEEKLY'){
+      if(values.some(x=>!(x in weekdays)))throw new Error('Unsupported weekly BYDAY rule')
+      selected=values.map(x=>weekdays[x])
+      if(!selected.includes(day(start).getDay()))throw new Error('DTSTART weekday is not in BYDAY')
+    }else{
+      monthlyWeekdays=values.map(value=>{
+        const match=/^(-?[1-5])?(SU|MO|TU|WE|TH|FR|SA)$/.exec(value)
+        if(!match||match[1]==='0'||match[1]==='-0')
+          throw new Error('Unsupported monthly BYDAY ordinal (use 1..5 or -1..-5)')
+        return {ordinal:match[1]?Number(match[1]):0,weekday:weekdays[match[2]]}
+      })
+      if(!monthlyWeekdays.some(selector=>matchesMonthlyWeekday(day(start),selector)))
+        throw new Error('DTSTART is not included in monthly BYDAY')
+    }
   }
   let monthdays:number[]|undefined
   if(map.BYMONTHDAY){
@@ -44,7 +60,17 @@ export function parseFiniteAllDayRule(value:string,start:LocalDate):FiniteAllDay
     if(!monthdays.some(n=>n>0?n===current.getDate():lastDay+n+1===current.getDate()))
       throw new Error('DTSTART is not included in BYMONTHDAY')
   }
-  return {frequency:freq,interval,count,until,weekdays:selected,monthdays}
+  return {frequency:freq,interval,count,until,weekdays:selected,monthdays,monthlyWeekdays}
+}
+/** RFC 5545 monthly selector: a positive ordinal counts from month start,
+ * a negative ordinal from month end. Zero means every named weekday. */
+function matchesMonthlyWeekday(date:Date,rule:{ordinal:number;weekday:number}):boolean {
+  if(date.getDay()!==rule.weekday)return false
+  if(rule.ordinal===0)return true
+  const last=new Date(date.getFullYear(),date.getMonth()+1,0).getDate()
+  const ordinal=rule.ordinal>0?Math.floor((date.getDate()-1)/7)+1:
+    -Math.floor((last-date.getDate())/7)-1
+  return ordinal===rule.ordinal
 }
 export function expandFiniteAllDay(start:LocalDate,rule:FiniteAllDayRule,exdates:LocalDate[]=[]):LocalDate[]{
   day(start)
@@ -65,7 +91,9 @@ export function expandFiniteAllDay(start:LocalDate,rule:FiniteAllDayRule,exdates
       if(rule.monthdays?.length){
         const lastDay=new Date(at.getFullYear(),at.getMonth()+1,0).getDate()
         matches=diff%rule.interval===0&&rule.monthdays.some(n=>n>0?n===at.getDate():lastDay+n+1===at.getDate())
-      }else matches=diff%rule.interval===0&&at.getDate()===anchorDay
+      }else if(rule.monthlyWeekdays?.length)
+        matches=diff%rule.interval===0&&rule.monthlyWeekdays.some(selector=>matchesMonthlyWeekday(at,selector))
+      else matches=diff%rule.interval===0&&at.getDate()===anchorDay
     }
     if(!matches)continue
     emitted++
