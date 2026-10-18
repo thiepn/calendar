@@ -621,7 +621,8 @@ export default function App(){
         <div className="topbar-actions">
           <div className="search-field"><Search className="search-decorative-icon" size={16}/>
              <button type="button" className="search-focus-trigger" aria-label="Focus event search"
-               onClick={()=>searchInput.current?.focus()}><Search size={18}/></button>
+               onPointerDown={e=>e.preventDefault()}
+               onClick={e=>{e.preventDefault();searchInput.current?.focus()}}><Search size={18}/></button>
              <input ref={searchInput} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search events" aria-label="Search calendar events"/>
              {query&&<button aria-label="Clear search" onClick={()=>setQuery('')}><X size={14}/></button>}</div>
           <button className="secondary compact reminder-launch" aria-label={'Local reminders'+(dueReminderCount?' ('+dueReminderCount+' due)':'')} onClick={()=>setRemindersOpen(true)}>
