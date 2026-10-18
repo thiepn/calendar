@@ -13,6 +13,7 @@ import {personalDraftFromImported} from './core/personal-copy'
 import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
 import {exportBackup,importBackup,loadState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCalendar,restoreUnreadableCalendar,STORAGE_KEY,type RecoverySnapshot} from './core/storage'
 import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
+import {reviewImportedChanges,exportImportedChangeCsv} from './core/ics-change-review'
 import {EventEditor} from './components/EventEditor'
 import {AllDayDialog} from './components/AllDayDialog'
 import {RestoreDialog} from './components/RestoreDialog'
@@ -506,13 +507,19 @@ export default function App(){
   }
   const importReview=useMemo(()=>{
     if(!pending)return null
-    try{return {result:mergeIcs(calendar,pending,importMode),error:''}}
-    catch(error){return {result:null,error:error instanceof Error?error.message:String(error)}}
+    try{
+      const changes=reviewImportedChanges(calendar,pending,importMode)
+      return {result:mergeIcs(calendar,pending,importMode),changes,error:''}
+    }catch(error){return {result:null,changes:null,error:error instanceof Error?error.message:String(error)}}
   },[calendar,pending,importMode])
   function applyImport(){
     if(!pending)return
-    const count=calendar.records.filter(x=>x.source==='ics'&&x.sourceCalendar===pending.name).length
-    if(importMode==='replace'&&count>0&&!window.confirm('Replace all '+count+' imported copies from '+pending.name+' with this file? Personal events will be preserved.'))return
+    // Confirm only demonstrable removals, never the whole prior imported source.
+    const changed=reviewImportedChanges(calendar,pending,importMode)
+    const removed=changed.counts.removed
+    if(removed>0&&!window.confirm('This replacement removes '+removed+
+      ' local imported event(s) missing from '+pending.name+
+      '. Your personal events and external source are untouched. Continue?'))return
     const result=mergeIcs(calendar,pending,importMode)
     if(commit(result.state,`Imported ${result.added}; updated ${result.updated}; unchanged ${result.duplicates}; removed from prior snapshot ${result.removed}`))setPending(null)
   }
@@ -788,6 +795,39 @@ export default function App(){
       {importReview?.result&&<p className="import-delta" aria-label="Import change preview">
         Preview: <strong>{importReview.result.added} new</strong> · {importReview.result.updated} updated · {importReview.result.duplicates} unchanged · {importReview.result.removed} removed from this local snapshot.
       </p>}
+      {importReview?.changes&&<section className="import-change-review" aria-label="Imported changes by event">
+        <header><strong>Exactly what changes in this local snapshot</strong>
+          <small>{importMode==='replace'?'Full source replacement':'Add or update matching source UIDs; omissions retained'}</small>
+        </header>
+        {importReview.changes.counts.removed>0&&<p className="import-deletion-warning" role="status">
+          {importReview.changes.counts.removed} imported event(s) will be removed locally because they are missing from this replacement file.
+          Your external source and personal events are not modified.
+        </p>}
+        <div className="import-change-items">
+          {importReview.changes.changes.filter(item=>item.kind!=='unchanged').slice(0,35).map((item,index)=>{
+            const before=item.original,after=item.incoming
+            return <div key={(after?.sourceKey??before?.sourceKey??'change')+'-'+index}
+              className={'import-change-row change-'+item.kind}>
+              <span className="import-change-kind">{item.kind}</span>
+              <strong>{after?.title??before?.title}</strong>
+              {before&&<small>Before: {before.allDay?before.startDate:new Date(before.start).toLocaleString()}
+                {after&&before.title!==after.title?' · '+before.title:''}</small>}
+              {after&&<small>After: {after.allDay?after.startDate:new Date(after.start).toLocaleString()}</small>}
+              {item.changedFields.length>0&&<small>Changed: {item.changedFields.join(', ')}</small>}
+            </div>
+          })}
+          {!importReview.changes.changes.some(item=>item.kind!=='unchanged')&&
+            <p className="empty-note">No additions, changes or removals in this mode.</p>}
+        </div>
+        {importReview.changes.changes.filter(item=>item.kind!=='unchanged').length>35&&
+          <p className="fine-print">Showing the first 35 changes. Download the complete report to review the others.</p>}
+        <button type="button" className="secondary small" onClick={()=>{
+          try{
+            download('thiepn-calendar-import-review.csv',exportImportedChangeCsv(importReview.changes!),'text/csv;charset=utf-8')
+            setNotice('Downloaded the local event-level source change report. No data was uploaded.')
+          }catch(error){setNotice('Change report export failed: '+String(error))}
+        }}><Download size={14}/> Download complete change report ({importReview.changes.changes.length} entries)</button>
+      </section>}
       <p className="fine-print">Read-only local snapshot; not live sync. Unsupported RRULE masters are skipped with warnings. Neither method modifies Google, Folio, KLIPS or personal events.</p>
       <footer className="editor-actions"><button className="secondary" onClick={()=>setPending(null)}>Cancel</button><button className="primary" onClick={applyImport} disabled={!importReview?.result}>Apply reviewed changes</button></footer>
     </section></div>}
