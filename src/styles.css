@@ -618,3 +618,26 @@
  .day-jump-pages button{min-height:44px;min-width:0}
 }
 @media(max-width:350px){.day-jump-entry button{min-width:48px;padding:6px}.day-jump-pages{flex-wrap:wrap}}
+
+/* C30 original agenda-day pagination; no separate storage or hidden event cap. */
+.agenda-date small{display:block;font-size:10px;color:#718474;padding:5px 6px}
+.agenda-page-events{gap:5px}
+.agenda-page-events .event-chip{width:100%;min-height:44px}
+.agenda-page-events .event-chip small{white-space:normal;overflow-wrap:anywhere;line-height:1.4}
+.agenda-day-pages{display:flex;gap:9px;align-items:center;justify-content:space-between;
+ flex-wrap:wrap;padding:10px 0 3px;border-top:1px solid #e7eae5;margin-top:9px}
+.agenda-day-pages button{min-height:38px;display:flex;align-items:center;gap:3px}
+.agenda-day-pages span{color:#607464;font-size:11px;line-height:1.4;text-align:center}
+.agenda-open-day{background:transparent;border:0;color:#286245;display:flex;
+ align-items:center;gap:6px;text-align:left;padding:9px 1px;font-size:11px;font-weight:600;min-height:38px}
+.agenda-open-day:hover,.agenda-open-day:focus-visible{text-decoration:underline}
+@media(max-width:740px){
+ .agenda-row{grid-template-columns:68px minmax(0,1fr) 34px}
+ .agenda-create{width:34px;height:44px}
+ .agenda-date button{min-height:44px}
+ .agenda-page-events .event-chip{min-height:46px}
+ .agenda-day-pages{display:grid;grid-template-columns:1fr 1fr;gap:5px 8px}
+ .agenda-day-pages span{grid-row:1;grid-column:1/-1}
+ .agenda-day-pages button{min-height:44px;justify-content:center}
+ .agenda-open-day{min-height:44px}
+}

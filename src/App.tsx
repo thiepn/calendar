@@ -757,6 +757,7 @@ export default function App(){
           <div className="calendar-surface"><CalendarViews mode={mode} days={days} selected={selected} records={visible} onSelect={setSelected} onOpen={open} onCreate={create} onCreateAt={(date,start,end)=>startSlot({date,start,end})}
               onAdjust={requestAdjustment} onAllDaySlot={startAllDay} onAllDayAdjust={requestAllDayAdjustment}
               onPeek={date=>{setSelected(date);setMonthPeekDate(date)}}
+              onShowDay={date=>{setSelected(date);setMode('day')}}
               hideEmptyAgenda={agendaBusyOnly}/></div>
           <aside className="inspector">
             <div className="inspector-heading"><span className="eyebrow">SELECTED DAY</span><h3>{dateLabel(selected,{weekday:'long',month:'short',day:'numeric'})}</h3>

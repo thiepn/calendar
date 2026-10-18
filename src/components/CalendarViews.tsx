@@ -3,6 +3,7 @@ import type {CalendarRecord,CalendarOccurrence,LocalDate} from '../types'
 import {dateLabel,localDate} from '../core/dates'
 import {dayOccurrences,conflictsOnDay} from '../core/occurrences'
 import {TimelineView} from './TimelineView'
+import {AgendaDay} from './AgendaDay'
 type Mode='month'|'week'|'day'|'agenda'
 type Props={mode:Mode;days:LocalDate[];selected:LocalDate;records:CalendarRecord[];
   onSelect:(date:LocalDate)=>void;onOpen:(event:CalendarOccurrence)=>void;onCreate:(date:LocalDate)=>void;onCreateAt:(date:LocalDate,start:string,end:string)=>void;
@@ -10,7 +11,8 @@ type Props={mode:Mode;days:LocalDate[];selected:LocalDate;records:CalendarRecord
   hideEmptyAgenda?:boolean;
   onAllDaySlot:(from:LocalDate,through:LocalDate)=>void;
   onAllDayAdjust:(item:CalendarOccurrence,from:LocalDate,through:LocalDate)=>void;
-  onPeek:(date:LocalDate)=>void}
+  onPeek:(date:LocalDate)=>void;
+  onShowDay:(date:LocalDate)=>void}
 const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 function belongs(event:CalendarOccurrence,date:LocalDate) {
   return event.allDay ? event.startDate<=date&&event.endDateExclusive>date :
@@ -34,7 +36,7 @@ function Events({date,records,onOpen,onPeek,limit=30}:Pick<Props,'records'|'onOp
       <span className="more-events">+{all.length-limit} more</span>)}
   </div>
 }
-export function CalendarViews({mode,days,selected,records,onSelect,onOpen,onCreate,onCreateAt,onAdjust,onAllDaySlot,onAllDayAdjust,onPeek,hideEmptyAgenda=false}:Props){
+export function CalendarViews({mode,days,selected,records,onSelect,onOpen,onCreate,onCreateAt,onAdjust,onAllDaySlot,onAllDayAdjust,onPeek,onShowDay,hideEmptyAgenda=false}:Props){
   if(mode==='month')return <section className="month-view" aria-label="Month grid">
     <div className="weekday-head">{dayNames.map(name=><span key={name}>{name}</span>)}</div>
     <div className="month-grid">
@@ -49,13 +51,11 @@ export function CalendarViews({mode,days,selected,records,onSelect,onOpen,onCrea
     </div>
   </section>
   if(mode==='week'||mode==='day')return <TimelineView key={mode} days={days} selected={selected} records={records} onSelect={onSelect} onOpen={onOpen} onSlot={onCreateAt} onAdjust={onAdjust} onAllDaySlot={onAllDaySlot} onAllDayAdjust={onAllDayAdjust}/>
-  return <section className="agenda-view" aria-label="Upcoming agenda">{days.filter(d=>!hideEmptyAgenda||dayOccurrences(records,d).length>0).map(d=>{
-    const n=dayOccurrences(records,d).length
-    return <div className={'agenda-row '+(d===selected?'selected':'')} key={d}>
-      <div className="agenda-date"><button onClick={()=>onSelect(d)}><strong>{dateLabel(d,{weekday:'short'})}</strong>
-        <span>{dateLabel(d,{month:'short',day:'numeric'})}</span></button></div>
-      <div className="agenda-events">{n?<Events date={d} records={records} onOpen={onOpen}/>:<p className="empty-note">No commitments</p>}</div>
-      <button className="icon-button" onClick={()=>onCreate(d)} aria-label={'New event '+d}><Plus size={16}/></button>
-    </div>})}{hideEmptyAgenda&&!days.some(d=>dayOccurrences(records,d).length>0)&&<p className="empty-note agenda-empty">No commitments in this period. Try showing empty days or moving to another date.</p>}</section>
+  return <section className="agenda-view" aria-label="Upcoming agenda">{days.filter(d=>!hideEmptyAgenda||dayOccurrences(records,d).length>0).map(d=>
+    <AgendaDay key={d} date={d} selected={d===selected} records={records} onOpen={onOpen}
+      onCreate={onCreate} onShowDay={onShowDay}/>)}
+    {hideEmptyAgenda&&!days.some(d=>dayOccurrences(records,d).length>0)&&
+      <p className="empty-note agenda-empty">No commitments in this period. Try showing empty days or moving to another date.</p>}
+  </section>
 }
 export type {Mode}

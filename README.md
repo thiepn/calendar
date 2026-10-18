@@ -416,3 +416,28 @@ under existing filters. Hidden imported busy events still count separately
 for source-complete availability, reviewed conflicts and guarded CAS.
 Event record IDs, original recurrence exceptions, imports, backup/recovery,
 local privacy and Folio authority remain untouched.
+
+## C30 — complete day-specific agenda browsing, without the thirty-event cliff
+
+Before C30, List/Agenda's original `Events` renderer silently stopped at
+30 occurrences per day and displayed an **inert** `+N more` span. Even
+with a 14-/30-day agenda range, users could not open any later instance
+from that date without changing views manually. This is distinct from
+C27's Month-cell overflow and C29's graphical Day timeline locator.
+
+Every visible date row now offers an **in-place, 12-per-page original-event
+list**, accurate per-day counts and Previous/Next page controls. The day
+heading and explicit **Open graphical Day view** hand off directly to the
+original Day timeline without moving the Agenda window unexpectedly.
+Each occurrence remains independently clickable, including personal,
+recurring/exception, overnight, multiday and read-only ICS events, with
+honest imported/TRANSP/free labels and original overlapping-event alerts.
+Days without visible events retain their no-commitments message and
+existing new personal event action.
+
+The new `AgendaDay` only calls the existing canonical `dayJumpPage`
+(C29) and original `conflictsOnDay`. No shadow store, duplicate
+recurrence generator, secondary persistence or event modification exists.
+Filters and hidden-source choices affect only this visible projection;
+complete-source availability, guarded CAS, source UIDs, recurring parent
+exclusions, backups/recovery and Folio boundaries are unchanged.
