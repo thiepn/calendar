@@ -1,4 +1,4 @@
-import type {CalendarRecord,CalendarState,LocalDate} from '../types'
+import type {CalendarRecord,CalendarState} from '../types'
 import {addDays,daysBetween,localDate} from './dates'
 import {findFreeSlots,type FreeSlot} from './availability'
 import {occurrencesBetween} from './occurrences'
