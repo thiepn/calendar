@@ -1793,6 +1793,119 @@ async function exerciseC18MobileFullExportAndStaleGuard(){
   await context.close()
 }
 
+
+async function exerciseC19ExactSnoozeDesktopAndOldSource(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const state=await page.evaluate(()=>{
+    const start=new Date(Date.now()+10*60000)
+    const personal={id:'c19-current',title:'C19 reviewed personal reminder',
+      description:'Original private note',location:'Home',source:'personal',allDay:false,
+      start:start.toISOString(),end:new Date(start.getTime()+3600000).toISOString(),
+      reminderMinutes:15,updatedAt:new Date().toISOString()}
+    const result={schemaVersion:1,records:[personal]}
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(result))
+    return result
+  })
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const panel=page.getByRole('dialog',{name:'Local reminders'})
+  await panel.getByRole('button',{name:'Choose snooze time for C19 reviewed personal reminder'}).click()
+  const picker=panel.getByRole('group',{name:'Custom snooze for C19 reviewed personal reminder'})
+  const requested=await page.evaluate(()=>{
+    const d=new Date(Date.now()+50*60000),pad=n=>String(n).padStart(2,'0')
+    return [d.getFullYear(),pad(d.getMonth()+1),pad(d.getDate())].join('-')+
+      'T'+[pad(d.getHours()),pad(d.getMinutes())].join(':')
+  })
+  await picker.getByLabel('Snooze until date and time for C19 reviewed personal reminder').fill(requested)
+  await picker.getByRole('button',{name:'Save snooze time'}).click()
+  const actions=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.reminder-actions.v1')))
+  assert.equal(Object.keys(actions).length,1)
+  assert.equal(Object.values(actions)[0].kind,'snooze')
+  assert.equal(Object.values(actions)[0].until,await page.evaluate(wall=>new Date(wall).toISOString(),requested))
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),state)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const reopened=page.getByRole('dialog',{name:'Local reminders'})
+  await reopened.getByRole('button',{name:'Cancel snooze C19 reviewed personal reminder'}).click()
+  assert.equal(await page.evaluate(()=>Object.keys(JSON.parse(localStorage.getItem('thiepn.calendar.reminder-actions.v1'))).length),0)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),state)
+  console.log('BROWSER_C19_DESKTOP_EXACT_SNOOZE_RELOAD_CANCEL_ORIGINAL_PRESERVED_PASS')
+
+  // Date-window eviction: original source event was 12 days ago. A current,
+  // explicitly snoozed due time must still be available to undo/review.
+  await page.evaluate(()=>{
+    const start=new Date(Date.now()-12*86400000)
+    const pad=n=>String(n).padStart(2,'0')
+    const date=[start.getFullYear(),pad(start.getMonth()+1),pad(start.getDate())].join('-')
+    const event={id:'older|source',title:'C19 older snoozed reminder',
+      description:'Old original',location:'Local',source:'personal',allDay:false,
+      start:start.toISOString(),end:new Date(start.getTime()+3600000).toISOString(),
+      reminderMinutes:15,updatedAt:new Date().toISOString()}
+    const imported={...event,id:'ics-old',source:'ics',sourceCalendar:'Read only',
+      sourceKey:'Read only|old',title:'External not reminded',reminderMinutes:undefined}
+    const key=[event.id,date,event.start,15].join('|')
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify({schemaVersion:1,records:[event,imported]}))
+    localStorage.setItem('thiepn.calendar.reminder-actions.v1',JSON.stringify({
+      [key]:{kind:'snooze',until:new Date(Date.now()+60*60000).toISOString()}
+    }))
+  })
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const older=page.getByRole('dialog',{name:'Local reminders'})
+  await older.getByRole('button',{name:'Cancel snooze C19 older snoozed reminder'}).waitFor()
+  assert.doesNotMatch(await older.innerText(),/External not reminded/)
+  await older.getByRole('button',{name:'Cancel snooze C19 older snoozed reminder'}).click()
+  assert.equal(await older.getByRole('button',{name:'Choose snooze time for C19 older snoozed reminder'}).count(),0)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C19_OLDER_SOURCE_SNOOZE_STAYS_ACTIONABLE_AFTER_DATE_WINDOW_PASS')
+  await context.close()
+}
+async function exerciseC19MobileCustomSnoozeStaleSourceGuard(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.evaluate(()=>{
+    const start=new Date(Date.now()+10*60000)
+    const state={schemaVersion:1,records:[{id:'c19-mobile',title:'C19 mobile custom reminder',
+      description:'Private mobile notes',location:'Private',source:'personal',allDay:false,
+      start:start.toISOString(),end:new Date(start.getTime()+3600000).toISOString(),
+      reminderMinutes:15,updatedAt:new Date().toISOString()}]}
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state))
+  })
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const panel=page.getByRole('dialog',{name:'Local reminders'})
+  await panel.getByRole('button',{name:'Choose snooze time for C19 mobile custom reminder'}).click()
+  const picker=panel.getByRole('group',{name:'Custom snooze for C19 mobile custom reminder'})
+  const requested=await page.evaluate(()=>{
+    const d=new Date(Date.now()+55*60000),pad=n=>String(n).padStart(2,'0')
+    return [d.getFullYear(),pad(d.getMonth()+1),pad(d.getDate())].join('-')+
+      'T'+[pad(d.getHours()),pad(d.getMinutes())].join(':')
+  })
+  await picker.getByLabel('Snooze until date and time for C19 mobile custom reminder').fill(requested)
+  const geo=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(geo.scroll<=geo.width+2,'C19 mobile snooze overflow '+JSON.stringify(geo))
+  await page.evaluate(()=>{
+    const state=JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))
+    state.records[0].title='Edited in another tab'
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state))
+  })
+  await picker.getByRole('button',{name:'Save snooze time'}).click()
+  assert.match(await page.locator('.notice').last().innerText(),/Reminder preference not saved/)
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.reminder-actions.v1')),null)
+  assert.equal(await picker.count(),1)
+  await picker.getByRole('button',{name:'Cancel custom snooze'}).click()
+  assert.equal(await picker.count(),0)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C19_MOBILE_CUSTOM_SNOOZE_STALE_TAB_AND_TOUCH_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -1833,6 +1946,8 @@ try{
   await exerciseC17MobileSourceReviewWithoutWrites()
   await exerciseC18DesktopReviewedPrivateIcsSharing()
   await exerciseC18MobileFullExportAndStaleGuard()
+  await exerciseC19ExactSnoozeDesktopAndOldSource()
+  await exerciseC19MobileCustomSnoozeStaleSourceGuard()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
