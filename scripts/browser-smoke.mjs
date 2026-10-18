@@ -1389,6 +1389,9 @@ async function exerciseC15OrdinalAnnualAndTwoIndependentSources(){
   await page.reload({waitUntil:'networkidle'})
   assert.equal(await page.getByRole('button',{name:'Toggle imported calendar University'}).getAttribute('aria-pressed'),'false')
   assert.equal(await page.getByRole('button',{name:'Toggle imported calendar Work'}).getAttribute('aria-pressed'),'false')
+  // The selected date intentionally resets on reload; restore the inspected
+  // date before asserting the persisted per-source visibility state.
+  await page.getByLabel('Jump to date').fill('2026-11-27')
   assert.match(await page.getByRole('region',{name:'Seven-day planning overview'})
     .getByRole('button',{name:'Open daily plan 2026-11-27'}).innerText(),/0 events/)
   await page.getByRole('button',{name:'Manage sources'}).click()
