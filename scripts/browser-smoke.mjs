@@ -2541,6 +2541,125 @@ async function exerciseC25DesktopSourceFilteredNavigationAndNoWrites(){
   await context.close()
 }
 
+
+async function exerciseC26MobileContextualSingleDayFinderOriginalSources(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',err=>errors.push(err.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const fixture={schemaVersion:1,records:[
+    {id:'c26-hidden-day-block',source:'ics',sourceCalendar:'C26 Hidden Busy',
+      sourceKey:'c26-hidden-day-original',title:'C26 hidden reserved day',allDay:false,
+      transparent:false,description:'Source private',location:'',
+      start:'2026-11-27T07:00:00.000Z',end:'2026-11-27T18:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c26-hidden-clock-block',source:'ics',sourceCalendar:'C26 Hidden Busy',
+      sourceKey:'c26-clock-original',title:'C26 hidden clock time',allDay:false,
+      transparent:false,description:'Source private',location:'',
+      start:'2026-11-28T08:00:00.000Z',end:'2026-11-28T09:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c26-transparent-class',source:'ics',sourceCalendar:'C26 Public Free',
+      sourceKey:'c26-free-original',title:'C26 transparent class',allDay:false,
+      transparent:true,description:'Non blocking',location:'',
+      start:'2026-11-28T07:00:00.000Z',end:'2026-11-28T08:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c26-parent-stable',source:'personal',title:'C26 weekly review',allDay:false,
+      description:'Keep parent recurrence',location:'',
+      repeat:{frequency:'weekly',interval:1},excludedDates:['2026-12-05'],
+      start:'2026-11-28T11:00:00.000Z',end:'2026-11-28T12:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(value)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  const strip=page.getByRole('region',{name:'Seven-day planning overview'})
+  const trigger=strip.getByRole('button',{name:'Find free time on 2026-11-27'})
+  await trigger.waitFor()
+  assert.equal(await trigger.isEnabled(),true)
+  assert.equal(await strip.getByRole('button',{name:'Open daily plan 2026-11-27'}).isVisible(),true)
+  await page.getByRole('button',{name:'Toggle imported calendar C26 Hidden Busy'}).click()
+  const baseline=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.deepEqual(baseline,fixture)
+  await trigger.click()
+  const finder=page.getByRole('dialog',{name:'Find an available time'})
+  await finder.waitFor()
+  assert.equal(await finder.getByLabel('Finder start date').inputValue(),'2026-11-27')
+  assert.equal(await finder.getByLabel('Look ahead').inputValue(),'1')
+  assert.match(await finder.innerText(),/Single-day search/)
+  assert.equal(await finder.locator('.finder-slot').count(),0,
+    'Hidden imported original must block every day-only proposal')
+  assert.match(await finder.innerText(),/No available slots/)
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-11-26',
+    'Finder should not change the week selected date until a slot is chosen')
+  await finder.getByRole('button',{name:'Next finder day'}).click()
+  assert.equal(await finder.getByLabel('Finder start date').inputValue(),'2026-11-28')
+  assert.ok(await finder.locator('.finder-slot').count()>0)
+  const first=finder.locator('.finder-slot').first()
+  assert.match(await first.innerText(),/08:00/)
+  await first.click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.waitFor()
+  const proposed=await editor.locator('input[type="datetime-local"]').first().inputValue()
+  assert.equal(proposed,'2026-11-28T08:00')
+  assert.equal(await editor.locator('.draft-collisions li').count(),0,
+    'Transparent imported hour cannot be counted as a busy conflict')
+  await editor.getByLabel('Event name').fill('C26 personal scheduled locally')
+  await editor.getByRole('button',{name:'Create event'}).click()
+  await editor.waitFor({state:'hidden'})
+  const final=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(final.records.length,fixture.records.length+1)
+  for(const old of fixture.records){
+    assert.deepEqual(final.records.find(x=>x.id===old.id),old,
+      'C26 must preserve original sources, transparent flag, UID and recurrence exclusions')
+  }
+  assert.equal(final.records.find(x=>x.title==='C26 personal scheduled locally')?.start,
+    '2026-11-28T07:00:00.000Z')
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-11-28')
+  const size=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(size.scroll<=size.width+2,'C26 mobile page overflow: '+JSON.stringify(size))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C26_MOBILE_DAY_SCOPED_HIDDEN_SOURCE_TRANSP_GUARDED_SAVE_PASS')
+  await context.close()
+}
+async function exerciseC26DesktopFinderDayWindowAndStaleStorageGuard(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',err=>errors.push(err.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.getByRole('button',{name:'Find time',exact:true}).click()
+  const finder=page.getByRole('dialog',{name:'Find an available time'})
+  await finder.waitFor()
+  assert.equal(await finder.getByLabel('Finder start date').inputValue(),'2026-11-26')
+  assert.equal(await finder.getByLabel('Look ahead').inputValue(),'7',
+    'Global Find time retains original broad search')
+  await finder.getByLabel('Look ahead').selectOption('1')
+  assert.match(await finder.innerText(),/Single-day search/)
+  await finder.getByLabel('Finder start date').fill('2026-11-28')
+  await finder.getByRole('button',{name:'Previous finder day'}).click()
+  assert.equal(await finder.getByLabel('Finder start date').inputValue(),'2026-11-27')
+  await finder.getByRole('button',{name:'Next finder day'}).click()
+  assert.equal(await finder.getByLabel('Finder start date').inputValue(),'2026-11-28')
+  assert.ok(await finder.locator('.finder-slot').count()>0)
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  const original=finder.locator('.finder-slot').first()
+  const next={...before,records:[...before.records,{
+    id:'c26-another-tab-original',source:'personal',title:'C26 another tab appointment',
+    description:'',location:'',allDay:false,
+    start:'2026-11-28T07:00:00.000Z',end:'2026-11-28T09:00:00.000Z',
+    updatedAt:'2026-10-18T10:00:00.000Z'}]}
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(value)),next)
+  await original.click()
+  assert.equal(await page.getByRole('dialog',{name:'New event'}).count(),0,
+    'Stale source-complete suggestion must not open an editor')
+  assert.match(await page.getByRole('status').last().innerText(),/changed in another tab/)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),next)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C26_DESKTOP_FINDER_EXPLICIT_DATE_AND_STALE_ORIGINAL_CAS_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -2596,6 +2715,8 @@ try{
   await exerciseC24DesktopReverseSearchPagesAndFilterReset()
   await exerciseC25MobileReadOnlySourceAndDetachedEventBrowsing()
   await exerciseC25DesktopSourceFilteredNavigationAndNoWrites()
+  await exerciseC26MobileContextualSingleDayFinderOriginalSources()
+  await exerciseC26DesktopFinderDayWindowAndStaleStorageGuard()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
