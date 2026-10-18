@@ -1451,6 +1451,93 @@ async function exerciseC15MobileSourceVisibilityAndAccountBoundaries(){
   await context.close()
 }
 
+
+async function exerciseC16FiniteMonthlySetPosAndSourceClockGuard(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const valid=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C16 Payroll',
+    'BEGIN:VEVENT','UID:last-business-day','SUMMARY:C16 final weekday payroll',
+    'DTSTART;TZID=Europe/Berlin:20261030T163000',
+    'DURATION:PT90M','RRULE:FREQ=MONTHLY;COUNT=3;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1',
+    'END:VEVENT','END:VCALENDAR'].join('\r\n')
+  const choose=async source=>page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'c16-payroll.ics',mimeType:'text/calendar',buffer:Buffer.from(source)})
+  await choose(valid)
+  let dialog=page.getByRole('dialog',{name:'ICS import review'})
+  await dialog.waitFor()
+  assert.match(await dialog.getByLabel('Import change preview').innerText(),/3 new/)
+  await dialog.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const original=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(original.length,3)
+  assert.deepEqual(original.map(r=>r.start),[
+    '2026-10-30T15:30:00.000Z','2026-11-30T15:30:00.000Z',
+    '2026-12-31T15:30:00.000Z'])
+  assert.ok(original.every(r=>r.source==='ics'&&!r.repeat))
+  await choose(valid)
+  dialog=page.getByRole('dialog',{name:'ICS import review'})
+  await dialog.waitFor()
+  assert.match(await dialog.getByLabel('Import change preview').innerText(),/3 unchanged/)
+  await dialog.getByRole('button',{name:'Cancel'}).click()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records),original)
+  await page.getByLabel('Jump to date').fill('2026-11-30')
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  assert.match(await page.locator('.inspector').innerText(),/C16 final weekday payroll/)
+  console.log('BROWSER_C16_SOURCE_TZID_MONTHLY_BYSETPOS_UID_REFRESH_PASS')
+
+  const unsafe=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C16 Payroll',
+    'BEGIN:VEVENT','UID:last-business-day','SUMMARY:Unsafe wrong-zone exclusion',
+    'DTSTART;TZID=Europe/Berlin:20261030T163000','DURATION:PT90M',
+    'RRULE:FREQ=MONTHLY;COUNT=3;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1',
+    'EXDATE;TZID=America/New_York:20261130T163000',
+    'END:VEVENT','END:VCALENDAR'].join('\r\n')
+  await choose(unsafe)
+  dialog=page.getByRole('dialog',{name:'ICS import review'})
+  await dialog.waitFor()
+  assert.match(await dialog.innerText(),/1 source event/)
+  assert.match(await dialog.innerText(),/EXDATE.*clock system/)
+  await dialog.locator('input[type=radio]').nth(1).check()
+  assert.match(await dialog.innerText(),/Import cannot be applied/)
+  assert.equal(await dialog.getByRole('button',{name:'Apply reviewed changes'}).isDisabled(),true)
+  await dialog.getByRole('button',{name:'Cancel'}).click()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records),original)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C16_MIXED_SOURCE_CLOCK_INCOMPLETE_REPLACE_GUARD_PASS')
+  await context.close()
+}
+async function exerciseC16MobileMonthlySourceAndNoFalseEventEdits(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,
+    hasTouch:true,timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const ics=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C16 Mobile Schedule',
+    'BEGIN:VEVENT','UID:c16-mobile-payday',
+    'SUMMARY:Last workday mobile snapshot','DTSTART;VALUE=DATE:20261030',
+    'DURATION:P1D','RRULE:FREQ=MONTHLY;COUNT=3;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1',
+    'END:VEVENT','END:VCALENDAR'].join('\r\n')
+  await page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'c16-mobile.ics',mimeType:'text/calendar',buffer:Buffer.from(ics)})
+  const review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  assert.match(await review.getByLabel('Import change preview').innerText(),/3 new/)
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  await page.getByLabel('Jump to date').fill('2026-12-31')
+  await page.locator('.view-switch button').filter({hasText:'List'}).click()
+  assert.match(await page.locator('.calendar-surface').innerText(),/Last workday mobile snapshot/)
+  const pre=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.deepEqual(pre.records.map(r=>r.startDate),['2026-10-30','2026-11-30','2026-12-31'])
+  assert.ok(pre.records.every(r=>r.source==='ics'))
+  const size=await page.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth}))
+  assert.ok(size.document<=size.viewport+2,'C16 mobile agenda overflow '+JSON.stringify(size))
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),pre)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C16_MOBILE_BOUND_MONTHLY_AGENDA_NO_SHADOW_WRITES_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -1485,6 +1572,8 @@ try{
   await exerciseC14MobileFinder()
   await exerciseC15OrdinalAnnualAndTwoIndependentSources()
   await exerciseC15MobileSourceVisibilityAndAccountBoundaries()
+  await exerciseC16FiniteMonthlySetPosAndSourceClockGuard()
+  await exerciseC16MobileMonthlySourceAndNoFalseEventEdits()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
