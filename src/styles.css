@@ -583,3 +583,38 @@
  .agenda-jump-controls button{width:100%;min-width:0;min-height:44px;font-size:12px}
  .agenda-jump-note{font-size:11px}
 }
+
+/* C29: event-specific Day timeline location, not another agenda or event store. */
+.day-jump-nav{padding:12px 13px;border-bottom:1px solid #dbe5dc;background:#f8faf7;min-width:0}
+.day-jump-head{display:flex;gap:10px;align-items:baseline;justify-content:space-between;flex-wrap:wrap;margin-bottom:9px}
+.day-jump-head>div{display:flex;flex-wrap:wrap;gap:9px;align-items:baseline}
+.day-jump-head strong{font-size:13px;color:#244b36}
+.day-jump-head small,.day-jump-head>span{font-size:11px;color:#647e6b}
+.day-jump-items{display:grid;gap:5px;max-height:250px;overflow-y:auto;overscroll-behavior:contain}
+.day-jump-entry{display:grid;grid-template-columns:minmax(75px,.5fr) minmax(0,1.9fr) auto auto;gap:7px;align-items:center;
+ min-width:0;border:1px solid #d9e6dd;background:#fff;padding:8px 9px;color:#2f5541}
+.day-jump-entry.imported{background:#faf6ed;border-color:#e4dccc;color:#765d36}
+.day-jump-time{font-size:11px;font-variant-numeric:tabular-nums;font-weight:650}
+.day-jump-title{display:grid;gap:3px;min-width:0}
+.day-jump-title strong{font-size:12px;overflow-wrap:anywhere}
+.day-jump-title small{font-size:10px;line-height:1.45;color:#768679}
+.day-jump-entry button{min-height:35px;font-size:11px}
+.day-jump-entry button:focus-visible{outline:2px solid #287450;outline-offset:1px}
+.day-jump-pages{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:9px 0 2px}
+.day-jump-pages span{font-size:11px;color:#688171;text-align:center}
+.day-jump-pages button{min-height:38px;white-space:normal}
+.day-jump-status,.day-jump-empty{margin:8px 0 0;font-size:11px;line-height:1.5;color:#637969}
+@media(max-width:740px){
+ .day-jump-nav{padding:11px 9px}
+ .day-jump-head{display:grid;gap:5px}
+ .day-jump-entry{grid-template-columns:minmax(0,1fr) auto auto;gap:6px;padding:9px 7px}
+ .day-jump-entry .day-jump-time{grid-column:1;grid-row:1}
+ .day-jump-entry .day-jump-title{grid-column:1;grid-row:2}
+ .day-jump-entry button{grid-row:1/3;min-height:46px;min-width:57px;padding:8px;font-size:11px}
+ .day-jump-entry button:nth-last-child(2){grid-column:2}
+ .day-jump-entry button:last-child{grid-column:3}
+ .day-jump-entry:has(button:only-of-type) button:last-child{grid-column:3}
+ .day-jump-items{max-height:33dvh}
+ .day-jump-pages button{min-height:44px;min-width:0}
+}
+@media(max-width:350px){.day-jump-entry button{min-width:48px;padding:6px}.day-jump-pages{flex-wrap:wrap}}

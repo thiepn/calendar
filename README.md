@@ -389,3 +389,30 @@ recurrence exceptions/detached IDs, view persistence, guarded CAS
 writer, backup/recovery, original all-source availability/conflicts,
 local privacy and Folio boundary are unchanged. No second store,
 external provider action, or implicit event booking.
+
+## C29 — exact-event navigation within the original Day timeline
+
+The graphical Day view has an hours-long scroll. Below 1000px the selected
+day inspector is hidden, leaving no direct way to locate a specific late,
+overlapping, or recurring appointment in that day's original timeline.
+C25 navigates between **details** and C27 previews **month cells**, but
+neither jumps the user's Day timeline to a particular saved event.
+
+Day view now includes a compact, source-filtered **Jump to an event** panel
+above the original graphical timeline. It uses canonical `dayOccurrences`,
+all-day-first and UTC-instance ordering, deterministic original keys, 8-per-page
+bounded browsing for busy days, and separate **Locate** (scroll/focus original
+timeline event) and **Details** (open original event) actions. All-day entries
+offer Details without inventing a timeline hour. Continuations clip their
+scroll targets to the current day's real local midnight; autumn DST repeated
+hours receive distinct UTC-offset labels and genuinely distinct scroll
+positions based on `dayAxis`. Mobile buttons are 46px and the navigator has
+its own bounded scroll region so it does not obscure all 24 hours.
+
+`src/core/day-navigator.ts` is a read-only projection, not a shadow store
+or alternative occurrence/free-time engine. Visible personal, recurring,
+detached, imported read-only and free (TRANSP:TRANSPARENT) events are shown
+under existing filters. Hidden imported busy events still count separately
+for source-complete availability, reviewed conflicts and guarded CAS.
+Event record IDs, original recurrence exceptions, imports, backup/recovery,
+local privacy and Folio authority remain untouched.

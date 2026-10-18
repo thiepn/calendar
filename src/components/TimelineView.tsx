@@ -1,4 +1,4 @@
-import {useEffect,useRef,useState,type PointerEvent,type KeyboardEvent} from 'react'
+import {useEffect,useMemo,useRef,useState,type PointerEvent,type KeyboardEvent} from 'react'
 import {AlertTriangle,GripHorizontal,Plus} from 'lucide-react'
 import type {CalendarRecord,CalendarOccurrence,LocalDate} from '../types'
 import {addDays,daysBetween,dateLabel,displayTime,localDate,localDateTime,localInstantOptions} from '../core/dates'
@@ -6,6 +6,7 @@ import {dayOccurrences} from '../core/occurrences'
 import {layoutTimedDay,dayAxis,slotAt,TIMELINE_HOUR_HEIGHT,SLOT_MINUTES} from '../core/timeline'
 import {nudgeTimed,type TimedAction} from '../core/reschedule'
 import {focusDaySummary,focusScrollMinute} from '../core/mobile-focus'
+import {dayJumpPage,type DayJump} from '../core/day-navigator'
 
 type Props={days:LocalDate[];selected:LocalDate;records:CalendarRecord[];
   onSelect:(date:LocalDate)=>void;onOpen:(item:CalendarOccurrence)=>void;
@@ -35,6 +36,8 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
   const [duration,setDuration]=useState<number>(60)
   const [touchDrag,setTouchDrag]=useState(false)
   const [focusDay,setFocusDay]=useState(false)
+  const [jumpPage,setJumpPage]=useState(0)
+  const [located,setLocated]=useState('')
   const pointerPosition=useRef({x:0,y:0})
   const edgeTimer=useRef<number|null>(null)
   useEffect(()=>()=>{if(edgeTimer.current!==null)window.clearInterval(edgeTimer.current)},[])
@@ -45,6 +48,19 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
   },[])
   const week=days.length>1
   const renderedDays=week&&focusDay?[selected]:days
+  const dayJumps=useMemo(()=>!week?dayJumpPage(records,selected,jumpPage):null,
+    [week,records,selected,jumpPage])
+  useEffect(()=>{setJumpPage(0);setLocated('')},[selected])
+  function locateDayEvent(item:DayJump){
+    if(item.scrollMinute===null||!scroll.current)return
+    // Scroll the existing original timeline, then focus its original event
+    // element. Never use synthetic time slots or mutate a calendar record.
+    scroll.current.scrollTop=item.scrollMinute/60*TIMELINE_HOUR_HEIGHT
+    const controls=scroll.current.querySelectorAll<HTMLButtonElement>('.timeline-block')
+    Array.from(controls).find(button=>button.dataset.occurrenceKey===item.occurrence.key)
+      ?.focus({preventScroll:true})
+    setLocated(item.occurrence.title+' located at '+item.timeLabel)
+  }
   useEffect(()=>{
     if(!scroll.current)return
     scroll.current.scrollTop=(week&&focusDay?focusScrollMinute(records,selected):420)/60*TIMELINE_HOUR_HEIGHT
@@ -202,6 +218,37 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
           Touch drag mode</label>
       </div>
     </div>
+    {!week&&dayJumps&&<nav className="day-jump-nav" aria-label="Navigate today's visible events">
+      <header className="day-jump-head">
+        <div><strong>Jump to an event</strong>
+          <small>{dayJumps.total} visible · {dayJumps.timedCount} timed · {dayJumps.allDayCount} all-day</small></div>
+        <span>Day timeline · shown sources only</span>
+      </header>
+      {dayJumps.items.length?<div className="day-jump-items">
+        {dayJumps.items.map(item=><div key={item.occurrence.key}
+          className={'day-jump-entry '+(item.occurrence.source==='ics'?'imported':'')}>
+          <span className="day-jump-time">{item.timeLabel}</span>
+          <span className="day-jump-title"><strong>{item.occurrence.title}</strong>
+            <small>{item.occurrence.source==='ics'?'Imported · read only':'Personal'}
+            {item.occurrence.transparent?' · Free (non-blocking)':''}
+            {item.occurrence.startDate<selected?' · Continues':''}</small></span>
+          {item.minute!==null&&<button type="button" className="secondary compact"
+            aria-label={'Locate in timeline '+item.occurrence.key}
+            onClick={()=>locateDayEvent(item)}>Locate</button>}
+          <button type="button" className="secondary compact"
+            aria-label={'Open original event '+item.occurrence.key}
+            onClick={()=>onOpen(item.occurrence)}>Details</button>
+        </div>)}
+      </div>:<p className="day-jump-empty">No visible events on this date. The timeline can still be used to create a personal event.</p>}
+      {dayJumps.pages>1&&<div className="day-jump-pages" aria-label="Day navigation pages">
+        <button type="button" className="secondary compact" disabled={!dayJumps.hasPrevious}
+          onClick={()=>{setJumpPage(dayJumps.page-1);setLocated('')}}>Previous events</button>
+        <span>Events {dayJumps.fromIndex}–{dayJumps.throughIndex} of {dayJumps.total} · Page {dayJumps.page+1} of {dayJumps.pages}</span>
+        <button type="button" className="secondary compact" disabled={!dayJumps.hasNext}
+          onClick={()=>{setJumpPage(dayJumps.page+1);setLocated('')}}>Next events</button>
+      </div>}
+      <p className="day-jump-status" role="status" aria-live="polite">{located||'Locate scrolls the existing timeline. Details opens the original event.'}</p>
+    </nav>}
     {week&&focusDay&&<nav className="mobile-focus-strip" aria-label="Focused week day">
       {days.map(date=>{
         const summary=focusDaySummary(records,date)
@@ -288,6 +335,7 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
                     left:'calc(34px + (100% - 38px) * '+(lane/lanes)+')',width:'calc((100% - 38px) * '+(width/100)+' - 4px)'}}>
                   <button type="button"
                     className={'timeline-block '+(occurrence.source==='ics'?'imported ':'')+(overlaps?'overlap':'')}
+                    data-occurrence-key={occurrence.key}
                     aria-label={occurrence.title+', '+displayTime(occurrence.start)+' to '+displayTime(occurrence.end)+(overlaps?', overlapping event':'')}
                     title={editable?'Drag to move · Alt+arrows to move · Alt+Shift+vertical arrows to resize':'Imported snapshot — read only'}
                     onPointerDown={event=>{if(editable)begin(event,'move',date,eventMinute(occurrence,date),eventLength(occurrence),occurrence)}}
