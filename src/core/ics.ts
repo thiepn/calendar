@@ -428,7 +428,13 @@ export function mergeIcs(state:CalendarState,preview:IcsPreview,mode:'update'|'r
     removed:mode==='replace'?old.filter(x=>!seenKeys.has(x.sourceKey!)).length:0}
 }
 
-function textValue(value:string){return value.replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;')}
+/** Avoid line injection in imported/personal text even when local inputs contain bare CR.
+ * ICS requires escaped TEXT, and raw CR or NUL must never create new properties. */
+function textValue(value:string){
+  return value.replace(/\r\n?/g,'\n').replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g,'')
+    .replace(/\\/g,'\\\\').replace(/\n/g,'\\n')
+    .replace(/,/g,'\\,').replace(/;/g,'\\;')
+}
 function utcValue(iso:string){const d=new Date(iso);const p=(n:number)=>String(n).padStart(2,'0');return ''+d.getUTCFullYear()+p(d.getUTCMonth()+1)+p(d.getUTCDate())+'T'+p(d.getUTCHours())+p(d.getUTCMinutes())+p(d.getUTCSeconds())+'Z'}
 function fold(line:string):string {
   const enc=new TextEncoder();if(enc.encode(line).length<=73)return line
@@ -436,20 +442,39 @@ function fold(line:string):string {
   for(const ch of line){if(cur&&enc.encode(cur+ch).length>73){chunks.push(cur);cur=' '+ch}else cur+=ch}
   return [...chunks,cur].join('\r\n')
 }
-export function exportIcs(state:CalendarState,from:string,through:string):string {
+export type PersonalIcsPrivacy='busy'|'titles'|'details'
+export interface PersonalIcsExportOptions{
+  privacy?:PersonalIcsPrivacy
+  includeReminders?:boolean
+}
+export function exportIcs(state:CalendarState,from:string,through:string,
+  options:PersonalIcsExportOptions={}):string {
+  const privacy=options.privacy??'details'
+  if(!['busy','titles','details'].includes(privacy))throw new Error('Invalid personal ICS privacy selection')
+  if(options.includeReminders&&privacy!=='details')
+    throw new Error('Reminder alarms require explicit full-details export')
+  const withReminders=options.includeReminders??(options.privacy===undefined)
   const mine=state.records.filter(r=>r.source==='personal')
   const items=occurrencesBetween(mine,from,through)
   if(items.length>5000)throw new Error('Too many events to export in one snapshot')
   const lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//THIEPN//Calendar standalone//EN','CALSCALE:GREGORIAN','X-WR-CALNAME:THIEPN Calendar']
   for(const item of items){
     const record=mine.find(x=>x.id===item.recordId)!
-    lines.push('BEGIN:VEVENT','UID:'+textValue(item.key+'@calendar.thiepn.local'),'DTSTAMP:'+utcValue(new Date().toISOString()),
-      'SUMMARY:'+textValue(item.title),'DESCRIPTION:'+textValue(item.description),
-      'LOCATION:'+textValue(item.location))
+    // Busy-only exports create non-linkable throwaway UIDs, never expose local
+    // canonical IDs in availability snapshots. Consequently importing separate
+    // Busy-only exports may create duplicates; use the full JSON backup instead
+    // for lossless same-device recovery.
+    const uid=privacy==='busy'?crypto.randomUUID()+'@calendar.thiepn.local':
+      item.key+'@calendar.thiepn.local'
+    lines.push('BEGIN:VEVENT','UID:'+textValue(uid),'DTSTAMP:'+utcValue(new Date().toISOString()),
+      'SUMMARY:'+textValue(privacy==='busy'?'Busy':item.title))
+    if(privacy==='details'){
+      lines.push('DESCRIPTION:'+textValue(item.description),'LOCATION:'+textValue(item.location))
+    }
     if(item.allDay){
       lines.push('DTSTART;VALUE=DATE:'+item.startDate.replace(/-/g,''),'DTEND;VALUE=DATE:'+item.endDateExclusive.replace(/-/g,''))
     }else lines.push('DTSTART:'+utcValue(item.start),'DTEND:'+utcValue(item.end))
-    if(record.reminderMinutes!==undefined){
+    if(withReminders&&record.reminderMinutes!==undefined){
       lines.push('BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+textValue(item.title),
         'TRIGGER:-PT'+record.reminderMinutes+'M','END:VALARM')
     }
