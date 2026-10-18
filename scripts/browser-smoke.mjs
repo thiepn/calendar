@@ -2368,6 +2368,15 @@ async function exerciseC24MobileSearchPageNavigationAndCanonicalDetails(){
   assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture,
     'Pagination and details must not rewrite personal/recurring originals')
   // Opening a result selects its date; reset the search anchor before looking back.\n  await page.getByLabel('Jump to date').fill('2026-10-18')\n  await input.fill('C24 Free imported')
+  const c24QueryDiagnostic=await page.evaluate(()=>{
+    const data=JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')||'{}')
+    return {selected:document.querySelector('input[aria-label="Jump to date"]')?.value,
+      query:document.querySelector('input[aria-label="Search calendar events"]')?.value,
+      selectedFilter:document.querySelector('.source-entry.active')?.textContent,
+      results:document.querySelector('[aria-label="Calendar search results"]')?.textContent?.slice(0,250),
+      storedRecords:data.records?.map(x=>({title:x.title,source:x.source,sourceCalendar:x.sourceCalendar}))}
+  })
+  console.log('C24_IMPORTED_SEARCH_DIAGNOSTIC',JSON.stringify(c24QueryDiagnostic))
   await panel.getByText('1 occurrence found',{exact:false}).waitFor()
   assert.match(await panel.innerText(),/1 occurrence found/)
   assert.equal(await panel.getByRole('button',{name:'Next results'}).count(),0)
