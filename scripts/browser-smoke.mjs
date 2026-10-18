@@ -1660,6 +1660,139 @@ async function exerciseC17MobileSourceReviewWithoutWrites(){
   await context.close()
 }
 
+
+async function exerciseC18DesktopReviewedPrivateIcsSharing(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB',acceptDownloads:true})
+  const page=await context.newPage(),errors=[],downloads=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  page.on('download',file=>downloads.push(file.suggestedFilename()))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const original={schemaVersion:1,records:[
+    {id:'c18-canonical-private',title:'C18 secret therapy appointment',
+      description:'Private journal confidential',location:'Do not share address',
+      source:'personal',allDay:false,start:'2026-10-12T08:00:00.000Z',
+      end:'2026-10-12T09:00:00.000Z',reminderMinutes:15,
+      repeat:{frequency:'daily',interval:1,until:'2026-10-13'},
+      updatedAt:'2026-10-10T00:00:00.000Z'},
+    {id:'c18-all-day',title:'C18 private two-day retreat',
+      description:'Personal only notes',location:'Undisclosed',
+      source:'personal',allDay:true,start:'2026-10-14T00:00:00.000Z',
+      end:'2026-10-16T00:00:00.000Z',startDate:'2026-10-14',
+      endDateExclusive:'2026-10-16',updatedAt:'2026-10-10T00:00:00.000Z'},
+    {id:'c18-ics',title:'C18 imported provider secret',description:'Original read only',
+      location:'Provider location',source:'ics',sourceCalendar:'External',
+      sourceKey:'External|c18-ics',allDay:false,start:'2026-10-12T10:00:00.000Z',
+      end:'2026-10-12T11:00:00.000Z',updatedAt:'2026-10-10T00:00:00.000Z'}
+  ]}
+  await page.evaluate(state=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state)),original)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-10-12')
+  await page.getByRole('button',{name:'Export personal events'}).click()
+  const modal=page.getByRole('dialog',{name:'Personal ICS export review'})
+  await modal.waitFor()
+  assert.equal(await modal.getByLabel('ICS export from date').inputValue(),'2026-10-12')
+  assert.equal(await modal.getByLabel('ICS export through date').inputValue(),'2026-11-11')
+  assert.equal(await modal.getByRole('radio',{name:/Busy only/}).isChecked(),true)
+  assert.equal(downloads.length,0,'A reviewed ICS dialog must never auto-export')
+  await modal.getByLabel('ICS export through date').fill('2026-10-16')
+  const summary=modal.getByRole('region',{name:'Personal ICS export contents'})
+  assert.match(await summary.innerText(),/3 personal occurrences/)
+  assert.match(await summary.innerText(),/1 imported record excluded/)
+  assert.doesNotMatch(await summary.innerText(),/secret therapy appointment/)
+  const busyPending=page.waitForEvent('download')
+  await modal.getByRole('button',{name:'Download reviewed personal ICS'}).click()
+  const busyFile=await busyPending
+  const busy=await readFile(await busyFile.path(),'utf8')
+  assert.match(busyFile.suggestedFilename(),/thiepn-calendar-personal-2026-10-12-to-2026-10-16\.ics/)
+  assert.equal((busy.match(/BEGIN:VEVENT/g)||[]).length,3)
+  assert.equal((busy.match(/SUMMARY:Busy/g)||[]).length,3)
+  assert.ok(!busy.includes('secret therapy')&&!busy.includes('imported provider')&&
+    !busy.includes('Private journal')&&!busy.includes('canonical-private'))
+  assert.ok(!busy.includes('BEGIN:VALARM')&&!busy.includes('LOCATION:'))
+  assert.match(busy,/DTSTART;VALUE=DATE:20261014/)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),original)
+  console.log('BROWSER_C18_DESKTOP_BUSY_ONLY_REVIEW_AND_SOURCE_PRIVATE_DOWNLOAD_PASS')
+
+  await page.getByRole('button',{name:'Export personal events'}).click()
+  const titled=page.getByRole('dialog',{name:'Personal ICS export review'})
+  await titled.getByLabel('ICS export through date').fill('2026-10-16')
+  await titled.getByRole('radio',{name:/Event titles/}).check()
+  const titlesPending=page.waitForEvent('download')
+  await titled.getByRole('button',{name:'Download reviewed personal ICS'}).click()
+  const titles=await readFile(await (await titlesPending).path(),'utf8')
+  assert.match(titles,/SUMMARY:C18 secret therapy appointment/)
+  assert.ok(!titles.includes('Private journal')&&!titles.includes('Do not share address')&&
+    !titles.includes('BEGIN:VALARM')&&!titles.includes('imported provider'))
+  assert.ok(titles.includes('c18-canonical-private@2026-10-12@calendar.thiepn.local'))
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),original)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C18_DESKTOP_TITLE_ONLY_WITHOUT_PRIVATE_NOTES_PASS')
+  await context.close()
+}
+async function exerciseC18MobileFullExportAndStaleGuard(){
+  const context=await browser.newContext({viewport:{width:390,height:844},
+    isMobile:true,hasTouch:true,timezoneId:'Europe/Berlin',locale:'en-GB',acceptDownloads:true})
+  const page=await context.newPage(),errors=[],downloads=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  page.on('download',file=>downloads.push(file.suggestedFilename()))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const original={schemaVersion:1,records:[
+    {id:'c18-mobile-secret',title:'Mobile original note',
+      description:'Unshared medical history',location:'Private room',
+      source:'personal',allDay:false,start:'2026-10-12T08:00:00.000Z',
+      end:'2026-10-12T09:00:00.000Z',reminderMinutes:15,
+      updatedAt:'2026-10-10T00:00:00.000Z'},
+    {id:'c18-mobile-ics',title:'No provider export',description:'External source',
+      location:'Imported',source:'ics',sourceCalendar:'Provider',
+      sourceKey:'Provider|mobile',allDay:false,start:'2026-10-12T12:00:00.000Z',
+      end:'2026-10-12T13:00:00.000Z',updatedAt:'2026-10-10T00:00:00.000Z'}
+  ]}
+  await page.evaluate(state=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state)),original)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-10-12')
+  await page.getByRole('button',{name:'Export personal events'}).click()
+  const modal=page.getByRole('dialog',{name:'Personal ICS export review'})
+  await modal.getByLabel('ICS export through date').fill('2028-10-19')
+  assert.match(await modal.getByRole('alert').innerText(),/366 inclusive days/)
+  assert.equal(await modal.getByRole('button',{name:'Download reviewed personal ICS'}).isDisabled(),true)
+  await modal.getByLabel('ICS export through date').fill('2026-10-12')
+  await modal.getByRole('radio',{name:/Full event details/}).check()
+  const alarms=modal.getByLabel('Include reminder alarms in ICS')
+  assert.equal(await alarms.isChecked(),false)
+  await alarms.check()
+  const geometry=await page.evaluate(()=>({visible:innerWidth,content:document.documentElement.scrollWidth}))
+  assert.ok(geometry.content<=geometry.visible+2,'C18 mobile personal export overflow '+JSON.stringify(geometry))
+  const pending=page.waitForEvent('download')
+  await modal.getByRole('button',{name:'Download reviewed personal ICS'}).click()
+  const ics=await readFile(await (await pending).path(),'utf8')
+  assert.match(ics,/SUMMARY:Mobile original note/)
+  assert.match(ics,/DESCRIPTION:Unshared medical history/)
+  assert.match(ics,/LOCATION:Private room/)
+  assert.match(ics,/TRIGGER:-PT15M/)
+  assert.ok(!ics.includes('No provider export')&&!ics.includes('External source'))
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),original)
+  console.log('BROWSER_C18_MOBILE_FULL_OPT_IN_ALARM_AND_NO_PROVIDER_LEAK_PASS')
+
+  await page.getByRole('button',{name:'Export personal events'}).click()
+  const stale=page.getByRole('dialog',{name:'Personal ICS export review'})
+  await stale.getByLabel('ICS export through date').fill('2026-10-12')
+  const recorded=downloads.length
+  await page.evaluate(()=>{
+    const state=JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))
+    state.records[0].title='Other tab edited this event'
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state))
+  })
+  await stale.getByRole('button',{name:'Download reviewed personal ICS'}).click()
+  assert.match(await page.locator('.notice').last().innerText(),/Personal ICS export failed/)
+  assert.equal(downloads.length,recorded,'Stale snapshot must not download after a concurrent change')
+  assert.equal(await stale.count(),1)
+  await stale.getByRole('button',{name:'Cancel'}).click()
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C18_MOBILE_STALE_CALENDAR_EXPORT_REFUSED_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -1698,6 +1831,8 @@ try{
   await exerciseC16MobileMonthlySourceAndNoFalseEventEdits()
   await exerciseC17ImportChangeReviewAndStructureGuardDesktop()
   await exerciseC17MobileSourceReviewWithoutWrites()
+  await exerciseC18DesktopReviewedPrivateIcsSharing()
+  await exerciseC18MobileFullExportAndStaleGuard()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
