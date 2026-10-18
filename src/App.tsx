@@ -744,10 +744,10 @@ export default function App(){
             <option value={14}>14 days</option><option value={30}>30 days</option>
           </select></label>
           <label><input type="checkbox" checked={agendaBusyOnly} onChange={e=>setAgendaBusyOnly(e.target.checked)}/> Only days with commitments</label>
-          <nav className="agenda-jump-controls" aria-label="Skip empty agenda ranges">
-            <button className="secondary compact" type="button" aria-label="Previous visible agenda range"
+          <nav className="agenda-jump-controls" aria-label="Skip empty periods">
+            <button className="secondary compact" type="button" aria-label="Previous visible commitments"
               onClick={()=>jumpAgenda(-1)}><ChevronLeft size={15}/> Previous events</button>
-            <button className="secondary compact" type="button" aria-label="Next visible agenda range"
+            <button className="secondary compact" type="button" aria-label="Next visible commitments"
               onClick={()=>jumpAgenda(1)}>Next events <ChevronRight size={15}/></button>
           </nav>
           <button className="secondary compact" type="button" onClick={saveDisplayedAgenda} aria-label="Download visible agenda CSV"><Download size={14}/> Download visible agenda CSV</button>
