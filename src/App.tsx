@@ -22,7 +22,7 @@ import {PersonalExportDialog} from './components/PersonalExportDialog'
 import {ReminderCenter} from './components/ReminderCenter'
 import {OfflineReadiness} from './components/OfflineReadiness'
 import {loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY,type ViewPreferences} from './core/view-preferences'
-import {reminderItems,readReminderActions,saveReminderActions,actionForReminder,deliverableReminders,proposedSnooze,dismissReminderBatch,REMINDER_ACTIONS_KEY,REMINDER_DELIVERED_KEY,type ReminderItem,type ReminderActions} from './core/reminders'
+import {reminderItems,readReminderActions,saveReminderActions,actionForReminder,deliverableReminders,proposedSnooze,proposedSnoozeUntil,dismissReminderBatch,REMINDER_ACTIONS_KEY,REMINDER_DELIVERED_KEY,type ReminderItem,type ReminderActions} from './core/reminders'
 import {DEFAULT_REMINDER_SETTINGS,loadReminderSettings,saveReminderSettings,inQuietHours,foregroundNotificationText,REMINDER_SETTINGS_KEY,type ReminderSettings} from './core/reminder-settings'
 import {applyAllDayChange,type AllDayProposal} from './core/all-day'
 import {CalendarViews,type Mode} from './components/CalendarViews'
@@ -135,7 +135,7 @@ export default function App(){
     try{saveReminderSettings(next);setReminderSettings(next)}
     catch(error){setNotice('Reminder settings not saved: '+String(error))}
   }
-  function updateReminderAction(item:ReminderItem,kind:'dismiss'|'snooze',minutes=15){
+  function updateReminderAction(item:ReminderItem,kind:'dismiss'|'snooze',minutes=15,localWall?:string):boolean{
     try{
       // Re-read right before changing independent reminder preferences, so other-tab changes are retained.
       const latest=readReminderActions()
@@ -147,11 +147,13 @@ export default function App(){
         .find(candidate=>candidate.key===item.key&&candidate.dueAt===item.dueAt)
       if(!live)throw new Error('Reminder is stale; review the refreshed list')
       const action=kind==='dismiss'?actionForReminder(live.key,{kind:'dismiss'},now):
-        proposedSnooze(live,minutes as 5|15|60,now)
+        localWall===undefined?proposedSnooze(live,minutes as 5|15|60,now):
+        proposedSnoozeUntil(live,localWall,now)
       const next={...latest,[item.key]:action}
       saveReminderActions(next);setReminderActions(next)
       setReminderNow(new Date().toISOString())
-    }catch(error){setNotice('Reminder preference not saved: '+String(error))}
+      return true
+    }catch(error){setNotice('Reminder preference not saved: '+String(error));return false}
   }
   async function enableForegroundNotifications(){
     if(typeof Notification==='undefined'){setNotifyPermission('unsupported');return}
@@ -677,7 +679,8 @@ export default function App(){
       onCancelSnooze={undoReminderDismissal} settings={reminderSettings} onSettingsChange={changeReminderSettings} onUndoDismiss={undoReminderDismissal} onClose={()=>setRemindersOpen(false)}
       onOpen={item=>{setRemindersOpen(false);setMode('day');open(item.occurrence)}}
       onDismiss={item=>updateReminderAction(item,'dismiss')}
-      onSnooze={(item,minutes)=>updateReminderAction(item,'snooze',minutes)}
+      onSnooze={(item,minutes)=>{updateReminderAction(item,'snooze',minutes)}}
+       onSnoozeUntil={(item,localWall)=>updateReminderAction(item,'snooze',15,localWall)}
       onEnableNotifications={enableForegroundNotifications} onDisableNotifications={disableForegroundNotifications}
       foregroundEnabled={notifyEnabled&&notifyPermission==='granted'} permission={notifyPermission}/>}
     {finderOpen&&<div className="modal-backdrop" onMouseDown={ev=>{if(ev.target===ev.currentTarget)setFinderOpen(false)}}>
