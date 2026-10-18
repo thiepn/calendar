@@ -460,7 +460,7 @@
 @media(max-width:340px){.mobile-duration-presets{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* C24 bounded original-occurrence search navigation, including a usable phone trigger. */
-.search-focus-trigger{display:none}
+.search-field .search-focus-trigger{display:none}
 .search-page-navigation{display:flex;align-items:center;gap:10px;justify-content:space-between;margin:11px 0 6px}
 .search-page-navigation>span{font-size:11px;color:#61786b;font-variant-numeric:tabular-nums;text-align:center}
 .search-page-navigation button{min-height:37px}
