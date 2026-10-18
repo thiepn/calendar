@@ -542,7 +542,7 @@ export default function App(){
           <div className="search-field"><Search size={16}/><input ref={searchInput} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search events" aria-label="Search calendar events"/>{query&&<button aria-label="Clear search" onClick={()=>setQuery('')}><X size={14}/></button>}</div>
           <button className="secondary compact reminder-launch" aria-label={'Local reminders'+(dueReminderCount?' ('+dueReminderCount+' due)':'')} onClick={()=>setRemindersOpen(true)}>
             <Bell size={15}/><span className="desktop-text">Reminders</span>{dueReminderCount>0&&<span className="reminder-count">{dueReminderCount}</span>}</button>
-          <button className="secondary compact" onClick={()=>setFinderOpen(true)}><Clock3 size={15}/><span className="desktop-text">Find time</span></button>
+          <button className="secondary compact" aria-label="Find time" onClick={()=>setFinderOpen(true)}><Clock3 size={15}/><span className="desktop-text">Find time</span></button>
           <button className="secondary compact" onClick={()=>importInput.current?.click()}><Upload size={15}/><span className="desktop-text">Import ICS</span></button>
           <button className="icon-button" title="Export personal events as finite ICS snapshot" aria-label="Export personal events" onClick={()=>{
             try{download('thiepn-calendar-snapshot.ics',exportIcs(calendar,addDays(selected,-30),addDays(selected,365)),'text/calendar');setNotice('Exported a finite 395-day personal event snapshot, not continuous sync')}
