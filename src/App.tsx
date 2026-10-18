@@ -6,6 +6,7 @@ import {dayOccurrences,excludeOccurrence,occurrencesBetween} from './core/occurr
 import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,splitSeriesAt,endSeriesAt} from './core/series'
 import {findFreeSlots,type FreeSlot} from './core/availability'
 import {adjacentBusyDay,exportAgendaCsv} from './core/agenda'
+import {sevenDayWorkload} from './core/planning'
 import {previewMissingPersonal} from './core/recover-missing'
 import {personalDraftFromImported} from './core/personal-copy'
 import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
@@ -130,8 +131,14 @@ export default function App(){
       // Re-read right before changing independent reminder preferences, so other-tab changes are retained.
       const latest=readReminderActions()
       const now=new Date().toISOString()
-      const action=kind==='dismiss'?actionForReminder(item.key,{kind:'dismiss'},now):
-        proposedSnooze(item,minutes as 5|15|60,now)
+      const persisted=loadState()
+      if(persisted.error||JSON.stringify(persisted.state)!==JSON.stringify(calendar))
+        throw new Error('Calendar changed in another tab; review reminders again')
+      const live=reminderItems(persisted.state,now,latest,14,overdueDays)
+        .find(candidate=>candidate.key===item.key&&candidate.dueAt===item.dueAt)
+      if(!live)throw new Error('Reminder is stale; review the refreshed list')
+      const action=kind==='dismiss'?actionForReminder(live.key,{kind:'dismiss'},now):
+        proposedSnooze(live,minutes as 5|15|60,now)
       const next={...latest,[item.key]:action}
       saveReminderActions(next);setReminderActions(next)
       setReminderNow(new Date().toISOString())
@@ -224,6 +231,7 @@ export default function App(){
   const title=mode==='month'?dateLabel(selected,{month:'long',year:'numeric'}):
     friendlyRange(days[0],days[days.length-1])
   const selectedEvents=dayOccurrences(visible,selected)
+  const planningDays=useMemo(()=>mode==='week'||mode==='agenda'?sevenDayWorkload(visible,selected):[],[visible,selected,mode])
   const searchMatches=useMemo(()=>{
     if(!query.trim())return []
     const q=query.toLocaleLowerCase().trim()
@@ -546,6 +554,22 @@ export default function App(){
             <small>{item.source==='ics'?'Imported · read only':'Personal'} · {item.allDay?'All day':new Date(item.start).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small>
           </button>)}
           {!searchMatches.length&&<p className="empty-note">No matching saved events in this 365-day window. Choose previous/next year or change the selected date.</p>}</div>
+        </section>}
+        {planningDays.length>0&&<section className="planning-overview" aria-label="Seven-day planning overview">
+          <div className="planning-overview-heading">
+            <strong>Seven-day workload</strong>
+            <small>Original saved commitments · {filter==='all'?'all visible sources':filter==='personal'?'personal only':'imported only'}{query.trim()?' · search filtered':''}</small>
+          </div>
+          <div className="planning-overview-days">
+            {planningDays.map(item=><button key={item.date} type="button" aria-label={'Open daily plan '+item.date}
+              onClick={()=>{setSelected(item.date);setMode('day')}} className={'planning-day '+(item.date===selected?'is-selected':'')}>
+              <time dateTime={item.date}>{dateLabel(item.date,{weekday:'short',month:'short',day:'numeric'})}</time>
+              <strong>{item.timedCount+item.allDayCount} event{item.timedCount+item.allDayCount===1?'':'s'}</strong>
+              <small>{item.busyMinutes?Math.floor(item.busyMinutes/60)+'h '+item.busyMinutes%60+'m timed':'No timed blocks'}{item.allDayCount?' · '+item.allDayCount+' all-day':''}</small>
+              {item.overlaps&&<span className="planning-overlap">Overlapping times</span>}
+            </button>)}
+          </div>
+          <p className="fine-print">Scheduled timed minutes are combined without counting overlaps twice, including entries crossing midnight or DST. All-day entries are listed separately; this is not a free-time guarantee. Open a day to plan a personal event.</p>
         </section>}
         {mode==='agenda'&&<div className="agenda-options">
           <label>Agenda range<select aria-label="Agenda range" value={agendaSpan} onChange={e=>setAgendaSpan(Number(e.target.value) as 14|30)}>
