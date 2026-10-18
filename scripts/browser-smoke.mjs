@@ -343,7 +343,9 @@ async function exerciseC7DstAndRange(){
   const errors=[]
   page.on('pageerror',e=>errors.push(e.message))
   await page.goto(url,{waitUntil:'networkidle'})
-  // Friday 16 October 2026 -> the next displayed week includes Sunday 25 October.
+  // Anchor this regression to the 2026 transition week instead of current
+  // real-world week, which crosses its boundary on Monday 19 October 2026.
+  await page.getByLabel('Jump to date').fill('2026-10-18')
   await page.getByRole('button',{name:'Next period'}).click()
   const autumn=page.locator('.timeline-day').nth(6)
   assert.equal(await autumn.locator('.timeline-slot').count(),50,'Autumn Sunday must have 50 physical slots')
