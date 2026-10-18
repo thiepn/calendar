@@ -1833,3 +1833,85 @@ describe('C20 conflict-free one-occurrence rescheduling alternatives',()=>{
     expect(changed.records[0]).toBe(selected)
   })
 })
+
+
+describe('C21 imported ICS TRANSP source-safe availability and local planning',()=>{
+  const fixture=(extra:string[],detached=false)=>[
+    'BEGIN:VCALENDAR','X-WR-CALNAME:C21 Campus',
+    'BEGIN:VEVENT','UID:c21-series','SUMMARY:Office hours',
+    'DTSTART:20261109T090000Z','DTEND:20261109T100000Z',
+    'RRULE:FREQ=WEEKLY;COUNT=2',...extra,'END:VEVENT',
+    ...(detached?['BEGIN:VEVENT','UID:c21-series',
+      'RECURRENCE-ID:20261116T090000Z','SUMMARY:Moved office hours',
+      'DTSTART:20261116T120000Z','DTEND:20261116T130000Z',
+      'TRANSP:OPAQUE','END:VEVENT']:[]),'END:VCALENDAR'
+  ].join('\r\n')
+  it('inherits and overrides recurring transparency without replacing original imported UID or personal data',()=>{
+    const first=previewIcs(fixture(['TRANSP:TRANSPARENT'],true))
+    expect(first.skippedEvents).toBe(0)
+    expect(first.records.map(r=>Boolean(r.transparent))).toEqual([true,false])
+    expect(first.records[1].sourceKey).toContain('2026-11-16T09:00:00.000Z')
+    const state=mergeIcs({schemaVersion:1,records:[record({id:'owner'})]},first).state
+    const next=previewIcs(fixture(['TRANSP:OPAQUE'],true))
+    const review=reviewImportedChanges(state,next,'update')
+    expect(review.counts.updated).toBe(1)
+    expect(review.changes.find(x=>x.kind==='updated')?.changedFields).toContain('transparent')
+    const merge=mergeIcs(state,next,'replace')
+    expect(merge.updated).toBe(1)
+    expect(merge.state.records.find(x=>x.sourceKey===first.records[0].sourceKey)?.id).toBe(first.records[0].id)
+    expect(merge.state.records.find(x=>x.id==='owner')).toEqual(state.records[0])
+    expect(validateState(merge.state).records).toHaveLength(3)
+  })
+  it('rejects malformed TRANSP without destructive source replacement',()=>{
+    const good=mergeIcs({schemaVersion:1,records:[]},previewIcs(fixture(['TRANSP:TRANSPARENT']))).state
+    for(const fields of [['TRANSP:UNSUPPORTED'],['TRANSP:OPAQUE','TRANSP:TRANSPARENT']]){
+      const bad=previewIcs(fixture(fields))
+      expect(bad.skippedEvents).toBe(1)
+      expect(bad.records).toHaveLength(0)
+      expect(()=>mergeIcs(good,bad,'replace')).toThrow('incomplete')
+      expect(good.records).toHaveLength(2)
+    }
+    expect(()=>validateState({schemaVersion:1,records:[record({transparent:true})]})).toThrow('Only imported')
+  })
+  it('honors free imports in Find Time, personal conflict review, adjustment, busy-day and workload',()=>{
+    const free=record({id:'free',source:'ics',sourceCalendar:'Campus',sourceKey:'campus|free',
+      transparent:true,start:fromLocalDateTime('2026-11-09T09:00'),
+      end:fromLocalDateTime('2026-11-09T10:00')})
+    const busy=record({id:'busy',source:'ics',sourceCalendar:'Campus',sourceKey:'campus|busy',
+      start:fromLocalDateTime('2026-11-09T10:00'),end:fromLocalDateTime('2026-11-09T11:00')})
+    const personal=record({id:'personal',start:fromLocalDateTime('2026-11-09T08:00'),
+      end:fromLocalDateTime('2026-11-09T09:00')})
+    const freeSlots=findFreeSlots([free,busy,personal],{from:'2026-11-09',days:1,
+      durationMinutes:60,startHour:8,endHour:12,blockAllDay:true,
+      now:new Date('2026-11-01T00:00:00Z')})
+    expect(freeSlots.map(x=>x.start)).toEqual([
+      fromLocalDateTime('2026-11-09T09:00'),fromLocalDateTime('2026-11-09T11:00')])
+    const candidate=record({id:'candidate',start:free.start,end:free.end})
+    expect(reviewDraft([free],candidate).collisionCount).toBe(0)
+    expect(reviewDraft([busy],record({id:'other',start:busy.start,end:busy.end})).collisionCount).toBe(1)
+    const original=occurrencesBetween([personal],'2026-11-09','2026-11-09')[0]
+    expect(proposeTimedChange({schemaVersion:1,records:[personal,free]},original,
+      'move','2026-11-09',9*60,60).conflicts).toHaveLength(0)
+    expect(adjacentBusyDay([free],'2026-11-08',1)).toBeNull()
+    expect(adjacentBusyDay([busy],'2026-11-08',1)).toBe('2026-11-09')
+    const items=occurrencesBetween([free,candidate],'2026-11-09','2026-11-09')
+    expect(conflictsOnDay(items).size).toBe(0)
+    expect(layoutTimedDay(items,'2026-11-09').every(x=>!x.overlaps)).toBe(true)
+    const overview=sevenDayWorkload([free,busy,personal],'2026-11-09')[0]
+    expect(overview.timedCount).toBe(3)
+    expect(overview.busyMinutes).toBe(120)
+    expect(overview.overlaps).toBe(false)
+  })
+  it('keeps transparent all-day source records visible but not blocking all-day availability',()=>{
+    const free=record({id:'free-day',source:'ics',sourceCalendar:'Campus',sourceKey:'campus|day',
+      transparent:true,allDay:true,startDate:'2026-11-09',endDateExclusive:'2026-11-10',
+      start:fromLocalDateTime('2026-11-09T00:00'),end:fromLocalDateTime('2026-11-10T00:00')})
+    const options={from:'2026-11-09',days:1,durationMinutes:60,
+      startHour:8,endHour:9,blockAllDay:true,
+      now:new Date('2026-11-01T00:00:00Z')}
+    expect(findFreeSlots([free],options)).toHaveLength(1)
+    expect(findFreeSlots([{...free,transparent:undefined}],options)).toHaveLength(0)
+    expect(occurrencesBetween([free],'2026-11-09','2026-11-09')[0].transparent).toBe(true)
+    expect(sevenDayWorkload([free],'2026-11-09')[0].allDayCount).toBe(1)
+  })
+})
