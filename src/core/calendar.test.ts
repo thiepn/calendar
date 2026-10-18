@@ -14,6 +14,8 @@ import {DEFAULT_REMINDER_SETTINGS,validateReminderSettings,inQuietHours,foregrou
 import {validateViewPreferences,loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY} from './view-preferences'
 import {reminderItems,reminderKey,actionForReminder,deliverableReminders,proposedSnooze,dismissReminderBatch} from './reminders'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
+import {parseIcsDuration} from './ics-duration'
+import {sevenDayWorkload} from './planning'
 import {adjacentBusyDay,exportAgendaCsv} from './agenda'
 import {previewMissingPersonal} from './recover-missing'
 import {personalDraftFromImported} from './personal-copy'
@@ -936,5 +938,150 @@ describe('C12 lock-screen privacy and legacy reminder settings',()=>{
     expect(content.title).toContain('Client visit')
     expect(content.body).toContain('Local reminder')
     expect(()=>validateReminderSettings({...prior,notificationPreview:'remote'})).toThrow('Invalid')
+  })
+})
+
+
+describe('C13 supported RFC5545 ordinal monthly BYDAY imports',()=>{
+  it('calculates second Tuesday and last Friday across short months and DST-year boundaries',()=>{
+    expect(expandFiniteAllDay('2026-01-13',parseFiniteAllDayRule(
+      'FREQ=MONTHLY;COUNT=4;BYDAY=2TU','2026-01-13'))).toEqual([
+        '2026-01-13','2026-02-10','2026-03-10','2026-04-14'])
+    expect(expandFiniteAllDay('2026-01-30',parseFiniteAllDayRule(
+      'FREQ=MONTHLY;COUNT=4;BYDAY=-1FR','2026-01-30'))).toEqual([
+        '2026-01-30','2026-02-27','2026-03-27','2026-04-24'])
+  })
+  it('supports every named weekday within a month while honoring RRULE COUNT',()=>{
+    const result=expandFiniteAllDay('2026-01-05',parseFiniteAllDayRule(
+      'FREQ=MONTHLY;COUNT=7;BYDAY=MO','2026-01-05'))
+    expect(result).toEqual(['2026-01-05','2026-01-12','2026-01-19','2026-01-26',
+      '2026-02-02','2026-02-09','2026-02-16'])
+  })
+  it('retains named zone wall-time across spring DST and UID identities when refreshed',()=>{
+    const input=['BEGIN:VCALENDAR','X-WR-CALNAME:Training','BEGIN:VEVENT','UID:monthly-tue',
+      'SUMMARY:C13 Monthly lab','DTSTART;TZID=Europe/Berlin:20260113T090000',
+      'DTEND;TZID=Europe/Berlin:20260113T100000',
+      'RRULE:FREQ=MONTHLY;COUNT=4;BYDAY=2TU','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const initial=previewIcs(input)
+    expect(initial.skippedEvents).toBe(0)
+    expect(initial.records.map(x=>x.start)).toEqual([
+      '2026-01-13T08:00:00.000Z','2026-02-10T08:00:00.000Z',
+      '2026-03-10T08:00:00.000Z','2026-04-14T07:00:00.000Z'])
+    const one=mergeIcs({schemaVersion:1,records:[record({id:'private'})]},initial).state
+    const two=mergeIcs(one,previewIcs(input),'replace')
+    expect(two.duplicates).toBe(4)
+    expect(two.state.records.map(r=>r.id)).toEqual(one.records.map(r=>r.id))
+  })
+  it('rejects nonexistent ordinals, duplicate selectors and DTSTART outside selector set',()=>{
+    const bad=['FREQ=MONTHLY;COUNT=2;BYDAY=6MO',
+      'FREQ=MONTHLY;COUNT=2;BYDAY=-6MO',
+      'FREQ=MONTHLY;COUNT=2;BYDAY=0MO',
+      'FREQ=MONTHLY;COUNT=2;BYDAY=1MO,1MO',
+      'FREQ=MONTHLY;COUNT=2;BYDAY=1MO;BYMONTHDAY=1',
+      'FREQ=MONTHLY;COUNT=2;BYDAY=-1FR']
+    for(const rule of bad)
+      expect(()=>parseFiniteAllDayRule(rule,'2026-01-13')).toThrow()
+    expect(()=>parseFiniteAllDayRule('FREQ=WEEKLY;COUNT=3;BYDAY=2TU','2026-01-13')).toThrow()
+  })
+})
+describe('C13 explicitly bounded and source-safe RFC DURATION imports',()=>{
+  it('imports standalone all-day P2D and timed PT90M without a DTEND',()=>{
+    const input=['BEGIN:VCALENDAR','X-WR-CALNAME:Safe duration',
+      'BEGIN:VEVENT','UID:days','SUMMARY:Two-day retreat','DTSTART;VALUE=DATE:20261103',
+      'DURATION:P2D','END:VEVENT',
+      'BEGIN:VEVENT','UID:hours','SUMMARY:Seminar','DTSTART:20261103T100000Z',
+      'DURATION:PT1H30M','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const preview=previewIcs(input)
+    expect(preview.skippedEvents).toBe(0)
+    expect(preview.records[0].startDate).toBe('2026-11-03')
+    expect(preview.records[0].endDateExclusive).toBe('2026-11-05')
+    expect(preview.records[1].end).toBe('2026-11-03T11:30:00.000Z')
+    expect(parseIcsDuration('P1W',true)).toBe(7)
+    expect(parseIcsDuration('PT1H30M',false)).toBe(5400000)
+  })
+  it('materializes source-zone recurrence DURATION with RDATE/EXDATE and original UID stable',()=>{
+    const input=['BEGIN:VCALENDAR','X-WR-CALNAME:Classes','BEGIN:VEVENT',
+      'UID:c13-span','SUMMARY:Lab',
+      'DTSTART;TZID=Europe/Berlin:20260324T093000','DURATION:PT90M',
+      'RRULE:FREQ=WEEKLY;COUNT=3',
+      'RDATE;TZID=Europe/Berlin:20260401T103000',
+      'EXDATE;TZID=Europe/Berlin:20260331T093000',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const p=previewIcs(input)
+    expect(p.skippedEvents).toBe(0)
+    expect(p.records.map(r=>r.start)).toEqual([
+      '2026-03-24T08:30:00.000Z','2026-04-01T08:30:00.000Z','2026-04-07T07:30:00.000Z'])
+    expect(p.records.map(r=>(Date.parse(r.end)-Date.parse(r.start))/60000)).toEqual([90,90,90])
+    expect(mergeIcs({schemaVersion:1,records:[]},p).added).toBe(3)
+  })
+  it('resolves an explicit timed occurrence override DURATION while retaining its original source key',()=>{
+    const input=['BEGIN:VCALENDAR','X-WR-CALNAME:Tutorials',
+      'BEGIN:VEVENT','UID:dur','SUMMARY:Tutorial','DTSTART:20261019T100000Z',
+      'DURATION:PT1H','RRULE:FREQ=DAILY;COUNT=2','END:VEVENT',
+      'BEGIN:VEVENT','UID:dur','RECURRENCE-ID:20261020T100000Z',
+      'SUMMARY:Extended tutorial','DTSTART:20261020T140000Z',
+      'DURATION:PT2H','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const p=previewIcs(input)
+    expect(p.skippedEvents).toBe(0)
+    expect(p.records).toHaveLength(2)
+    expect(p.records[1].sourceKey).toBe('Tutorials|dur|2026-10-20T10:00:00.000Z')
+    expect(p.records[1].start).toBe('2026-10-20T14:00:00.000Z')
+    expect(p.records[1].end).toBe('2026-10-20T16:00:00.000Z')
+  })
+  it('rejects conflicting end and duration fields, nominal timed days and orphan source exceptions',()=>{
+    const invalid=['PT0M','P1D','PT169H','PT2H60M','PT','PT1M61S','-PT15M']
+    for(const text of invalid)expect(()=>parseIcsDuration(text,false)).toThrow()
+    for(const text of ['P0D','P32D','PT1H','P5W'])
+      expect(()=>parseIcsDuration(text,true)).toThrow()
+    const conflict=['BEGIN:VCALENDAR','BEGIN:VEVENT','UID:one','SUMMARY:Bad',
+      'DTSTART:20261019T100000Z','DTEND:20261019T110000Z',
+      'DURATION:PT1H','RRULE:FREQ=DAILY;COUNT=2','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    expect(previewIcs(conflict).records).toHaveLength(0)
+    expect(previewIcs(conflict).skippedEvents).toBe(1)
+    const orphan=['BEGIN:VCALENDAR','BEGIN:VEVENT','UID:missing',
+      'RECURRENCE-ID:20261104T100000Z','SUMMARY:Detached without master',
+      'DTSTART:20261104T120000Z','DURATION:PT1H','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    expect(previewIcs(orphan).records).toHaveLength(0)
+    expect(previewIcs(orphan).skippedEvents).toBe(1)
+  })
+  it('refuses ambiguous RANGE and duplicate all-day exception identifiers as incomplete source',()=>{
+    const head=['BEGIN:VCALENDAR','X-WR-CALNAME:Original','BEGIN:VEVENT','UID:series',
+      'SUMMARY:Class','DTSTART;VALUE=DATE:20261019','DURATION:P1D',
+      'RRULE:FREQ=DAILY;COUNT=3','END:VEVENT']
+    const child=['BEGIN:VEVENT','UID:series','RECURRENCE-ID;VALUE=DATE:20261020',
+      'SUMMARY:Moved','DTSTART;VALUE=DATE:20261021','DURATION:P1D','END:VEVENT']
+    const duplicate=previewIcs([...head,...child,...child,'END:VCALENDAR'].join('\r\n'))
+    expect(duplicate.records).toHaveLength(0)
+    expect(duplicate.skippedEvents).toBe(1)
+    expect(()=>mergeIcs({schemaVersion:1,records:[]},duplicate,'replace')).toThrow('incomplete')
+    const range=previewIcs([...head,...child.map(x=>x==='RECURRENCE-ID;VALUE=DATE:20261020'?
+      'RECURRENCE-ID;VALUE=DATE;RANGE=THISANDFUTURE:20261020':x),'END:VCALENDAR'].join('\r\n'))
+    expect(range.records).toHaveLength(0)
+    expect(range.skippedEvents).toBe(1)
+  })
+})
+describe('C13 source-filtered local seven-day planning',()=>{
+  it('uses unioned timed minutes without double counting overlapping blocks, and separates all-day',()=>{
+    const monday=record({id:'a',start:fromLocalDateTime('2026-10-12T10:00'),
+      end:fromLocalDateTime('2026-10-12T12:00')})
+    const second=record({id:'b',start:fromLocalDateTime('2026-10-12T11:00'),
+      end:fromLocalDateTime('2026-10-12T13:30'),source:'ics',sourceCalendar:'School',sourceKey:'b'})
+    const allDay=record({id:'c',allDay:true,startDate:'2026-10-12',endDateExclusive:'2026-10-14',
+      start:fromLocalDateTime('2026-10-12T00:00'),end:fromLocalDateTime('2026-10-14T00:00')})
+    const week=sevenDayWorkload([monday,second,allDay],'2026-10-12')
+    expect(week).toHaveLength(7)
+    expect(week[0]).toMatchObject({date:'2026-10-12',timedCount:2,allDayCount:1,
+      busyMinutes:210,overlaps:true,importedCount:1})
+    expect(week[1]).toMatchObject({date:'2026-10-13',allDayCount:1,timedCount:0,busyMinutes:0})
+    expect(sevenDayWorkload([monday,allDay],'2026-10-12')[0].busyMinutes).toBe(120)
+  })
+  it('clips actual elapsed-time blocks at a DST-shortened local midnight boundary',()=>{
+    const cross=record({id:'midnight',start:fromLocalDateTime('2026-03-28T23:30'),
+      end:fromLocalDateTime('2026-03-29T03:30')})
+    const week=sevenDayWorkload([cross],'2026-03-28')
+    expect(week[0].busyMinutes).toBe(30)
+    // Spring clocks jump directly 01:59 -> 03:00. No invented lost hour.
+    expect(week[1].busyMinutes).toBe(150)
+    expect(week[1].timedCount).toBe(1)
   })
 })
