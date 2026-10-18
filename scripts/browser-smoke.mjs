@@ -3026,6 +3026,140 @@ async function exerciseC29DesktopRepeatedDstTimeNavigationAndReadOnlyOriginal(){
   await context.close()
 }
 
+
+async function exerciseC30MobileAgendaDenseOriginalEventsAndDayDrilldown(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const personal=Array.from({length:53},(_,i)=>({
+    id:'c30-original-'+String(i).padStart(3,'0'),source:'personal',
+    title:'C30 Personal '+String(i).padStart(3,'0'),description:'Original '+i,location:'',
+    allDay:false,start:'2026-11-26T09:00:00.000Z',end:'2026-11-26T09:30:00.000Z',
+    updatedAt:'2026-10-18T09:00:00.000Z'
+  }))
+  const fixture={schemaVersion:1,records:[...personal,
+    {id:'c30-readonly-free',source:'ics',sourceCalendar:'C30 Campus',sourceKey:'C30 Campus|original',
+      title:'C30 Campus free seminar',description:'Read only',location:'',transparent:true,allDay:false,
+      start:'2026-11-26T07:00:00.000Z',end:'2026-11-26T08:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c30-readonly-all-day',source:'ics',sourceCalendar:'C30 Campus',sourceKey:'C30 Campus|all-day',
+      title:'C30 Campus all-day notice',description:'Read only',location:'',allDay:true,
+      startDate:'2026-11-26',endDateExclusive:'2026-11-27',
+      start:'2026-11-25T23:00:00.000Z',end:'2026-11-26T23:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c30-hidden-busy',source:'ics',sourceCalendar:'C30 Hidden Lab',sourceKey:'C30 Hidden Lab|busy',
+      title:'C30 Hidden busy import',description:'Hidden source retained',location:'',allDay:false,
+      start:'2026-11-26T08:00:00.000Z',end:'2026-11-26T08:30:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(value)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.getByRole('button',{name:'List',exact:true}).click()
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  const hide=page.getByRole('button',{name:'Toggle imported calendar C30 Hidden Lab'})
+  await hide.click()
+  assert.equal(await hide.getAttribute('aria-pressed'),'false')
+  await page.getByRole('button',{name:'Close navigation'}).click({position:{x:350,y:340}})
+  const day=page.getByRole('article',{name:'Agenda for 2026-11-26'})
+  await day.waitFor()
+  assert.match(await day.innerText(),/55 events/)
+  assert.equal(await day.locator('.event-chip').count(),12)
+  const nav=day.getByRole('navigation',{name:'Event pages for 2026-11-26'})
+  assert.match(await nav.innerText(),/Events 1–12 of 55/)
+  assert.equal(await day.getByText('C30 Hidden busy import').count(),0)
+  const allDay=day.getByRole('button',{name:/C30 Campus all-day notice/})
+  await allDay.click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.equal(await details.getByRole('button',{name:'Edit event'}).count(),0)
+  await details.getByRole('button',{name:'Close event'}).click()
+  const imported=day.getByRole('button',{name:/C30 Campus free seminar/})
+  assert.match(await imported.innerText(),/Free \(non-blocking\)/)
+  await imported.click()
+  await details.waitFor()
+  assert.match(await details.innerText(),/TRANSP:TRANSPARENT/)
+  assert.equal(await details.getByRole('button',{name:'Edit event'}).count(),0)
+  await details.getByRole('button',{name:'Close event'}).click()
+  for(let i=0;i<4;i++)await day.getByRole('button',{name:'Next events on 2026-11-26'}).click()
+  assert.match(await nav.innerText(),/Events 49–55 of 55 · Page 5 of 5/)
+  assert.equal(await day.locator('.event-chip').count(),7)
+  const last=day.getByRole('button',{name:/C30 Personal 052/})
+  await last.click()
+  await details.waitFor()
+  assert.match(await details.innerText(),/Original 52/)
+  await details.getByRole('button',{name:'Close event'}).click()
+  await day.getByRole('button',{name:'Previous events on 2026-11-26'}).click()
+  assert.match(await nav.innerText(),/Page 4 of 5/)
+  await day.getByRole('button',{name:'Open graphical Day view'}).click()
+  assert.equal(await page.locator('.view-switch button.active').innerText(),'Day')
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-11-26')
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture,
+    'Agenda paging and Day view handoff must not rewrite canonical events')
+  const dimensions=await page.evaluate(()=>({w:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(dimensions.scroll<=dimensions.w+2,'C30 mobile overflow '+JSON.stringify(dimensions))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C30_MOBILE_AGENDA_ALL_55_EVENTS_READONLY_SOURCE_PAGES_DAY_HANDOFF_PASS')
+  await context.close()
+}
+async function exerciseC30DesktopAgendaDetachedAndSourceFilteredPageClamping(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const many=Array.from({length:27},(_,i)=>({
+    id:'c30-desktop-'+String(i).padStart(2,'0'),source:'personal',
+    title:'C30 desktop slot '+i,description:'',location:'',allDay:false,
+    start:'2026-11-26T10:00:00.000Z',end:'2026-11-26T10:30:00.000Z',
+    updatedAt:'2026-10-18T09:00:00.000Z'
+  }))
+  const fixture={schemaVersion:1,records:[...many,
+    {id:'c30-parent',source:'personal',title:'C30 parent recurrence',description:'',location:'',allDay:false,
+      start:'2026-11-19T10:00:00.000Z',end:'2026-11-19T11:00:00.000Z',
+      repeat:{frequency:'weekly',interval:1},excludedDates:['2026-11-26'],
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c30-detached',source:'personal',title:'C30 detached original',description:'Detachment preserved',
+      location:'',allDay:false,start:'2026-11-26T11:00:00.000Z',end:'2026-11-26T11:30:00.000Z',
+      recurrenceParentId:'c30-parent',recurrenceDate:'2026-11-26',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c30-free-ics',source:'ics',sourceCalendar:'C30 Clock',sourceKey:'C30 Clock|free',
+      transparent:true,title:'C30 transparent readonly',description:'',location:'',allDay:false,
+      start:'2026-11-26T08:00:00.000Z',end:'2026-11-26T08:30:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(value)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.getByRole('button',{name:'List',exact:true}).click()
+  const day=page.getByRole('article',{name:'Agenda for 2026-11-26'})
+  assert.match(await day.innerText(),/29 events/)
+  const nav=day.getByRole('navigation',{name:'Event pages for 2026-11-26'})
+  await day.getByRole('button',{name:'Next events on 2026-11-26'}).click()
+  await day.getByRole('button',{name:'Next events on 2026-11-26'}).click()
+  assert.match(await nav.innerText(),/Events 25–29 of 29/)
+  const detached=day.getByRole('button',{name:/C30 detached original/})
+  await detached.click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.innerText(),/Original series date: 2026-11-26/)
+  await details.getByRole('button',{name:'Close event'}).click()
+  await page.locator('.sidebar .source-entry').filter({hasText:'Imported snapshots'}).click()
+  assert.match(await day.innerText(),/1 event/)
+  assert.equal(await day.locator('.event-chip').count(),1)
+  assert.equal(await day.getByRole('navigation',{name:'Event pages for 2026-11-26'}).count(),0)
+  assert.match(await day.innerText(),/C30 transparent readonly/)
+  const desktopDay=day.getByRole('button',{name:'Open day view 2026-11-26'})
+  await desktopDay.click()
+  assert.equal(await page.locator('.view-switch button.active').innerText(),'Day')
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-11-26')
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C30_DESKTOP_AGENDA_DETACHED_CAS_SOURCE_FILTER_PAGING_CLAMP_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -3089,6 +3223,8 @@ try{
   await exerciseC28DesktopAgendaAllDayContinuationAndBoundedEmpty()
   await exerciseC29MobileDayOriginalAppointmentNavigatorAndDensePagination()
   await exerciseC29DesktopRepeatedDstTimeNavigationAndReadOnlyOriginal()
+  await exerciseC30MobileAgendaDenseOriginalEventsAndDayDrilldown()
+  await exerciseC30DesktopAgendaDetachedAndSourceFilteredPageClamping()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
