@@ -3,6 +3,7 @@ import {X,CalendarPlus,AlertTriangle} from 'lucide-react'
 import type {CalendarRecord,Frequency,LocalDate,RepeatRule} from '../types'
 import {addDays,day,localDateTime,dateLabel,localInstantOptions,offsetLabel} from '../core/dates'
 import {draftTimedRange,reviewDraft} from '../core/draft'
+import {mobileTimedChange,mobileAllDayShift,type MobileTimedAction} from '../core/mobile-editor'
 const weekdays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 type Props={date:LocalDate;event?:CalendarRecord;initialRange?:{start:string;end:string};initialAllDay?:{from:LocalDate;through:LocalDate};records:CalendarRecord[];ignoreOccurrence?:{id:string;date:LocalDate};ignoreParentFrom?:{id:string;date:LocalDate};scope?:'instance'|'future';isCopy?:boolean;defaultReminderMinutes?:number;onSave:(record:CalendarRecord)=>void;onClose:()=>void}
 export function EventEditor({date,event,initialRange,initialAllDay,records,ignoreOccurrence,ignoreParentFrom,scope,isCopy=false,defaultReminderMinutes=-1,onSave,onClose}:Props){
@@ -81,6 +82,21 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
     setEnd(v=>value?v.slice(0,10):v.slice(0,10)+'T10:00')
     setAllDay(value)
   }
+  function quickSchedule(action:MobileTimedAction|{kind:'day';days:-1|1}){
+    setError('')
+    try{
+      if(allDay){
+        if(action.kind!=='day')throw new Error('Select a timed event for duration controls')
+        const shifted=mobileAllDayShift(start,end,action.days)
+        setStart(shifted.start);setEnd(shifted.end)
+      }else{
+        const next=mobileTimedChange({start,end,startFold,endFold},action)
+        setStart(next.start);setEnd(next.end)
+        setStartFold(next.startFold);setEndFold(next.endFold)
+      }
+      setAcceptedSignature('')
+    }catch(err){setError(err instanceof Error?err.message:String(err))}
+  }
   function submit(e:FormEvent<HTMLFormElement>){
     e.preventDefault()
     try{
@@ -95,11 +111,34 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
       <header className="editor-head"><div className="heading-inline"><CalendarPlus size={20}/><h2>{isCopy?'Duplicate event':scope==='instance'?'Edit one occurrence':scope==='future'?'Edit this and future':event?'Edit event':'New event'}</h2></div>
         <button className="icon-button" onClick={onClose} aria-label="Close editor"><X size={19}/></button></header>
       <form onSubmit={submit} className="editor-form">
-        <label>Event name<input autoFocus required maxLength={240} value={title} onChange={e=>setTitle(e.target.value)} placeholder="What are you planning?"/></label>
+        <label>Event name<input autoFocus={typeof window!=='undefined'&&!window.matchMedia('(max-width:740px)').matches} required maxLength={240} value={title} onChange={e=>setTitle(e.target.value)} placeholder="What are you planning?"/></label>
         <label className="checkline"><input type="checkbox" checked={allDay} onChange={e=>toggleAllDay(e.target.checked)}/> All-day event</label>
         <div className="editor-grid">
           <label>Starts<input required type={allDay?'date':'datetime-local'} value={start} onChange={e=>{setStart(e.target.value);setStartFold('')}}/></label>
           <label>{allDay?'Last day (inclusive)':'Ends'}<input required type={allDay?'date':'datetime-local'} value={end} onChange={e=>{setEnd(e.target.value);setEndFold('')}}/></label>
+        </div>
+        <div className="mobile-editor-shortcuts" aria-label="Mobile quick scheduling">
+          <div className="mobile-editor-shortcuts-head">
+            <strong>Quick schedule</strong>
+            <small>{allDay?'Shift the whole all-day range':'Change this draft before reviewing and saving'}</small>
+          </div>
+          <div className="mobile-editor-shortcut-row" aria-label="Change event day">
+            <button type="button" className="secondary compact" onClick={()=>quickSchedule({kind:'day',days:-1})}>Previous day</button>
+            <button type="button" className="secondary compact" onClick={()=>quickSchedule({kind:'day',days:1})}>Next day</button>
+          </div>
+          {!allDay&&<>
+            <div className="mobile-editor-shortcut-row" aria-label="Shift event time">
+              <button type="button" className="secondary compact" onClick={()=>quickSchedule({kind:'shift',minutes:-30})}>30 min earlier</button>
+              <button type="button" className="secondary compact" onClick={()=>quickSchedule({kind:'shift',minutes:30})}>30 min later</button>
+            </div>
+            <fieldset className="mobile-duration-presets" aria-label="Set event duration">
+              <legend>Duration from start</legend>
+              {[30,60,90,120].map(n=><button key={n} type="button" className="secondary compact"
+                onClick={()=>quickSchedule({kind:'duration',minutes:n as 30|60|90|120})}>
+                {n<60?n+' min':n/60+' h'}
+              </button>)}
+            </fieldset>
+          </>}
         </div>
         {firstFoldOptions.length===2&&<label className="fold-choice">Repeated start hour
           <select aria-label="Repeated start hour" value={startFold} onChange={e=>setStartFold(e.target.value as ''|'earlier'|'later')}>

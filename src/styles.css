@@ -430,3 +430,31 @@
  .timeline-single .timeline-block strong{font-size:12px}
  .timeline-single .timeline-block span{font-size:10px}
 }
+
+/* C23: optional mobile-only draft scheduling actions; canonical review still precedes saving. */
+.mobile-editor-shortcuts{display:none}
+@media(max-width:740px){
+  .editor.dialog-surface{width:min(100%,560px);max-height:calc(100dvh - 16px);padding:0 15px 0}
+  .editor-head{position:sticky;top:0;z-index:3;margin:0 -15px 15px;padding:14px 15px;
+    background:#fff;border-bottom:1px solid #e4eae3}
+  .editor-form{padding-bottom:0;gap:13px}
+  .editor-form input:not([type=checkbox]),.editor-form select,.editor-form textarea{min-height:43px;font-size:16px}
+  .editor-form .checkline input{width:19px;height:19px}
+  .mobile-editor-shortcuts{display:grid;gap:9px;padding:12px;border:1px solid #d8e5db;
+    border-radius:5px;background:#f5faf5}
+  .mobile-editor-shortcuts-head{display:grid;gap:4px;color:#2a563b}
+  .mobile-editor-shortcuts-head strong{font-size:13px}
+  .mobile-editor-shortcuts-head small{font-size:11px;color:#6f8274;line-height:1.4}
+  .mobile-editor-shortcut-row{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .mobile-editor-shortcut-row button{min-height:43px;white-space:nowrap;font-size:12px}
+  .mobile-duration-presets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;
+    border:0;margin:0;padding:0;min-width:0}
+  .mobile-duration-presets legend{font-size:11px;color:#5a7463;margin-bottom:7px}
+  .mobile-duration-presets button{min-width:0;padding:7px 4px;min-height:43px;font-size:12px}
+  .editor-actions{position:sticky;z-index:4;bottom:0;background:#fff;border-top:1px solid #dfe7e0;
+    margin:2px -15px 0;padding:10px 15px max(10px,env(safe-area-inset-bottom));
+    display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);
+    gap:8px;box-shadow:0 -6px 15px #101f1010}
+  .editor-actions button{min-width:0;min-height:46px;white-space:normal}
+}
+@media(max-width:340px){.mobile-duration-presets{grid-template-columns:repeat(2,minmax(0,1fr))}}

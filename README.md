@@ -257,3 +257,21 @@ actual local-midnight elapsed minutes and handles overnight spans and DST
 23/25-hour days without changing records or inferring free time. The original
 ICS/read-only/TRANSP, Folio, recurrence, guarded editing and privacy boundaries
 remain authoritative; no new storage or migration is introduced.
+
+## C23 — mobile draft-first scheduling and persistent save controls
+
+Mobile New event, Edit event, Duplicate and per-occurrence/future-only editors
+share optional **Quick schedule** controls. Timed drafts can move to the previous/
+next calendar day, shift +/-30 real minutes while preserving exact duration,
+or set a 30/60/90/120-minute duration. All-day drafts can shift their inclusive
+multi-day range one calendar date without changing its length.
+
+A pure local-clock helper preserves explicit DST folds on real-instant shifts;
+moving to a date with missing or ambiguous wall times fails visibly without
+changing either field or silently selecting a fold. Users may still edit both
+native date/time fields and explicitly resolve repeated hours. These shortcuts
+**only change unsaved editor state**, invalidate earlier conflict acknowledgements
+and keep the source-complete calendar review, original record writer and CAS
+boundary fully responsible for saves. On narrow viewports, the editor stops
+auto-opening the software keyboard, provides 43px controls, and keeps Cancel/
+Save visible while scrolling through the long form. Desktop editor is unchanged.
