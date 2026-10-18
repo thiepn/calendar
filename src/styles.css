@@ -300,3 +300,25 @@
  .source-visibility-actions button{flex:1 1 auto}
  .source-visibility-card .source-card-name{max-width:65%}
 }
+
+
+/* C17 — inspect original imported changes before committing a source replacement. */
+.import-change-review{border:1px solid #d6e0d6;padding:13px;margin:14px 0;background:#f8fbf8;display:grid;gap:11px;min-width:0}
+.import-change-review header{display:flex;justify-content:space-between;flex-wrap:wrap;gap:5px;font-size:12px;color:#2d523b}
+.import-change-review header small{font-size:11px;font-weight:400;color:#607664}
+.import-change-items{display:grid;gap:6px;max-height:min(31dvh,320px);overflow-y:auto;min-width:0}
+.import-change-row{border:1px solid #e0e9df;background:white;padding:9px;display:grid;gap:4px;min-width:0;font-size:12px;overflow-wrap:anywhere}
+.import-change-kind{font-size:9px;font-weight:750;letter-spacing:.08em;text-transform:uppercase;color:#547b5c}
+.import-change-row strong{color:#324b39;font-size:12px}
+.import-change-row small{font-size:11px;color:#6b7b70;white-space:normal;overflow-wrap:anywhere}
+.import-change-row.change-removed{border-left:3px solid #ad6253}
+.import-change-row.change-removed .import-change-kind{color:#a44b3a}
+.import-change-row.change-updated{border-left:3px solid #b28d4c}
+.import-change-row.change-added{border-left:3px solid #4c8760}
+.import-deletion-warning{margin:0;padding:10px;border:1px solid #e8c7b7;background:#fff6f0;color:#904f39;font-size:11px;line-height:1.55}
+.import-change-review>button{justify-self:start;min-height:39px;max-width:100%;white-space:normal;text-align:left}
+@media(max-width:740px){
+  .import-change-review{padding:10px}
+  .import-change-items{max-height:33dvh}
+  .import-change-review>button{justify-self:stretch;justify-content:center;min-height:44px}
+}

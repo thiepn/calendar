@@ -1538,6 +1538,128 @@ async function exerciseC16MobileMonthlySourceAndNoFalseEventEdits(){
   await context.close()
 }
 
+
+async function exerciseC17ImportChangeReviewAndStructureGuardDesktop(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB',acceptDownloads:true})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const event=(uid,title,start,end)=>[
+    'BEGIN:VEVENT','UID:'+uid,'SUMMARY:'+title,'DTSTART:'+start,'DTEND:'+end,'END:VEVENT']
+  const source=(events,extra=[])=>['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C17 Department',
+    ...extra,...events.flat(),'END:VCALENDAR'].join('\r\n')
+  const originalFile=source([
+    event('a','C17 Laboratory','20261109T100000Z','20261109T110000Z'),
+    event('b','C17 Consultation','20261110T100000Z','20261110T110000Z'),
+    event('c','C17 Unchanged','20261111T100000Z','20261111T110000Z')])
+  const updatedFile=source([
+    event('a','C17 Laboratory moved','20261109T140000Z','20261109T150000Z'),
+    event('c','C17 Unchanged','20261111T100000Z','20261111T110000Z'),
+    event('d','C17 New workshop','20261112T100000Z','20261112T110000Z')])
+  const put=async value=>page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'c17-department.ics',mimeType:'text/calendar',buffer:Buffer.from(value)})
+  await page.evaluate(()=>{
+    const state={schemaVersion:1,records:[{id:'c17-personal',title:'Keep private',
+      description:'Original note',location:'',source:'personal',allDay:false,
+      start:'2026-11-08T09:00:00.000Z',end:'2026-11-08T10:00:00.000Z',
+      updatedAt:'2026-10-18T00:00:00.000Z'}]}
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state))
+  })
+  await page.reload({waitUntil:'networkidle'})
+  await put(originalFile)
+  let dialog=page.getByRole('dialog',{name:'ICS import review'})
+  await dialog.waitFor()
+  assert.match(await dialog.getByLabel('Import change preview').innerText(),/3 new/)
+  assert.equal(await dialog.getByRole('region',{name:'Imported changes by event'})
+    .locator('.change-added').count(),3)
+  await dialog.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const original=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(original.length,4)
+  await put(updatedFile)
+  dialog=page.getByRole('dialog',{name:'ICS import review'})
+  await dialog.waitFor()
+  let detail=dialog.getByRole('region',{name:'Imported changes by event'})
+  assert.equal(await detail.locator('.change-updated').count(),1)
+  assert.equal(await detail.locator('.change-added').count(),1)
+  assert.equal(await detail.locator('.change-removed').count(),0)
+  assert.match(await detail.innerText(),/C17 Laboratory moved/)
+  assert.match(await dialog.getByLabel('Import change preview').innerText(),/0 removed/)
+  await dialog.locator('input[type="radio"]').nth(1).check()
+  detail=dialog.getByRole('region',{name:'Imported changes by event'})
+  assert.equal(await detail.locator('.change-removed').count(),1)
+  assert.match(await detail.locator('.change-removed').innerText(),/C17 Consultation/)
+  assert.match(await dialog.getByLabel('Import change preview').innerText(),/1 removed/)
+  const promise=page.waitForEvent('download')
+  await detail.getByRole('button',{name:/Download complete change report/}).click()
+  const file=await promise
+  const csv=await readFile(await file.path(),'utf8')
+  assert.match(csv,/removed","C17 Department","C17 Consultation"/)
+  assert.match(csv,/updated","C17 Department","C17 Laboratory","C17 Laboratory moved"/)
+  assert.ok(!csv.includes('Keep private'),'Export must not include any personal calendar record')
+  assert.equal((await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)).length,4)
+  page.once('dialog',message=>message.dismiss())
+  await dialog.getByRole('button',{name:'Apply reviewed changes'}).click()
+  assert.equal(await dialog.count(),1,'Declined destructive review must retain original snapshot')
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records),original)
+  page.once('dialog',message=>message.accept())
+  await dialog.getByRole('button',{name:'Apply reviewed changes'}).click()
+  await dialog.waitFor({state:'detached'})
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(saved.length,4)
+  assert.deepEqual(saved[0],original[0])
+  assert.equal(saved.some(x=>x.title==='C17 Consultation'),false)
+  assert.equal(saved.find(x=>x.sourceKey==='C17 Department|a|').id,
+    original.find(x=>x.sourceKey==='C17 Department|a|').id)
+  const truncated=updatedFile.replace('END:VCALENDAR','')
+  await put(truncated)
+  assert.equal(await page.getByRole('dialog',{name:'ICS import review'}).count(),0)
+  assert.match(await page.locator('.notice').last().innerText(),/Incomplete ICS/)
+  const cancellation=updatedFile.replace('VERSION:2.0','VERSION:2.0\r\nMETHOD:CANCEL')
+  await put(cancellation)
+  assert.equal(await page.getByRole('dialog',{name:'ICS import review'}).count(),0)
+  assert.match(await page.locator('.notice').last().innerText(),/METHOD/)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records),saved)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C17_DESKTOP_SOURCE_CHANGE_REVIEW_CSV_EXPLICIT_REMOVAL_AND_INCOMPLETE_FILE_GUARD_PASS')
+  await context.close()
+}
+async function exerciseC17MobileSourceReviewWithoutWrites(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB',acceptDownloads:true})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const current=['BEGIN:VCALENDAR','X-WR-CALNAME:C17 Mobile',
+    'BEGIN:VEVENT','UID:one','SUMMARY:Original mobile event','DTSTART;VALUE=DATE:20261126',
+    'DURATION:P1D','END:VEVENT','END:VCALENDAR'].join('\r\n')
+  const revised=current.replace('Original mobile event','Revised mobile event')
+  const put=async text=>page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'c17-mobile.ics',mimeType:'text/calendar',buffer:Buffer.from(text)})
+  await put(current)
+  let review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  await put(revised)
+  review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  const changes=review.getByRole('region',{name:'Imported changes by event'})
+  assert.equal(await changes.locator('.change-updated').count(),1)
+  assert.match(await changes.locator('.change-updated').innerText(),/Revised mobile event/)
+  const width=await page.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth}))
+  assert.ok(width.document<=width.viewport+2,'C17 mobile change preview overflow '+JSON.stringify(width))
+  const promise=page.waitForEvent('download')
+  await changes.getByRole('button',{name:/Download complete change report/}).click()
+  const file=await promise
+  assert.match(await readFile(await file.path(),'utf8'),/Revised mobile event/)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),before)
+  await review.getByRole('button',{name:'Cancel'}).click()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),before)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C17_MOBILE_PREVIEW_DOWNLOAD_CANCEL_NO_ORIGINAL_SOURCE_WRITES_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -1574,6 +1696,8 @@ try{
   await exerciseC15MobileSourceVisibilityAndAccountBoundaries()
   await exerciseC16FiniteMonthlySetPosAndSourceClockGuard()
   await exerciseC16MobileMonthlySourceAndNoFalseEventEdits()
+  await exerciseC17ImportChangeReviewAndStructureGuardDesktop()
+  await exerciseC17MobileSourceReviewWithoutWrites()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
