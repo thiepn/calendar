@@ -2017,9 +2017,7 @@ async function exerciseC20MobileRecurringAlternativesAndStaleSourceGuard(){
   assert.equal(after.records.length,2)
   assert.deepEqual(after.records[0],original.records[0])
   assert.equal(after.records[1].title,'Imported Mobile was independently refreshed')
-  await dlg.getByRole('button',{name:'Cancel adjustment'}).click().catch(async()=>{
-    await dlg.getByRole('button',{name:'Cancel',exact:true}).click()
-  })
+  await dlg.getByRole('button',{name:'Cancel',exact:true}).click()
   assert.equal(errors.length,0,errors.join('; '))
   console.log('BROWSER_C20_MOBILE_RECURRING_INSTANCE_HIDDEN_SOURCE_AND_STALE_TAB_GUARD_PASS')
   await context.close()
