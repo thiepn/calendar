@@ -20,6 +20,7 @@ import {parseIcsDuration} from './ics-duration'
 import {sevenDayWorkload} from './planning'
 import {focusDaySummary,focusScrollMinute} from './mobile-focus'
 import {searchOccurrencePage} from './search-pages'
+import {detailNeighbors} from './detail-navigation'
 import {mobileTimedChange,mobileAllDayShift} from './mobile-editor'
 import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './source-visibility'
 import {adjacentBusyDay,exportAgendaCsv} from './agenda'
@@ -2101,5 +2102,89 @@ describe('C24 bounded canonical occurrence discovery and result pagination',()=>
     expect(searchOccurrencePage([],'2026-10-19','2026-10-19','forward',99))
       .toMatchObject({items:[],page:0,pages:1,total:0,fromIndex:0,throughIndex:0,
         hasPrevious:false,hasNext:false})
+  })
+})
+
+describe('C25 source-owned nearby event details navigation',()=>{
+  it('moves by original visible occurrence across calendar days with no record writes',()=>{
+    const a=record({id:'a',title:'Morning',start:fromLocalDateTime('2026-10-19T09:00'),
+      end:fromLocalDateTime('2026-10-19T10:00')})
+    const b=record({id:'b',title:'Afternoon',start:fromLocalDateTime('2026-10-19T13:00'),
+      end:fromLocalDateTime('2026-10-19T14:00')})
+    const c=record({id:'c',title:'Tomorrow',start:fromLocalDateTime('2026-10-20T09:00'),
+      end:fromLocalDateTime('2026-10-20T10:00')})
+    const records=[a,b,c],frozen=JSON.stringify(records)
+    const current=occurrencesBetween([a],'2026-10-19','2026-10-19')[0]
+    const first=detailNeighbors(records,current)
+    expect(first).toMatchObject({position:1,count:3,included:true,previous:null})
+    expect(first.next?.key).toBe('b@2026-10-19')
+    const middle=detailNeighbors(records,first.next!)
+    expect(middle.previous?.key).toBe(current.key)
+    expect(middle.next?.key).toBe('c@2026-10-20')
+    expect(detailNeighbors(records,middle.next!).next).toBe(null)
+    expect(JSON.stringify(records)).toBe(frozen)
+  })
+  it('uses detached IDs without resurrecting excluded parent instances',()=>{
+    const parent=record({id:'parent',title:'Series',
+      start:fromLocalDateTime('2026-10-19T10:00'),end:fromLocalDateTime('2026-10-19T11:00'),
+      repeat:{frequency:'weekly',interval:1},excludedDates:['2026-10-26']})
+    const detached=record({id:'detached-original',title:'Moved independently',
+      start:fromLocalDateTime('2026-10-26T12:00'),end:fromLocalDateTime('2026-10-26T13:00'),
+      recurrenceParentId:'parent',recurrenceDate:'2026-10-26'})
+    const occ=occurrencesBetween([parent],'2026-10-19','2026-10-19')[0]
+    const next=detailNeighbors([parent,detached],occ).next!
+    expect(next.key).toBe('detached-original@2026-10-26')
+    expect(next.recordId).toBe('detached-original')
+    expect(detailNeighbors([parent,detached],next).next?.key).toBe('parent@2026-11-02')
+  })
+  it('includes transparent read-only imports only when visible, without asserting free time',()=>{
+    const personal=record({id:'my',start:fromLocalDateTime('2026-10-19T09:00'),
+      end:fromLocalDateTime('2026-10-19T10:00')})
+    const free=record({id:'import-free',source:'ics',sourceCalendar:'University',sourceKey:'first',
+      transparent:true,start:fromLocalDateTime('2026-10-19T11:00'),
+      end:fromLocalDateTime('2026-10-19T12:00')})
+    const occupied=record({id:'hidden-busy',source:'ics',sourceCalendar:'Private',
+      sourceKey:'second',start:fromLocalDateTime('2026-10-19T12:00'),
+      end:fromLocalDateTime('2026-10-19T13:00')})
+    const selected=occurrencesBetween([personal],'2026-10-19','2026-10-19')[0]
+    const visible=visibleCalendarRecords([personal,free,occupied],'all',new Set(['Private']))
+    const nav=detailNeighbors(visible,selected)
+    expect(nav.count).toBe(2)
+    expect(nav.next).toMatchObject({recordId:'import-free',source:'ics',transparent:true})
+    expect(detailNeighbors(visible,nav.next!).next).toBe(null)
+    expect(reviewDraft([personal,free,occupied],record({id:'new',start:occupied.start,
+      end:occupied.end})).collisionCount).toBeGreaterThan(0)
+  })
+  it('keeps repeated physical DST hours in exact chronological order',()=>{
+    const early=record({id:'early',start:'2026-10-25T00:15:00.000Z',
+      end:'2026-10-25T00:35:00.000Z'})
+    const late=record({id:'late',start:'2026-10-25T01:15:00.000Z',
+      end:'2026-10-25T01:35:00.000Z'})
+    const occ=occurrencesBetween([early],'2026-10-25','2026-10-25')[0]
+    expect(detailNeighbors([late,early],occ)).toMatchObject({
+      next:{key:'late@2026-10-25',start:'2026-10-25T01:15:00.000Z'},position:1,count:2})
+  })
+  it('uses bounded windows with disabled ends, and refuses stale/filtered out anchors',()=>{
+    const current=record({id:'center',start:fromLocalDateTime('2026-10-19T10:00'),
+      end:fromLocalDateTime('2026-10-19T11:00')})
+    const edge=record({id:'edge',start:fromLocalDateTime('2026-11-18T10:00'),
+      end:fromLocalDateTime('2026-11-18T11:00')})
+    const beyond=record({id:'beyond',start:fromLocalDateTime('2026-11-19T10:00'),
+      end:fromLocalDateTime('2026-11-19T11:00')})
+    const o=occurrencesBetween([current],'2026-10-19','2026-10-19')[0]
+    const nav=detailNeighbors([current,edge,beyond],o)
+    expect(nav.count).toBe(2)
+    expect(nav.next?.recordId).toBe('edge')
+    expect(detailNeighbors([edge,beyond],o)).toMatchObject({
+      position:0,included:false,previous:null,next:null})
+    expect(()=>detailNeighbors([current],o,46)).toThrow('browsing window')
+  })
+  it('orders tied instants deterministically by canonical key, regardless of input order',()=>{
+    const a=record({id:'a',start:fromLocalDateTime('2026-10-19T10:00'),
+      end:fromLocalDateTime('2026-10-19T10:30')})
+    const b=record({id:'b',start:a.start,end:a.end})
+    const current=occurrencesBetween([a],'2026-10-19','2026-10-19')[0]
+    expect(detailNeighbors([b,a],current)).toMatchObject({position:1,
+      next:{recordId:'b'}})
   })
 })
