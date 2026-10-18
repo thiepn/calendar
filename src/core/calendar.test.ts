@@ -1161,7 +1161,7 @@ describe('C14 finite yearly source recurrence and source-correct time proposals'
     expect(plain).toContain(start('11:00'))
     expect(padded).not.toContain(start('11:00'))
     expect(padded).toContain(start('11:15'))
-    expect(padded).toContain(start('09:15'))
+    expect(padded).toContain(start('09:00'))
     expect(padded.length).toBeLessThan(plain.length)
   })
   it('omits DST fold start minutes rather than guessing either physical instant',()=>{
