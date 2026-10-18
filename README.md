@@ -339,3 +339,27 @@ slot selection re-reads local storage and revalidates original full-source
 availability before pre-filling the **existing** EventEditor, which conducts
 its conflict/acknowledgement checks and guarded CAS save. No new event
 writer, calendar/availability store, external provider action, or Folio sync.
+
+## C27 — month day preview and complete original-event access
+
+The original Month grid showed only three event chips per day, then an inert
+"+N more" span. Clicking a date merely changed selected-day state, but the
+separate selected-day inspector is hidden below 1000px; later events on busy
+mobile dates were effectively inaccessible without switching views by hand.
+
+C27 makes both the **day number** and **+N more · View all** open a dedicated
+source-filtered, read-only day preview. It displays original all-day, recurring
+(parent exclusions and detached overrides), personal and read-only ICS
+occurrences, with full event details available by tapping a canonical instance.
+Busy days use the existing `searchOccurrencePage` bounded 20-at-a-time
+pagination, not a shadow store or second search/recurrence engine. The sheet
+provides explicit **Open Day view** and **New personal event** handoffs using
+the original renderer and guarded EventEditor. Desktop gains the same
+accessible entry; mobile gains a touch-sized bottom sheet.
+
+The preview never books, edits, copies, or persists any event on its own.
+It respects source visibility and query filters, yet hidden imported busy
+events still count in the independent source-complete availability and
+conflict checks; ICS `TRANSP:TRANSPARENT` remains visible and nonblocking.
+Original record IDs, recurrence dates and exclusions, backups/recovery,
+privacy, Folio separation, and original CAS writer remain unchanged.

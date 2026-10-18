@@ -30,6 +30,7 @@ import {reminderItems,readReminderActions,saveReminderActions,actionForReminder,
 import {DEFAULT_REMINDER_SETTINGS,loadReminderSettings,saveReminderSettings,inQuietHours,foregroundNotificationText,REMINDER_SETTINGS_KEY,type ReminderSettings} from './core/reminder-settings'
 import {applyAllDayChange,type AllDayProposal} from './core/all-day'
 import {CalendarViews,type Mode} from './components/CalendarViews'
+import {MonthDayPeek} from './components/MonthDayPeek'
 
 type Filter='all'|'personal'|'ics'
 function download(name:string,contents:string,type:string){
@@ -88,6 +89,7 @@ export default function App(){
   const [allDayAdjustment,setAllDayAdjustment]=useState<{item:CalendarOccurrence;from:LocalDate;through:LocalDate}|null>(null)
   const [editorDate,setEditorDate]=useState<LocalDate|null>(null)
   const [active,setActive]=useState<CalendarOccurrence|null>(null)
+  const [monthPeekDate,setMonthPeekDate]=useState<LocalDate|null>(null)
   const [pending,setPending]=useState<IcsPreview|null>(null)
   const [sourcePanel,setSourcePanel]=useState(false)
   const [personalExportOpen,setPersonalExportOpen]=useState(false)
@@ -228,7 +230,7 @@ export default function App(){
       const target=e.target as HTMLElement
       if(['INPUT','TEXTAREA','SELECT'].includes(target.tagName)||target.isContentEditable)return
       if(e.ctrlKey||e.metaKey||e.altKey)return
-      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setPersonalExportOpen(false);setFinderOpen(false);setRemindersOpen(false);setAdjustment(null);setAllDayAdjustment(null)}
+      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setPersonalExportOpen(false);setFinderOpen(false);setRemindersOpen(false);setAdjustment(null);setAllDayAdjustment(null);setMonthPeekDate(null)}
       if(e.key==='n'){e.preventDefault();create(selected)}
       if(e.key==='t'){e.preventDefault();setSelected(localDate())}
       if(e.key==='/'){e.preventDefault();searchInput.current?.focus()}
@@ -731,6 +733,7 @@ export default function App(){
         <div className="content-grid">
           <div className="calendar-surface"><CalendarViews mode={mode} days={days} selected={selected} records={visible} onSelect={setSelected} onOpen={open} onCreate={create} onCreateAt={(date,start,end)=>startSlot({date,start,end})}
               onAdjust={requestAdjustment} onAllDaySlot={startAllDay} onAllDayAdjust={requestAllDayAdjustment}
+              onPeek={date=>{setSelected(date);setMonthPeekDate(date)}}
               hideEmptyAgenda={agendaBusyOnly}/></div>
           <aside className="inspector">
             <div className="inspector-heading"><span className="eyebrow">SELECTED DAY</span><h3>{dateLabel(selected,{weekday:'long',month:'short',day:'numeric'})}</h3>
@@ -746,6 +749,11 @@ export default function App(){
     </div>
     <input ref={importInput} type="file" accept=".ics,text/calendar" hidden onChange={readIcs}/>
     <input ref={restoreInput} type="file" accept=".json,application/json" hidden onChange={readBackup}/>
+    {monthPeekDate!==null&&mode==='month'&&<MonthDayPeek key={monthPeekDate} date={monthPeekDate} records={visible}
+      onClose={()=>setMonthPeekDate(null)}
+      onOpen={item=>{setMonthPeekDate(null);open(item)}}
+      onShowDay={date=>{setMonthPeekDate(null);setSelected(date);setMode('day')}}
+      onCreate={date=>{setMonthPeekDate(null);create(date)}}/>}
     {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate+(newEventRange?.start??'')+(newAllDay?.through??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} initialAllDay={newAllDay??undefined} records={calendar.records} isCopy={copyDraft} defaultReminderMinutes={reminderSettings.defaultLead}
       ignoreOccurrence={editInstance?{id:editInstance.parentId,date:editInstance.date}:undefined}
       ignoreParentFrom={editFuture?{id:editFuture.parentId,date:editFuture.date}:undefined}
