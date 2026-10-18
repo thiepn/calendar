@@ -2212,11 +2212,12 @@ describe('C26 contextual single-day finder original availability window',()=>{
   })
   it('uses every original busy import even when the display hides it, and no future-day substitutes',()=>{
     const imported=record({id:'busy-import',source:'ics',sourceCalendar:'Hidden course',
-      sourceKey:'original-source-id',transparent:false,
+      sourceKey:'original-source-id',
       start:fromLocalDateTime('2026-11-26T08:00'),end:fromLocalDateTime('2026-11-26T19:00')})
     const transparent=record({id:'free-import',source:'ics',sourceCalendar:'Visible course',
       sourceKey:'transparent-source-id',transparent:true,
       start:fromLocalDateTime('2026-11-27T08:00'),end:fromLocalDateTime('2026-11-27T09:00')})
+    expect(validateState({schemaVersion:1,records:[imported,transparent]}).records).toHaveLength(2)
     const snapshot=JSON.stringify([imported,transparent])
     const options={from:'2026-11-26',days:1,durationMinutes:60,startHour:8,endHour:19,
       blockAllDay:true,now:new Date('2026-10-19T00:00:00.000Z'),maxResults:18}
