@@ -14,7 +14,7 @@ export interface ImportedChangeReview{
   changes:ImportedChange[]
   counts:{added:number;updated:number;unchanged:number;removed:number}
 }
-const materialFields=['title','description','location','start','end','allDay','startDate','endDateExclusive'] as const
+const materialFields=['title','description','location','start','end','allDay','startDate','endDateExclusive','transparent'] as const
 
 /** Compare ORIGINAL source identities, not display filters, generated UI keys or
  * sorted calendar positions. Validate via the authoritative merge function so

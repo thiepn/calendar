@@ -12,6 +12,8 @@ export function validateRecord(value:unknown):CalendarRecord {
   if(typeof r.start!=='string'||typeof r.end!=='string'||!Number.isFinite(Date.parse(r.start))||!Number.isFinite(Date.parse(r.end))||Date.parse(r.end)<=Date.parse(r.start)) throw new Error('Invalid event time range')
   if(typeof r.description!=='string'||r.description.length>4000||typeof r.location!=='string'||r.location.length>500)throw new Error('Invalid event details')
   if(typeof r.allDay!=='boolean'||!['personal','ics'].includes(r.source))throw new Error('Invalid event source')
+  if(r.transparent!==undefined&&(r.source!=='ics'||r.transparent!==true))
+    throw new Error('Only imported ICS records may explicitly be non-blocking')
   if(r.reminderMinutes!==undefined&&(!validReminderLead(r.reminderMinutes)||r.source!=='personal'))
     throw new Error('Invalid personal reminder lead time')
   if(r.allDay){day(r.startDate!);day(r.endDateExclusive!);if(r.endDateExclusive!<=r.startDate!)throw new Error('Invalid all-day dates')}

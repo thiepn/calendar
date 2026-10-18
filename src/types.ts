@@ -18,6 +18,8 @@ export interface CalendarRecord {
   startDate?: LocalDate
   endDateExclusive?: LocalDate
   source: Source
+  /** ICS TRANSP:TRANSPARENT; absent means opaque. */
+  transparent?: boolean
   sourceCalendar?: string
   sourceKey?: string
   /** An independently editable personal replacement for a recurring instance. */

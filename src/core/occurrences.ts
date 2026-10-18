@@ -30,7 +30,8 @@ function instantiate(record:CalendarRecord,date:LocalDate):CalendarOccurrence|nu
   const end=record.allDay ? new Date(endDateExclusive+'T00:00:00').toISOString() :
     new Date(Date.parse(start)+(Date.parse(record.end)-Date.parse(record.start))).toISOString()
   return {key:record.id+'@'+date,recordId:record.id,date,start,end,allDay:record.allDay,startDate:date,endDateExclusive,
-    title:record.title,source:record.source,sourceCalendar:record.sourceCalendar,location:record.location,description:record.description}
+    title:record.title,source:record.source,sourceCalendar:record.sourceCalendar,location:record.location,description:record.description,
+    ...(record.transparent?{transparent:true}:{})}
 }
 export function occurrencesBetween(records:CalendarRecord[],from:LocalDate,to:LocalDate):CalendarOccurrence[] {
   const found:CalendarOccurrence[]=[]
@@ -60,7 +61,7 @@ export function excludeOccurrence(record:CalendarRecord,date:LocalDate):Calendar
   return {...record,excludedDates:Array.from(new Set([...(record.excludedDates??[]),date])).sort(),updatedAt:new Date().toISOString()}
 }
 export function conflictsOnDay(items:CalendarOccurrence[]):Set<string> {
-  const timed=items.filter(x=>!x.allDay).sort((a,b)=>a.start.localeCompare(b.start))
+  const timed=items.filter(x=>!x.allDay&&!x.transparent).sort((a,b)=>a.start.localeCompare(b.start))
   const conflicts=new Set<string>()
   for(let i=0;i<timed.length;i++)for(let j=i+1;j<timed.length;j++){
     if(Date.parse(timed[j].start)>=Date.parse(timed[i].end))break

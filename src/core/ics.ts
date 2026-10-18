@@ -80,6 +80,15 @@ function ensureTimedOriginalClock(master:Property,part:Property,value:string,lab
      timedWallTemplate(value).suffix!==timedWallTemplate(master.value).suffix)
     throw new Error(label+' must match original DTSTART clock system')
 }
+/** RFC 5545: detached RECURRENCE-ID inherits master TRANSP unless overridden. */
+function readTransparency(props:Property[],inherited=false):boolean {
+  const values=props.filter(p=>p.name==='TRANSP')
+  if(values.length>1)throw new Error('Duplicate TRANSP property')
+  if(!values.length)return inherited
+  const value=values[0].value.trim().toUpperCase()
+  if(value!=='OPAQUE'&&value!=='TRANSPARENT')throw new Error('Unsupported ICS TRANSP value')
+  return value==='TRANSPARENT'
+}
 export function previewIcs(text:string):IcsPreview {
   if(text.length>2_000_000)throw new Error('ICS file is too large (2 MB maximum)')
   // An incomplete or calendar-message envelope must never become an apparently
@@ -160,6 +169,7 @@ export function previewIcs(text:string):IcsPreview {
         if(props.filter(p=>p.name===unique).length>1)
           throw new Error('Duplicate '+unique+' property in source event')
       }
+      const masterTransparent=readTransparency(props)
       if(get('RECURRENCE-ID')?.params.RANGE)
         throw new Error('RECURRENCE-ID RANGE is unsupported without changing other instances')
       if(get('STATUS')?.value.toUpperCase()==='CANCELLED')continue
@@ -247,6 +257,7 @@ export function previewIcs(text:string):IcsPreview {
             generatedKeys.add(original)
             const override=overrides.get(original)
             if(override)consumed.add(override)
+            const free=override?readTransparency(override,masterTransparent):masterTransparent
             if(override?.find(p=>p.name==='STATUS')?.value.toUpperCase()==='CANCELLED')continue
             if(excluded.has(original)&&!override)continue
             const fromProp=override?.find(p=>p.name==='DTSTART')
@@ -266,7 +277,7 @@ export function previewIcs(text:string):IcsPreview {
             const sourceKey=name+'|'+uid+'|'+original
             generated.push({id:'ics-'+hash(sourceKey),source:'ics',sourceCalendar:name,sourceKey,
               title:updatedTitle,description,location,start:from.iso,end:to.iso,allDay:false,
-              updatedAt:new Date().toISOString()})
+              ...(free?{transparent:true}:{}),updatedAt:new Date().toISOString()})
           }
           if(Array.from(overrides.keys()).some(key=>!generatedKeys.has(key)))
             throw new Error('Timed recurrence contains an override outside the supported bounded series')
@@ -333,6 +344,7 @@ export function previewIcs(text:string):IcsPreview {
           const key=uid+'|'+instanceToken
           const replacement=recurOverrides.get(key)
           if(replacement)consumed.add(replacement)
+          const free=replacement?readTransparency(replacement,masterTransparent):masterTransparent
           if(replacement?.find(p=>p.name==='STATUS')?.value.toUpperCase()==='CANCELLED')continue
           if(excluded.includes(originalDate)&&!replacement)continue
           if(!expanded.includes(originalDate)&&!replacement)continue
@@ -356,7 +368,8 @@ export function previewIcs(text:string):IcsPreview {
           generated.push({id:'ics-'+hash(sourceKey),source:'ics',sourceCalendar:name,sourceKey,
             title:finalTitle,description:finalDescription,location:finalLocation,
             start:new Date(startDate+'T00:00:00').toISOString(),end:new Date(finalDate+'T00:00:00').toISOString(),
-            allDay:true,startDate,endDateExclusive:finalDate,updatedAt:new Date().toISOString()})
+            allDay:true,startDate,endDateExclusive:finalDate,
+            ...(free?{transparent:true}:{}),updatedAt:new Date().toISOString()})
         }
         records.push(...generated)
         coveredUids.add(uid)
@@ -383,7 +396,8 @@ export function previewIcs(text:string):IcsPreview {
       const sourceKey=uid?name+'|'+uid+'|'+recurrence:name+'|'+title+'|'+start.iso+'|'+end.iso
       records.push({id:'ics-'+hash(sourceKey),source:'ics',sourceCalendar:name,sourceKey,
         title,description,location,start:start.iso,end:end.iso,allDay:Boolean(start.date),
-        startDate:start.date,endDateExclusive:end.date,updatedAt:new Date().toISOString()})
+        startDate:start.date,endDateExclusive:end.date,
+        ...(masterTransparent?{transparent:true}:{}),updatedAt:new Date().toISOString()})
     }catch(error){skippedEvents++;warnings.push(title+': '+(error instanceof Error?error.message:String(error)))}
   }
   return {records,warnings,name,skippedEvents}
@@ -409,7 +423,7 @@ export function mergeIcs(state:CalendarState,preview:IcsPreview,mode:'update'|'r
     seenKeys.add(record.sourceKey)
     const existing=prior.get(record.sourceKey)
     if(existing){
-      const keys=['title','description','location','start','end','allDay','startDate','endDateExclusive'] as const
+      const keys=['title','description','location','start','end','allDay','startDate','endDateExclusive','transparent'] as const
       const same=keys.every(k=>existing[k]===record[k])
       if(same)duplicates++;else updated++
       const chosen=same?existing:{...record,id:existing.id}
