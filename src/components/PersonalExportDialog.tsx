@@ -20,7 +20,7 @@ export function PersonalExportDialog({state,selected,onClose,onExport}:{
     try{return {value:reviewPersonalExport(state,options),error:''}}
     catch(error){return {value:null,error:error instanceof Error?error.message:String(error)}}
   },[state,from,through,privacy,includeReminders])
-  const selected=preview.value
+  const reviewed=preview.value
   return <div className="modal-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose()}}>
     <section className="personal-export-dialog dialog-surface" role="dialog" aria-modal="true"
       aria-label="Personal ICS export review">
@@ -64,29 +64,29 @@ export function PersonalExportDialog({state,selected,onClose,onExport}:{
         Include reminder alarms (off by default; recipient devices may display event details)
       </label>}
       <section className="personal-export-preview" aria-label="Personal ICS export contents">
-        <header><strong>Export contents</strong>{selected&&<small>{dateLabel(from,{month:'short',day:'numeric',year:'numeric'})} to {dateLabel(through,{month:'short',day:'numeric',year:'numeric'})}</small>}</header>
+        <header><strong>Export contents</strong>{reviewed&&<small>{dateLabel(from,{month:'short',day:'numeric',year:'numeric'})} to {dateLabel(through,{month:'short',day:'numeric',year:'numeric'})}</small>}</header>
         {preview.error?<p className="error" role="alert">Export unavailable: {preview.error}</p>:
-          selected?<><div className="personal-export-counts">
-            <strong>{selected.total} personal occurrence{selected.total===1?'':'s'}</strong>
-            <span>{selected.allDayInstances} all-day · {selected.timedInstances} timed · {selected.recurringInstances} expanded repeat{selected.recurringInstances===1?'':'s'}</span>
-            <small>{selected.importedExcluded} imported record{selected.importedExcluded===1?'':'s'} excluded ·
-              {includeReminders?' '+selected.reminderInstances+' personal alarm(s) eligible':' no reminder alarms'}</small>
+          reviewed?<><div className="personal-export-counts">
+            <strong>{reviewed.total} personal occurrence{reviewed.total===1?'':'s'}</strong>
+            <span>{reviewed.allDayInstances} all-day · {reviewed.timedInstances} timed · {reviewed.recurringInstances} expanded repeat{reviewed.recurringInstances===1?'':'s'}</span>
+            <small>{reviewed.importedExcluded} imported record{reviewed.importedExcluded===1?'':'s'} excluded ·
+              {includeReminders?' '+reviewed.reminderInstances+' personal alarm(s) eligible':' no reminder alarms'}</small>
           </div>
           <div className="personal-export-items">
-            {selected.occurrences.slice(0,6).map(item=><div key={item.key}>
+            {reviewed.occurrences.slice(0,6).map(item=><div key={item.key}>
               <time dateTime={item.startDate}>{dateLabel(item.startDate,{month:'short',day:'numeric',year:'numeric'})}</time>
               <span>{privacy==='busy'?'Busy':item.title}</span>
               <small>{item.allDay?'All day':new Date(item.start).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small>
             </div>)}
-            {selected.total>6&&<p className="fine-print">And {selected.total-6} more personal occurrence(s) within this window.</p>}
-            {selected.total===0&&<p className="empty-note">No personal events in this date window. Adjust the range before downloading.</p>}
+            {reviewed.total>6&&<p className="fine-print">And {reviewed.total-6} more personal occurrence(s) within this window.</p>}
+            {reviewed.total===0&&<p className="empty-note">No personal events in this date window. Adjust the range before downloading.</p>}
           </div>
           </>:null}
       </section>
       <p className="fine-print">Busy-only downloads use fresh opaque UIDs, so importing multiple separate copies may duplicate appointments. Title/full exports retain stable source identities for repeat downloads. No information leaves this device until you choose the file destination or share it yourself.</p>
       <footer className="editor-actions">
         <button type="button" className="secondary" onClick={onClose}>Cancel</button>
-        <button type="button" className="primary" disabled={!selected||selected.total===0}
+        <button type="button" className="primary" disabled={!reviewed||reviewed.total===0}
           onClick={()=>onExport(options)}><Download size={15}/> Download reviewed personal ICS</button>
       </footer>
     </section>
