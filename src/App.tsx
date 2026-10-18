@@ -6,6 +6,7 @@ import {dayOccurrences,excludeOccurrence,occurrencesBetween} from './core/occurr
 import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,splitSeriesAt,endSeriesAt} from './core/series'
 import {findFreeSlots,type FreeSlot} from './core/availability'
 import {adjacentBusyDay,exportAgendaCsv} from './core/agenda'
+import {searchOccurrencePage} from './core/search-pages'
 import {sevenDayWorkload} from './core/planning'
 import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './core/source-visibility'
 import {previewMissingPersonal} from './core/recover-missing'
@@ -60,6 +61,7 @@ export default function App(){
   const [hiddenImportedCalendars,setHiddenImportedCalendars]=useState<string[]>(initialView.hiddenImportedCalendars??[])
   const [query,setQuery]=useState('')
   const [searchDirection,setSearchDirection]=useState<'forward'|'backward'>('forward')
+  const [searchPage,setSearchPage]=useState(0)
   const [editing,setEditing]=useState<CalendarRecord|null>(null)
   const [copyDraft,setCopyDraft]=useState(false)
   const [editInstance,setEditInstance]=useState<{parentId:string;date:LocalDate}|null>(null)
@@ -249,14 +251,15 @@ export default function App(){
     friendlyRange(days[0],days[days.length-1])
   const selectedEvents=dayOccurrences(visible,selected)
   const planningDays=useMemo(()=>mode==='week'||mode==='agenda'?sevenDayWorkload(visible,selected):[],[visible,selected,mode])
-  const searchMatches=useMemo(()=>{
-    if(!query.trim())return []
-    const matches=visibleCalendarRecords(calendar.records,filter,hiddenImportedSet,query)
+  const searchResults=useMemo(()=>{
+    const matches=query.trim()?visibleCalendarRecords(calendar.records,filter,hiddenImportedSet,query):[]
     const from=searchDirection==='backward'?addDays(selected,-364):selected
     const to=searchDirection==='backward'?selected:addDays(selected,364)
-    const occurrences=occurrencesBetween(matches,from,to)
-    return searchDirection==='backward'?occurrences.slice(-30).reverse():occurrences.slice(0,30)
-  },[calendar,selected,query,filter,hiddenImportedSet,searchDirection])
+    return searchOccurrencePage(matches,from,to,searchDirection,searchPage)
+  },[calendar,selected,query,filter,hiddenImportedSet,searchDirection,searchPage])
+  // Search cursors are presentation-only and are reset as soon as their source
+  // window, query or visibility changes. No cursor is persisted to calendar.
+  useEffect(()=>{setSearchPage(0)},[query,searchDirection,selected,filter,hiddenImportedSet])
   // A Map avoids treating source-controlled names such as "__proto__" as object keys.
   const sourceCounts=new Map<string,number>()
   for(const record of calendar.records){
@@ -616,7 +619,11 @@ export default function App(){
         <button className="icon-button mobile-menu" aria-label="Open navigation" onClick={()=>setMobileNav(true)}><Menu size={20}/></button>
         <div className="topbar-heading"><span className="eyebrow">MY WORKSPACE</span><h1>Calendar</h1></div>
         <div className="topbar-actions">
-          <div className="search-field"><Search size={16}/><input ref={searchInput} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search events" aria-label="Search calendar events"/>{query&&<button aria-label="Clear search" onClick={()=>setQuery('')}><X size={14}/></button>}</div>
+          <div className="search-field"><Search className="search-decorative-icon" size={16}/>
+             <button type="button" className="search-focus-trigger" aria-label="Focus event search"
+               onClick={()=>searchInput.current?.focus()}><Search size={18}/></button>
+             <input ref={searchInput} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search events" aria-label="Search calendar events"/>
+             {query&&<button aria-label="Clear search" onClick={()=>setQuery('')}><X size={14}/></button>}</div>
           <button className="secondary compact reminder-launch" aria-label={'Local reminders'+(dueReminderCount?' ('+dueReminderCount+' due)':'')} onClick={()=>setRemindersOpen(true)}>
             <Bell size={15}/><span className="desktop-text">Reminders</span>{dueReminderCount>0&&<span className="reminder-count">{dueReminderCount}</span>}</button>
           <button className="secondary compact" aria-label="Find time" onClick={()=>setFinderOpen(true)}><Clock3 size={15}/><span className="desktop-text">Find time</span></button>
@@ -643,19 +650,27 @@ export default function App(){
         {notice&&<div className={'notice '+(/failed|rejected|not saved|could not/i.test(notice)?'notice-error':'')} role="status">{notice}<button onClick={()=>setNotice('')} aria-label="Dismiss message"><X size={14}/></button></div>}
         {unreadable&&<div className="recovery-danger" role="alert">The saved calendar could not be read. No replacement has been written. <button className="secondary compact" onClick={downloadUnreadable}>Download original raw data</button> before attempting recovery.</div>}
         {query.trim()&&<section className="search-results-panel" aria-label="Calendar search results">
-          <header><strong>Search {searchDirection==='backward'?'previous':'next'} 365 days from selected date</strong><span>{searchMatches.length} match{searchMatches.length===1?'':'es'} shown (maximum 30)</span></header>
+          <header><strong>Search {searchDirection==='backward'?'previous':'next'} 365 days from selected date</strong><span>{searchResults.total} occurrence{searchResults.total===1?'':'s'} found · showing {searchResults.fromIndex}–{searchResults.throughIndex}</span></header>
           <label className="search-window">Search period
-            <select aria-label="Search period" value={searchDirection} onChange={e=>setSearchDirection(e.target.value as 'forward'|'backward')}>
+            <select aria-label="Search period" value={searchDirection} onChange={e=>{setSearchDirection(e.target.value as 'forward'|'backward');setSearchPage(0)}}>
               <option value="forward">Selected date and next year</option>
               <option value="backward">Selected date and previous year</option>
             </select>
           </label>
-          <div className="search-results-items">{searchMatches.map(item=><button key={item.key} type="button" onClick={()=>{setMode('day');open(item)}}>
+          <div className="search-results-items">{searchResults.items.map(item=><button key={item.key} type="button" onClick={()=>{setMode('day');open(item)}}>
             <span className="search-result-date">{dateLabel(item.startDate,{month:'short',day:'numeric',year:'numeric'})}</span>
             <span className="search-result-title">{item.title}</span>
             <small>{item.source==='ics'?'Imported · read only':'Personal'}{item.transparent?' · Free (non-blocking)':''} · {item.allDay?'All day':new Date(item.start).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small>
           </button>)}
-          {!searchMatches.length&&<p className="empty-note">No matching saved events in this 365-day window. Choose previous/next year or change the selected date.</p>}</div>
+          {!searchResults.total&&<p className="empty-note">No matching saved events in this 365-day window. Choose previous/next year or change the selected date.</p>}</div>
+           {searchResults.pages>1&&<nav className="search-page-navigation" aria-label="Search result pages">
+             <button className="secondary compact" type="button" disabled={!searchResults.hasPrevious}
+               onClick={()=>setSearchPage(searchResults.page-1)}>Previous results</button>
+             <span>Page {searchResults.page+1} of {searchResults.pages}</span>
+             <button className="secondary compact" type="button" disabled={!searchResults.hasNext}
+               onClick={()=>setSearchPage(searchResults.page+1)}>Next results</button>
+           </nav>}
+           <p className="fine-print search-scope-note">Search lists only displayed sources. Hidden imported calendars still count for Find time and conflict checks. Results are local and do not alter original events.</p>
         </section>}
         {planningDays.length>0&&<section className="planning-overview" aria-label="Seven-day planning overview">
           <div className="planning-overview-heading">

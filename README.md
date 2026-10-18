@@ -275,3 +275,23 @@ and keep the source-complete calendar review, original record writer and CAS
 boundary fully responsible for saves. On narrow viewports, the editor stops
 auto-opening the software keyboard, provides 43px controls, and keeps Cancel/
 Save visible while scrolling through the long form. Desktop editor is unchanged.
+
+## C24 — source-preserving paginated local event discovery
+
+Search used to silently truncate a year of occurrence matches to 30; dense
+recurring series made later matching instances unreachable. The existing
+forward/backward 365-day source-filtered search now reports its actual total
+and exposes **Previous results / Next results** paging across all materialized
+original occurrences, with 30 per page. Pages are chronological within the
+selected direction, with stable canonical occurrence IDs and dates. Changes
+to date, filter, visibility, direction or query reset the ephemeral cursor.
+An explicit mobile search trigger focuses the existing accessible search input;
+phone result cards and page controls have larger touch targets.
+
+`src/core/search-pages.ts` is a pure, bounded projection, never a second
+store or a source of free/busy truth. Search still respects visible source/
+hidden snapshot filters; independently, original complete-source availability
+and conflict review include hidden busy imports and exclude transparent ones.
+No record IDs, recurring exclusions, original source data, storage, security
+authority, recovery or Folio boundaries are modified. Searching/paging opens
+existing event details via original occurrence keys, without writing records.
