@@ -11,12 +11,12 @@ export function parseIcsDuration(value:string,allDay:boolean):number{
     if(days<1||days>31)throw new Error('All-day DURATION exceeds 31-day range')
     return days
   }
-  const match=/^PT(?:(\d{1,3})H)?(?:(\d{1,2})M)?(?:(\d{1,2})S)?$/.exec(value)
+  const match=/^PT(?:(\d{1,3})H)?(?:(\d{1,6})M)?(?:(\d{1,6})S)?$/.exec(value)
   if(!match||(match[1]===undefined&&match[2]===undefined&&match[3]===undefined))
     throw new Error('Timed DURATION must use elapsed PT hours/minutes/seconds')
   const hours=Number(match[1]??0),minutes=Number(match[2]??0),seconds=Number(match[3]??0)
   const duration=(hours*3600+minutes*60+seconds)*1000
-  if(minutes>=60||seconds>=60||duration<=0||duration>7*86400000)
+  if(duration<=0||duration>7*86400000)
     throw new Error('Timed DURATION exceeds bounded elapsed-time range')
   return duration
 }

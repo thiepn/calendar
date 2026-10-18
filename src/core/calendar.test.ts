@@ -998,6 +998,8 @@ describe('C13 explicitly bounded and source-safe RFC DURATION imports',()=>{
     expect(preview.records[1].end).toBe('2026-11-03T11:30:00.000Z')
     expect(parseIcsDuration('P1W',true)).toBe(7)
     expect(parseIcsDuration('PT1H30M',false)).toBe(5400000)
+    expect(parseIcsDuration('PT90M',false)).toBe(5400000)
+    expect(parseIcsDuration('PT2H60M',false)).toBe(10800000)
   })
   it('materializes source-zone recurrence DURATION with RDATE/EXDATE and original UID stable',()=>{
     const input=['BEGIN:VCALENDAR','X-WR-CALNAME:Classes','BEGIN:VEVENT',
@@ -1029,7 +1031,7 @@ describe('C13 explicitly bounded and source-safe RFC DURATION imports',()=>{
     expect(p.records[1].end).toBe('2026-10-20T16:00:00.000Z')
   })
   it('rejects conflicting end and duration fields, nominal timed days and orphan source exceptions',()=>{
-    const invalid=['PT0M','P1D','PT169H','PT2H60M','PT','PT1M61S','-PT15M']
+    const invalid=['PT0M','P1D','PT169H','PT999999M','PT','PT999999S','-PT15M']
     for(const text of invalid)expect(()=>parseIcsDuration(text,false)).toThrow()
     for(const text of ['P0D','P32D','PT1H','P5W'])
       expect(()=>parseIcsDuration(text,true)).toThrow()
