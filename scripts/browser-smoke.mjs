@@ -2043,7 +2043,7 @@ async function exerciseC21DesktopTransparentSourceReview(){
   await review.getByRole('button',{name:'Apply reviewed changes'}).click()
   await page.getByLabel('Jump to date').fill('2026-11-09')
   await page.locator('.view-switch button').filter({hasText:'List'}).click()
-  assert.match(await page.locator('.calendar-surface').innerText(),/Free \\(non-blocking\\)/)
+  assert.ok((await page.locator('.calendar-surface').innerText()).includes('Free (non-blocking)'))
   await page.locator('.event-chip').filter({hasText:'C21 free office hours'}).first().click()
   const details=page.getByRole('dialog',{name:'Event details'})
   assert.match(await details.innerText(),/TRANSP:TRANSPARENT/)
@@ -2052,7 +2052,7 @@ async function exerciseC21DesktopTransparentSourceReview(){
   await put(source('OPAQUE'))
   review=page.getByRole('dialog',{name:'ICS import review'})
   await review.waitFor()
-  assert.match(await review.getByRole('region',{name:'Imported changes by event'}).innerText(),/free\\/busy status/)
+  assert.ok((await review.getByRole('region',{name:'Imported changes by event'}).innerText()).includes('free/busy status'))
   assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),before,
     'Import preview must never write to the source calendar')
   await review.getByRole('button',{name:'Apply reviewed changes'}).click()
