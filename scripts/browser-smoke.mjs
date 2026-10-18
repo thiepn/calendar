@@ -2152,7 +2152,7 @@ async function exerciseC22MobileFocusedWeekOriginalIdentityAndDST(){
   assert.equal(await page.locator('.timeline-event-frame').count(),0)
   await page.locator('.mobile-focus-date').nth(6).click()
   assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-10-25')
-  await page.getByRole('button',{name:'07:00'}).click()
+  await page.getByRole('button',{name:'07:00',exact:true}).click()
   assert.ok(Math.abs(await scroller.evaluate(el=>el.scrollTop)-448)<=3)
   await page.getByRole('button',{name:'First event'}).click()
   assert.ok(Math.abs(await scroller.evaluate(el=>el.scrollTop)-96)<=3)
