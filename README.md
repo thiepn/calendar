@@ -246,3 +246,14 @@ existing schemaVersion 1 for backward-compatible device-only backups; personal
 copies become normal busy appointments. Every saved imported snapshot counts
 towards source-complete free/busy even if visually hidden. No Folio authority,
 external provider write, sync service or migration is introduced.
+
+## C22 — mobile week focus
+
+Week retains the default horizontal seven-column timeline. Mobile **Focus day**
+reveals a full-width selected-day timeline while keeping all seven dates one
+tap away, displaying original filtered event counts, plus **First event** and
+**07:00** hour jumps. Desktop and Full week remain unchanged. The jump uses
+actual local-midnight elapsed minutes and handles overnight spans and DST
+23/25-hour days without changing records or inferring free time. The original
+ICS/read-only/TRANSP, Folio, recurrence, guarded editing and privacy boundaries
+remain authoritative; no new storage or migration is introduced.

@@ -411,3 +411,22 @@
 /* C21: original imported source transparency is visible, not editable. */
 .nonblocking-note{padding:12px;margin:14px 0;border:1px solid #cfe0d1;background:#f3f8f4;color:#345d45;font-size:12px;line-height:1.6}
 .event-chip.imported small{white-space:normal}
+
+/* C22 optional mobile-focused week; the 7-column layout remains the default. */
+.mobile-focus-toggle,.mobile-focus-strip{display:none}
+@media(max-width:740px){
+ .mobile-focus-toggle{display:inline-flex;min-height:42px}
+ .mobile-focus-strip{display:flex;align-items:stretch;gap:4px;overflow-x:auto;padding:8px 6px;
+  border-bottom:1px solid #dfe8df;background:#f8fbf8;scroll-snap-type:x proximity}
+ .mobile-focus-date{flex:1 0 39px;min-width:39px;border:1px solid #dce4dd;background:#fff;
+  border-radius:4px;padding:8px 2px;display:grid;gap:3px;justify-items:center;
+  color:#46604e;scroll-snap-align:start}
+ .mobile-focus-date.active{background:#e7f2e8;border-color:#477c5b;color:#205336}
+ .mobile-focus-date span{font-size:10px}
+ .mobile-focus-date strong{font-size:16px}
+ .mobile-focus-date small{font-size:9px;white-space:nowrap}
+ .mobile-focus-jumps{display:grid;gap:5px;flex:none;margin-left:3px}
+ .mobile-focus-jumps button{font-size:10px;min-height:32px;padding:4px 6px}
+ .timeline-single .timeline-block strong{font-size:12px}
+ .timeline-single .timeline-block span{font-size:10px}
+}

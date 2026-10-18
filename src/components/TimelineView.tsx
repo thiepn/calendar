@@ -5,6 +5,7 @@ import {addDays,daysBetween,dateLabel,displayTime,localDate,localDateTime,localI
 import {dayOccurrences} from '../core/occurrences'
 import {layoutTimedDay,dayAxis,slotAt,TIMELINE_HOUR_HEIGHT,SLOT_MINUTES} from '../core/timeline'
 import {nudgeTimed,type TimedAction} from '../core/reschedule'
+import {focusDaySummary,focusScrollMinute} from '../core/mobile-focus'
 
 type Props={days:LocalDate[];selected:LocalDate;records:CalendarRecord[];
   onSelect:(date:LocalDate)=>void;onOpen:(item:CalendarOccurrence)=>void;
@@ -33,17 +34,28 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
   const [dayPreview,setDayPreview]=useState<{from:LocalDate;through:LocalDate}|null>(null)
   const [duration,setDuration]=useState<number>(60)
   const [touchDrag,setTouchDrag]=useState(false)
+  const [focusDay,setFocusDay]=useState(false)
   const pointerPosition=useRef({x:0,y:0})
   const edgeTimer=useRef<number|null>(null)
   useEffect(()=>()=>{if(edgeTimer.current!==null)window.clearInterval(edgeTimer.current)},[])
+  useEffect(()=>{
+    const wide=()=>{if(window.innerWidth>740)setFocusDay(false)}
+    window.addEventListener('resize',wide)
+    return ()=>window.removeEventListener('resize',wide)
+  },[])
   const week=days.length>1
-  useEffect(()=>{if(scroll.current)scroll.current.scrollTop=7*TIMELINE_HOUR_HEIGHT},[week])
+  const renderedDays=week&&focusDay?[selected]:days
+  useEffect(()=>{
+    if(!scroll.current)return
+    scroll.current.scrollTop=(week&&focusDay?focusScrollMinute(records,selected):420)/60*TIMELINE_HOUR_HEIGHT
+  },[week,focusDay,selected])
   useEffect(()=>{
     if(!scroll.current||!week)return
     const index=days.indexOf(selected)
-    if(index>=0)scroll.current.scrollLeft=Math.max(0,index*172)
-  },[selected,week,days])
+    if(index>=0)scroll.current.scrollLeft=focusDay?0:Math.max(0,index*172)
+  },[selected,week,days,focusDay])
   function dateAtX(clientX:number):LocalDate|null {
+    if(week&&focusDay)return selected
     const columns=scroll.current?.querySelectorAll<HTMLElement>('.timeline-day')
     if(!columns)return null
     for(let i=0;i<columns.length;i++){
@@ -171,13 +183,18 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
       // Invalid movements are declined; users can enter an exact value in the details editor.
     }
   }
-  const axes=days.map(dayAxis)
+  const axes=renderedDays.map(dayAxis)
   const height=Math.max(...axes.map(a=>a.minutes))/60*TIMELINE_HOUR_HEIGHT
   return <section className={'timeline-view '+(touchDrag?'timeline-touch-drag':'')} aria-label={week?'Graphical weekly schedule':'Graphical daily schedule'}
     onPointerMove={movePointer} onPointerUp={endPointer} onPointerCancel={()=>{gesture.current=null;if(edgeTimer.current!==null)window.clearInterval(edgeTimer.current);edgeTimer.current=null;setPreview(null);setDayPreview(null)}}>
     <div className="timeline-tools">
       <p>Drag timed slots to create/move/resize. In the all-day row, drag across days to create a multi-day event or move a personal all-day event. Saves require confirmation.</p>
       <div className="timeline-controls">
+        {week&&<button type="button" className="secondary compact mobile-focus-toggle"
+          aria-label={focusDay?'Show scrollable full week':'Focus selected week day'}
+          aria-pressed={focusDay} onClick={()=>{setTouchDrag(false);setFocusDay(current=>!current)}}>
+          {focusDay?'Full week':'Focus day'}
+        </button>}
         <label>Slot length <select aria-label="New event duration" value={duration} onChange={event=>setDuration(Number(event.target.value))}>
           {durations.map(value=><option value={value} key={value}>{value} min</option>)}
         </select></label>
@@ -185,19 +202,39 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
           Touch drag mode</label>
       </div>
     </div>
+    {week&&focusDay&&<nav className="mobile-focus-strip" aria-label="Focused week day">
+      {days.map(date=>{
+        const summary=focusDaySummary(records,date)
+        return <button type="button" key={date} aria-pressed={selected===date}
+          aria-label={'Focus '+dateLabel(date,{weekday:'long',month:'long',day:'numeric'})+', '+summary.count+' visible events'}
+          className={'mobile-focus-date '+(selected===date?'active':'')} onClick={()=>onSelect(date)}>
+          <span>{dateLabel(date,{weekday:'short'})}</span>
+          <strong>{Number(date.slice(-2))}</strong>
+          <small>{summary.count} event{summary.count===1?'':'s'}</small>
+        </button>
+      })}
+      <div className="mobile-focus-jumps">
+        <button type="button" className="secondary compact" onClick={()=>{
+          if(scroll.current)scroll.current.scrollTop=focusScrollMinute(records,selected)/60*TIMELINE_HOUR_HEIGHT
+        }}>First event</button>
+        <button type="button" className="secondary compact" onClick={()=>{
+          if(scroll.current)scroll.current.scrollTop=7*TIMELINE_HOUR_HEIGHT
+        }}>07:00</button>
+      </div>
+    </nav>}
     <div className="timeline-scroll" ref={scroll} aria-label="Scroll calendar hours and days" tabIndex={0}>
-      <div className={'timeline-page '+(week?'timeline-week':'timeline-single')} style={{minWidth:week?(60+days.length*172)+'px':'100%'}}>
+      <div className={'timeline-page '+(week&&!focusDay?'timeline-week':'timeline-single')} style={{minWidth:week&&!focusDay?(60+days.length*172)+'px':'100%'}}>
         <div className="timeline-sticky">
           <div className="timeline-day-heads">
             <div className="timeline-gutter" aria-hidden="true">Local</div>
-            {days.map(date=><button type="button" key={date} className={'timeline-day-head '+(date===selected?'is-selected ':'')+(date===localDate()?'is-today':'')}
+            {renderedDays.map(date=><button type="button" key={date} className={'timeline-day-head '+(date===selected?'is-selected ':'')+(date===localDate()?'is-today':'')}
               onClick={()=>onSelect(date)} aria-label={'Select '+dateLabel(date,{weekday:'long',month:'long',day:'numeric'})}>
               <span>{dateLabel(date,{weekday:'short'})}</span><strong>{Number(date.slice(-2))}</strong>
             </button>)}
           </div>
           <div className="timeline-all-day">
             <span className="timeline-all-day-label">All day</span>
-            {days.map(date=>{
+            {renderedDays.map(date=>{
               const events=dayOccurrences(records,date).filter(item=>item.allDay)
               return <div className={'timeline-all-day-col '+(dayPreview&&date>=dayPreview.from&&date<=dayPreview.through?'is-preview':'')} key={date}>
                 <button type="button" className="timeline-all-day-create" aria-label={'Plan all-day event on '+date}
@@ -224,7 +261,7 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
           <div className="timeline-hour-labels" aria-hidden="true" style={{height}}>
             {axes[0].hours.map(h=><span key={h.minute} style={{top:h.minute/60*TIMELINE_HOUR_HEIGHT}}>{h.label}{h.repeated?' '+h.offset:''}</span>)}
           </div>
-          {days.map(date=>{
+          {renderedDays.map(date=>{
             const axis=dayAxis(date)
             const blocks=layoutTimedDay(dayOccurrences(records,date),date)
             return <div key={date} className={'timeline-day '+(date===localDate()?'is-today':'')} style={{height:axis.minutes/60*TIMELINE_HOUR_HEIGHT}}>
@@ -281,7 +318,7 @@ export function TimelineView({days,selected,records,onSelect,onOpen,onSlot,onAdj
     </div>
     <div className="timeline-footer">
       Keyboard: focus a personal event, Alt+↑/↓ moves 30 min; Alt+←/→ moves one day; Alt+Shift+↑/↓ resizes 30 min.
-      Touch drag mode disables native panning on selectable event surfaces; switch it off to scroll normally. Drag toward the timeline edges to scroll.
+      Mobile Focus day expands the selected weekday with a seven-day switcher; Full week restores horizontal scrolling. Touch drag mode disables native panning on selectable event surfaces; switch it off to scroll normally. Drag toward the timeline edges to scroll.
       Times are in {Intl.DateTimeFormat().resolvedOptions().timeZone}. Spring gaps are omitted; the repeated autumn hour has separate labelled ISO-backed rows.
     </div>
   </section>
