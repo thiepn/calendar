@@ -11,6 +11,7 @@ import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './core/so
 import {previewMissingPersonal} from './core/recover-missing'
 import {personalDraftFromImported} from './core/personal-copy'
 import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
+import {findAdjustmentAlternatives,type AdjustmentAlternative} from './core/adjustment-alternatives'
 import {exportBackup,importBackup,loadState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCalendar,restoreUnreadableCalendar,STORAGE_KEY,type RecoverySnapshot} from './core/storage'
 import {mergeIcs,previewIcs,type IcsPreview} from './core/ics'
 import {downloadPersonalExport,type ReviewedPersonalExportOptions} from './core/personal-export'
@@ -66,6 +67,9 @@ export default function App(){
   const [moveDate,setMoveDate]=useState<LocalDate>(localDate())
   const [adjustment,setAdjustment]=useState<{item:CalendarOccurrence;action:TimedAction;date:LocalDate;minute:number;length:number;fold?:'earlier'|'later'}|null>(null)
   const [adjustAck,setAdjustAck]=useState(false)
+  const [adjustAlternativesOpen,setAdjustAlternativesOpen]=useState(false)
+  const [adjustAlternativeDays,setAdjustAlternativeDays]=useState<1|3|7>(3)
+  const [adjustAlternativeBuffer,setAdjustAlternativeBuffer]=useState<0|15|30>(0)
   const [importMode,setImportMode]=useState<'update'|'replace'>('update')
   const [finderOpen,setFinderOpen]=useState(false)
   const [finderDuration,setFinderDuration]=useState(60)
@@ -273,6 +277,13 @@ export default function App(){
       adjustment.minute,adjustment.length,adjustment.fold),error:''}}
     catch(error){return {proposal:null,error:error instanceof Error?error.message:String(error)}}
   },[calendar,adjustment])
+  const adjustmentAlternatives=useMemo(()=>{
+    if(!adjustAlternativesOpen||!adjustmentReview.proposal)return {items:[] as AdjustmentAlternative[],error:''}
+    try{return {items:findAdjustmentAlternatives(calendar,adjustmentReview.proposal,{
+      days:adjustAlternativeDays,bufferMinutes:adjustAlternativeBuffer
+    }),error:''}}
+    catch(error){return {items:[] as AdjustmentAlternative[],error:error instanceof Error?error.message:String(error)}}
+  },[calendar,adjustmentReview.proposal,adjustAlternativesOpen,adjustAlternativeDays,adjustAlternativeBuffer])
   const freeSlots=useMemo(()=>finderOpen?findFreeSlots(calendar.records,{
     from:selected<localDate()?localDate():selected,days:finderDays,durationMinutes:finderDuration,
     startHour:finderWindow==='daytime'?8:17,endHour:finderWindow==='daytime'?19:23,
@@ -327,8 +338,28 @@ export default function App(){
   function open(item:CalendarOccurrence){setActive(item);setSelected(item.date);setMoveDate(item.startDate)}
   function requestAdjustment(item:CalendarOccurrence,action:TimedAction,date:LocalDate,minute:number,length:number,fold?:'earlier'|'later'){
     if(item.source!=='personal'||item.allDay)return
-    setActive(null);setAdjustAck(false)
+    setActive(null);setAdjustAck(false);setAdjustAlternativesOpen(false)
+    setAdjustAlternativeDays(3);setAdjustAlternativeBuffer(0)
     setAdjustment({item,action,date,minute,length,fold})
+  }
+  function chooseAdjustmentAlternative(slot:AdjustmentAlternative){
+    if(!adjustment)return
+    try{
+      const latest=loadState()
+      if(latest.error||JSON.stringify(latest.state)!==JSON.stringify(calendar))
+        throw new Error('Saved calendar changed in another tab. Review refreshed appointments first.')
+      const review=proposeTimedChange(latest.state,adjustment.item,adjustment.action,
+        adjustment.date,adjustment.minute,adjustment.length,adjustment.fold)
+      const refreshed=findAdjustmentAlternatives(latest.state,review,{
+        days:adjustAlternativeDays,bufferMinutes:adjustAlternativeBuffer,now:new Date()
+      })
+      if(!refreshed.some(item=>item.start===slot.start&&item.end===slot.end))
+        throw new Error('Suggested alternative is no longer available')
+      setAdjustment(current=>current?{...current,action:'move',date:slot.date,
+        minute:slot.minute,length:slot.lengthMinutes,fold:undefined}:current)
+      setAdjustAck(false)
+      setAdjustAlternativesOpen(false)
+    }catch(error){setNotice('Alternative time not selected: '+String(error))}
   }
   function confirmAdjustment(){
     if(!adjustmentReview.proposal||!adjustment)return
@@ -336,7 +367,7 @@ export default function App(){
     try{
       const next=applyTimedChange(calendar,adjustmentReview.proposal,()=>crypto.randomUUID())
       if(commit(next,'Timed event change saved locally')){
-        setAdjustment(null);setAdjustAck(false);setSelected(adjustment.date)
+        setAdjustment(null);setAdjustAck(false);setAdjustAlternativesOpen(false);setSelected(adjustment.date)
       }
     }catch(error){setNotice('Reschedule rejected: '+String(error))}
   }
@@ -710,7 +741,7 @@ export default function App(){
     {allDayAdjustment&&<AllDayDialog key={allDayAdjustment.item.key+allDayAdjustment.from+allDayAdjustment.through}
       item={allDayAdjustment.item} initial={{from:allDayAdjustment.from,through:allDayAdjustment.through}}
       state={calendar} onApply={confirmAllDay} onClose={()=>setAllDayAdjustment(null)}/>}
-    {adjustment&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setAdjustment(null)}}>
+    {adjustment&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget){setAdjustment(null);setAdjustAlternativesOpen(false)}}}>
       <section className="adjust-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Confirm time adjustment">
         <header className="editor-head"><h2>Review {adjustment.action==='move'?'move':'resize'}</h2>
           <button className="icon-button" aria-label="Cancel adjustment" onClick={()=>setAdjustment(null)}><X size={19}/></button></header>
@@ -749,10 +780,40 @@ export default function App(){
             <p className="readonly-note">This adjusts only the selected occurrence. Other dates in the recurring series remain unchanged.</p>}
           {adjustmentReview.proposal.conflicts.length>0&&<div className="adjust-conflicts" role="alert">
             <strong><AlertTriangle size={16}/> {adjustmentReview.proposal.conflicts.length} overlapping saved commitment(s)</strong>
-            <p>Including imported and hidden sources; no event is silently moved or deleted.</p>
+            <p>Including imported and hidden sources; no event is silently moved or deleted. Find a different time before accepting an overlap.</p>
             <ul>{adjustmentReview.proposal.conflicts.slice(0,8).map(item=><li key={item.key}>{item.title} ({item.source==='ics'?'imported, read-only':'personal'})</li>)}</ul>
             <label><input type="checkbox" checked={adjustAck} onChange={event=>setAdjustAck(event.target.checked)}/> Save despite these overlaps</label>
           </div>}
+          <section className="adjust-alternatives" aria-label="Conflict-free adjustment alternatives">
+            <button className="secondary" type="button" aria-expanded={adjustAlternativesOpen}
+              aria-controls="adjust-alternative-results" onClick={()=>setAdjustAlternativesOpen(current=>!current)}>
+              <Clock3 size={15}/>{adjustAlternativesOpen?'Hide alternatives':'Find conflict-free alternatives'}
+            </button>
+            {adjustAlternativesOpen&&<div id="adjust-alternative-results" className="adjust-alternative-results">
+              <p className="fine-print">Choose a suggested date and time for this one personal occurrence. All other personal series instances and every imported or hidden source remain busy. No changes are saved until you confirm.</p>
+              <div className="adjust-alternative-options">
+                <label>Search ahead<select aria-label="Alternative search days" value={adjustAlternativeDays}
+                  onChange={event=>setAdjustAlternativeDays(Number(event.target.value) as 1|3|7)}>
+                  <option value={1}>1 day</option><option value={3}>3 days</option><option value={7}>7 days</option>
+                </select></label>
+                <label>Spacing<select aria-label="Alternative spacing" value={adjustAlternativeBuffer}
+                  onChange={event=>setAdjustAlternativeBuffer(Number(event.target.value) as 0|15|30)}>
+                  <option value={0}>Back-to-back allowed</option><option value={15}>15-minute gap</option><option value={30}>30-minute gap</option>
+                </select></label>
+              </div>
+              {adjustmentAlternatives.error?<p role="alert" className="error">{adjustmentAlternatives.error}</p>:
+                adjustmentAlternatives.items.length?<div className="adjust-alternative-list">
+                  {adjustmentAlternatives.items.map(slot=><button type="button" key={slot.start}
+                    aria-label={'Use alternative '+slot.date+' '+new Date(slot.start).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}
+                    onClick={()=>chooseAdjustmentAlternative(slot)}>
+                    <span><strong>{dateLabel(slot.date,{weekday:'short',month:'short',day:'numeric'})}</strong>
+                      <small>{new Date(slot.start).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})} – {new Date(slot.end).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small></span>
+                    <span>Use time <ChevronRight size={14}/></span>
+                  </button>)}
+                </div>:<p className="empty-note">No free alternative within this search. Try more days or less spacing; long events may require manual scheduling.</p>}
+              <p className="fine-print">Suggestions use 07:00–23:00 device-local hours, a 15-minute grid and durations up to 4 hours. DST gaps and repeated hours are excluded. Source availability is rechecked when selecting a suggestion, then checked again during the guarded save.</p>
+            </div>}
+          </section>
         </>}
         <footer className="editor-actions"><button className="secondary" type="button" onClick={()=>setAdjustment(null)}>Cancel</button>
           <button className="primary" type="button" onClick={confirmAdjustment}
