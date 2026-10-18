@@ -1489,7 +1489,7 @@ describe('C17 original-source ICS event-level preview and envelope integrity',()
     const current:CalendarState={schemaVersion:1,records:[]}
     const report=exportImportedChangeCsv(reviewImportedChanges(current,previewIcs(risky),'update'))
     expect(report).toContain("'=HYPERLINK")
-    expect(report).toContain("'  +SUM(1,2)")
+    expect(report).toContain("'+SUM(1,2)")
   })
   it('refuses incomplete source-wide replacement even when the remaining entries can be reviewed',()=>{
     const original=mergeIcs({schemaVersion:1,records:[]},previewIcs(initial)).state
