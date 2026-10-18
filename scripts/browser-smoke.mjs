@@ -2646,7 +2646,7 @@ async function exerciseC26DesktopFinderDayWindowAndStaleStorageGuard(){
   await finder.getByRole('button',{name:'Next finder day'}).click()
   assert.equal(await finder.getByLabel('Finder start date').inputValue(),'2026-11-28')
   assert.ok(await finder.locator('.finder-slot').count()>0)
-  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))||{schemaVersion:1,records:[]})
   const original=finder.locator('.finder-slot').first()
   const next={...before,records:[...before.records,{
     id:'c26-another-tab-original',source:'personal',title:'C26 another tab appointment',
