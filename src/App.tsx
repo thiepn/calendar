@@ -67,6 +67,8 @@ export default function App(){
   const [finderDays,setFinderDays]=useState(7)
   const [finderWindow,setFinderWindow]=useState<'daytime'|'evening'>('daytime')
   const [finderBlockAllDay,setFinderBlockAllDay]=useState(true)
+  const [finderDaySelection,setFinderDaySelection]=useState<'all'|'weekdays'|'weekends'>('all')
+  const [finderBufferMinutes,setFinderBufferMinutes]=useState<0|15|30>(0)
   const [newEventRange,setNewEventRange]=useState<{start:string;end:string}|null>(null)
   const [newAllDay,setNewAllDay]=useState<{from:LocalDate;through:LocalDate}|null>(null)
   const [allDayAdjustment,setAllDayAdjustment]=useState<{item:CalendarOccurrence;from:LocalDate;through:LocalDate}|null>(null)
@@ -109,8 +111,9 @@ export default function App(){
       const latest=readReminderActions()
       const stillDue=reminderItems(current.state,new Date().toISOString(),latest,14,overdueDays)
         .filter(item=>item.status==='due')
-      const ids=new Set(stillDue.map(item=>item.key))
-      if(items.some(item=>!ids.has(item.key)))throw new Error('Reminder list changed; review it again')
+      const live=new Map(stillDue.map(item=>[item.key,item]))
+      if(items.some(item=>live.get(item.key)?.dueAt!==item.dueAt))
+        throw new Error('Reminder due time changed; review the refreshed list')
       const next=dismissReminderBatch(latest,items)
       saveReminderActions(next);setReminderActions(next);setReminderNow(new Date().toISOString())
       setNotice('Dismissed '+items.length+' reviewed reminders. Original events were not changed.')
@@ -256,11 +259,31 @@ export default function App(){
   const freeSlots=useMemo(()=>finderOpen?findFreeSlots(calendar.records,{
     from:selected<localDate()?localDate():selected,days:finderDays,durationMinutes:finderDuration,
     startHour:finderWindow==='daytime'?8:17,endHour:finderWindow==='daytime'?19:23,
-    blockAllDay:finderBlockAllDay,maxResults:18
-  }):[],[finderOpen,calendar,selected,finderDays,finderDuration,finderWindow,finderBlockAllDay])
+    blockAllDay:finderBlockAllDay,daySelection:finderDaySelection,
+    bufferMinutes:finderBufferMinutes,maxResults:18
+  }):[],[finderOpen,calendar,selected,finderDays,finderDuration,finderWindow,finderBlockAllDay,finderDaySelection,finderBufferMinutes])
 
   function create(date:LocalDate){setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setEditorDate(date)}
   function startSlot(slot:FreeSlot){
+    try{
+      // A suggested slot can expire or become occupied in another tab.
+      // Re-read original local storage and re-run *all* source conflict checks
+      // before opening a prefilled editor. The subsequent save remains guarded.
+      const latest=loadState()
+      if(latest.error)throw new Error('Saved calendar is unreadable. Recover it before scheduling.')
+      if(JSON.stringify(latest.state)!==JSON.stringify(calendar)){
+        setCalendar(latest.state)
+        throw new Error('Calendar changed in another tab. Review refreshed suggestions before scheduling.')
+      }
+      const eligible=findFreeSlots(latest.state.records,{
+        from:selected<localDate()?localDate():selected,days:finderDays,durationMinutes:finderDuration,
+        startHour:finderWindow==='daytime'?8:17,endHour:finderWindow==='daytime'?19:23,
+        blockAllDay:finderBlockAllDay,daySelection:finderDaySelection,
+        bufferMinutes:finderBufferMinutes,maxResults:18,now:new Date()
+      })
+      if(!eligible.some(candidate=>candidate.start===slot.start&&candidate.end===slot.end))
+        throw new Error('Suggested slot is no longer free. Review fresh recommendations.')
+    }catch(error){setNotice('Time proposal not opened: '+String(error));return}
     setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null)
     setNewAllDay(null);setNewEventRange({start:slot.start,end:slot.end});setEditorDate(slot.date)
     setSelected(slot.date);setFinderOpen(false)
@@ -619,6 +642,12 @@ export default function App(){
           <label>Duration<select value={finderDuration} onChange={ev=>setFinderDuration(Number(ev.target.value))}><option value={30}>30 minutes</option><option value={60}>60 minutes</option><option value={90}>90 minutes</option><option value={120}>120 minutes</option></select></label>
           <label>Look ahead<select value={finderDays} onChange={ev=>setFinderDays(Number(ev.target.value))}><option value={7}>7 days</option><option value={14}>14 days</option></select></label>
           <label>Hours<select value={finderWindow} onChange={ev=>setFinderWindow(ev.target.value as 'daytime'|'evening')}><option value="daytime">08:00–19:00</option><option value="evening">17:00–23:00</option></select></label>
+          <label>Days<select aria-label="Preferred days" value={finderDaySelection} onChange={ev=>setFinderDaySelection(ev.target.value as 'all'|'weekdays'|'weekends')}>
+            <option value="all">Every day</option><option value="weekdays">Weekdays only</option><option value="weekends">Weekends only</option>
+          </select></label>
+          <label>Spacing<select aria-label="Spacing between commitments" value={finderBufferMinutes} onChange={ev=>setFinderBufferMinutes(Number(ev.target.value) as 0|15|30)}>
+            <option value={0}>Back-to-back OK</option><option value={15}>15-minute gap</option><option value={30}>30-minute gap</option>
+          </select></label>
         </div>
         <label className="finder-checkbox"><input type="checkbox" checked={finderBlockAllDay} onChange={ev=>setFinderBlockAllDay(ev.target.checked)}/> Treat all-day entries as unavailable</label>
         <h3>Available start times <small>({freeSlots.length} shown)</small></h3>
@@ -627,7 +656,7 @@ export default function App(){
           <span className="finder-plan">Plan event <ChevronRight size={14}/></span>
         </button>)}
         {!freeSlots.length&&<p className="empty-note">No available slots in this window. Try a shorter duration, evening hours or more days.</p>}</div>
-        <p className="fine-print">Suggestions are calculated locally, can become outdated and are rechecked against saved calendar changes when you save. This is not a multi-user booking system.</p>
+        <p className="fine-print">Suggestions inspect every saved personal and read-only imported event regardless of visible source filters. Spacing is reserved both before and after timed commitments. Ambiguous/nonexistent local times are excluded rather than guessed. A selection is checked again against the latest local storage before the editor opens and still requires a guarded save. No provider or participant is booked.</p>
       </section></div>}
     {allDayAdjustment&&<AllDayDialog key={allDayAdjustment.item.key+allDayAdjustment.from+allDayAdjustment.through}
       item={allDayAdjustment.item} initial={{from:allDayAdjustment.from,through:allDayAdjustment.through}}
