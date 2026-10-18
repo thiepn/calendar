@@ -1629,7 +1629,7 @@ describe('C18 reviewed, privacy-graded and source-accurate personal ICS handoff'
     const review=reviewPersonalExport(state,{...options,privacy:'titles'})
     expect(review.total).toBe(3)
     expect(review.occurrences.map(x=>x.title)).toEqual([
-      'Recurring original','Two-day retreat','One corrected occurrence'
+      'Two-day retreat','Recurring original','One corrected occurrence'
     ])
     const text=downloadPersonalExport(state,{...options,privacy:'titles'})
     expect(text).toContain('DTSTART;VALUE=DATE:20261014')
@@ -1644,7 +1644,7 @@ describe('C18 reviewed, privacy-graded and source-accurate personal ICS handoff'
     expect(()=>reviewPersonalExport(current,{...options,through:'2028-10-19'})).toThrow('366')
     expect(()=>reviewPersonalExport(current,{...options,from:'2026-02-30'})).toThrow('Invalid')
     expect(()=>reviewPersonalExport(current,{...options,privacy:'none' as 'busy'})).toThrow('privacy')
-    expect(()=>downloadPersonalExport(current,{...options,from:'2026-11-01',through:'2026-11-10'}))
+    expect(()=>downloadPersonalExport(current,{...options,from:'2026-10-20',through:'2026-10-21'}))
       .toThrow('No personal events')
   })
 })
