@@ -2582,7 +2582,7 @@ async function exerciseC26MobileContextualSingleDayFinderOriginalSources(){
   assert.equal(await strip.getByRole('button',{name:'Open daily plan 2026-11-27'}).isVisible(),true)
   await page.getByRole('button',{name:'Open navigation'}).click()
   await page.getByRole('button',{name:'Toggle imported calendar C26 Hidden Busy'}).click()
-  await page.getByRole('button',{name:'Close navigation'}).click()
+  await page.getByRole('button',{name:'Close navigation'}).click({position:{x:350,y:340}})
   const baseline=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
   assert.deepEqual(baseline,fixture)
   await trigger.click()
