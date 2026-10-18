@@ -82,23 +82,56 @@ function ensureTimedOriginalClock(master:Property,part:Property,value:string,lab
 }
 export function previewIcs(text:string):IcsPreview {
   if(text.length>2_000_000)throw new Error('ICS file is too large (2 MB maximum)')
-  const lines=unfolded(text)
-  if(!lines.some(x=>x.toUpperCase()==='BEGIN:VCALENDAR'))throw new Error('This is not an iCalendar file')
+  // An incomplete or calendar-message envelope must never become an apparently
+  // complete replacement snapshot. Nested VTIMEZONE/VALARM are allowed; their
+  // properties must not leak into VCALENDAR metadata or VEVENT fields.
+  const lines=unfolded(text.replace(/^\uFEFF/,''))
   const records:CalendarRecord[]=[]
   const warnings:string[]=[]
   let skippedEvents=0
   let name='Imported calendar'
   let event:Property[]|null=null
   const items:Property[][]=[]
+  const stack:string[]=[]
+  let calendarClosed=false
   for(const line of lines){
     const upper=line.trim().toUpperCase()
-    if(upper==='BEGIN:VEVENT'){event=[];continue}
-    if(upper==='END:VEVENT'){if(event)items.push(event);event=null;continue}
+    if(!upper)continue
+    if(/^BEGIN:[A-Z0-9-]+$/.test(upper)){
+      const kind=upper.slice(6)
+      if(calendarClosed||!stack.length&&kind!=='VCALENDAR')
+        throw new Error('ICS must contain one complete VCALENDAR envelope')
+      if(kind==='VCALENDAR'&&stack.length)
+        throw new Error('Nested VCALENDAR is unsupported')
+      if(kind==='VEVENT'&&(stack.length!==1||stack[0]!=='VCALENDAR'))
+        throw new Error('VEVENT must be a direct child of VCALENDAR')
+      if(kind==='VEVENT')event=[]
+      stack.push(kind)
+      continue
+    }
+    if(/^END:[A-Z0-9-]+$/.test(upper)){
+      const kind=upper.slice(4)
+      if(stack.pop()!==kind)throw new Error('Unbalanced ICS component: '+kind)
+      if(kind==='VEVENT'){
+        if(!event)throw new Error('Unbalanced VEVENT')
+        items.push(event);event=null
+      }
+      if(kind==='VCALENDAR')calendarClosed=true
+      continue
+    }
+    if(!stack.length)throw new Error('Unexpected content outside VCALENDAR envelope')
     const p=property(line)
     if(!p)continue
-    if(event)event.push(p)
-    else if(p.name==='X-WR-CALNAME')name=unescapeText(p.value).slice(0,100)||name
+    if(stack.length===2&&stack[1]==='VEVENT'&&event)event.push(p)
+    else if(stack.length===1){
+      if(p.name==='X-WR-CALNAME')name=unescapeText(p.value).slice(0,100)||name
+      if(p.name==='METHOD'&&p.value.trim().toUpperCase()!=='PUBLISH')
+        throw new Error('ICS METHOD messages are not full calendar snapshots (only PUBLISH is supported)')
+    }
   }
+  if(stack.length||!calendarClosed)
+    throw new Error('Incomplete ICS file: missing END:VEVENT or END:VCALENDAR')
+  if(!items.length)throw new Error('ICS snapshot contains no VEVENT entries; empty deletion-only snapshots are not supported')
   // Resolve all-day recurrence overrides regardless of their position in the ICS file.
   const replacements=new Map<string,Property[]>()
   const duplicateAllDayOverrides=new Set<string>()
