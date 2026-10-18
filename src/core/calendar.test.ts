@@ -20,6 +20,7 @@ import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {parseIcsDuration} from './ics-duration'
 import {sevenDayWorkload} from './planning'
 import {focusDaySummary,focusScrollMinute} from './mobile-focus'
+import {dayJumpPage} from './day-navigator'
 import {searchOccurrencePage} from './search-pages'
 import {detailNeighbors} from './detail-navigation'
 import {mobileTimedChange,mobileAllDayShift} from './mobile-editor'
@@ -2390,5 +2391,99 @@ describe('C28 source-filtered skip-empty Agenda windows',()=>{
     expect(()=>adjacentAgendaRange([],'2026-10-19',14,0 as 1)).toThrow('direction')
     expect(()=>adjacentAgendaRange([],'2026-10-19',14,1,366)).toThrow('limit')
     expect(()=>adjacentAgendaRange([],'2026-10-19',14,1,0)).toThrow('limit')
+  })
+})
+
+describe('C29 exact original-event Day timeline navigation',()=>{
+  it('paginates dense days without losing original IDs, keys, source data or writes',()=>{
+    const records=Array.from({length:19},(_,i)=>record({id:'day-record-'+String(i).padStart(2,'0'),
+      title:'Appointment '+i,start:fromLocalDateTime('2026-11-26T09:00'),
+      end:fromLocalDateTime('2026-11-26T09:30')}))
+    const initial=JSON.stringify(records)
+    const a=dayJumpPage(records,'2026-11-26',0),b=dayJumpPage(records,'2026-11-26',1),
+      c=dayJumpPage(records,'2026-11-26',2)
+    expect(a).toMatchObject({total:19,pages:3,page:0,fromIndex:1,throughIndex:8,
+      timedCount:19,allDayCount:0,hasNext:true,hasPrevious:false})
+    expect(b).toMatchObject({page:1,fromIndex:9,throughIndex:16})
+    expect(c).toMatchObject({page:2,fromIndex:17,throughIndex:19,hasNext:false})
+    const all=[...a.items,...b.items,...c.items]
+    expect(all.map(x=>x.occurrence.recordId)).toEqual(records.map(x=>x.id))
+    expect(new Set(all.map(x=>x.occurrence.key)).size).toBe(19)
+    expect(JSON.stringify(records)).toBe(initial)
+  })
+  it('preserves original all-day continuation without fake time slots',()=>{
+    const all=record({id:'three-day',source:'ics',sourceCalendar:'C29 campus',
+      sourceKey:'original-three-day',allDay:true,startDate:'2026-11-25',
+      endDateExclusive:'2026-11-28',start:fromLocalDateTime('2026-11-25T00:00'),
+      end:fromLocalDateTime('2026-11-28T00:00')})
+    const page=dayJumpPage([all],'2026-11-26',0)
+    expect(page).toMatchObject({total:1,timedCount:0,allDayCount:1})
+    expect(page.items[0]).toMatchObject({minute:null,scrollMinute:null,timeLabel:'All day',
+      occurrence:{recordId:'three-day',key:'three-day@2026-11-25',
+        startDate:'2026-11-25',endDateExclusive:'2026-11-28'}})
+    expect(all.sourceKey).toBe('original-three-day')
+  })
+  it('positions an event continuing from yesterday at elapsed midnight, not original start',()=>{
+    const overnight=record({id:'overnight-origin',start:fromLocalDateTime('2026-11-25T23:45'),
+      end:fromLocalDateTime('2026-11-26T01:15')})
+    const item=dayJumpPage([overnight],'2026-11-26',0).items[0]
+    expect(item).toMatchObject({minute:0,scrollMinute:0,occurrence:{
+      recordId:'overnight-origin',startDate:'2026-11-25'}})
+  })
+  it('distinguishes real elapsed positions of both autumn DST repeated 02:00 instances',()=>{
+    const earlier=record({id:'autumn-first',start:'2026-10-25T00:00:00.000Z',
+      end:'2026-10-25T00:30:00.000Z'})
+    const later=record({id:'autumn-second',start:'2026-10-25T01:00:00.000Z',
+      end:'2026-10-25T01:30:00.000Z'})
+    const items=dayJumpPage([later,earlier],'2026-10-25',0).items
+    expect(items.map(x=>x.occurrence.recordId)).toEqual(['autumn-first','autumn-second'])
+    expect(items.map(x=>x.minute)).toEqual([120,180])
+    expect(items.map(x=>x.scrollMinute)).toEqual([75,135])
+    expect(items[0].timeLabel).toContain('UTC+02:00')
+    expect(items[1].timeLabel).toContain('UTC+01:00')
+  })
+  it('uses the real 23-hour spring day rather than 03:15 wall-minute arithmetic',()=>{
+    const spring=record({id:'spring-after-gap',
+      start:'2026-03-29T01:15:00.000Z',end:'2026-03-29T02:15:00.000Z'})
+    expect(dayAxis('2026-03-29').minutes).toBe(1380)
+    expect(dayJumpPage([spring],'2026-03-29',0).items[0]).toMatchObject({
+      minute:135,scrollMinute:90,occurrence:{recordId:'spring-after-gap'}})
+  })
+  it('respects detached recurrence and exact original source visibility without affecting busy conflicts',()=>{
+    const parent=record({id:'c29-series',start:fromLocalDateTime('2026-11-19T10:00'),
+      end:fromLocalDateTime('2026-11-19T11:00'),
+      repeat:{frequency:'weekly',interval:1},excludedDates:['2026-11-26']})
+    const child=record({id:'c29-detached',recurrenceParentId:'c29-series',recurrenceDate:'2026-11-26',
+      start:fromLocalDateTime('2026-11-26T13:00'),
+      end:fromLocalDateTime('2026-11-26T14:00')})
+    const free=record({id:'c29-free',source:'ics',sourceCalendar:'Shown campus',
+      sourceKey:'c29-source-free',transparent:true,
+      start:fromLocalDateTime('2026-11-26T12:00'),
+      end:fromLocalDateTime('2026-11-26T12:30')})
+    const hidden=record({id:'c29-busy',source:'ics',sourceCalendar:'Hidden lab',
+      sourceKey:'c29-source-busy',
+      start:fromLocalDateTime('2026-11-26T15:00'),
+      end:fromLocalDateTime('2026-11-26T16:00')})
+    const visible=visibleCalendarRecords([parent,child,free,hidden],'all',new Set(['Hidden lab']))
+    const nav=dayJumpPage(visible,'2026-11-26',0)
+    expect(nav.items.map(x=>x.occurrence.recordId)).toEqual(['c29-free','c29-detached'])
+    expect(nav.items[0].occurrence.transparent).toBe(true)
+    expect(nav.items[1].occurrence.key).toBe('c29-detached@2026-11-26')
+    expect(reviewDraft([parent,child,free,hidden],
+      record({id:'candidate',start:hidden.start,end:hidden.end})).collisionCount).toBeGreaterThan(0)
+    expect(child.recurrenceParentId).toBe('c29-series')
+    expect(parent.excludedDates).toEqual(['2026-11-26'])
+  })
+  it('clamps a stale page, keeps empty days truthful and refuses bad page inputs',()=>{
+    const one=record({id:'one-appointment',start:fromLocalDateTime('2026-11-26T10:00'),
+      end:fromLocalDateTime('2026-11-26T11:00')})
+    expect(dayJumpPage([one],'2026-11-26',99)).toMatchObject({page:0,pages:1,
+      total:1,fromIndex:1,throughIndex:1})
+    expect(dayJumpPage([one],'2026-11-27',0)).toMatchObject({items:[],page:0,pages:1,
+      total:0,fromIndex:0,throughIndex:0})
+    expect(()=>dayJumpPage([one],'2026-11-26',-1)).toThrow('page')
+    expect(()=>dayJumpPage([one],'2026-11-26',1.2)).toThrow('page')
+    expect(()=>dayJumpPage([one],'2026-11-26',0,13)).toThrow('page')
+    expect(()=>dayJumpPage([one],'2026-02-30',0)).toThrow()
   })
 })
