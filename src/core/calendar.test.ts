@@ -12,6 +12,7 @@ import {validateState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCa
 import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent,splitSeriesAt,endSeriesAt} from './series'
 import {layoutTimedDay,slotRange,dayAxis,slotAt} from './timeline'
 import {findFreeSlots} from './availability'
+import {finderDayWindow,advanceFinderDay} from './finder-day'
 import {DEFAULT_REMINDER_SETTINGS,validateReminderSettings,inQuietHours,foregroundNotificationText} from './reminder-settings'
 import {validateViewPreferences,loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY} from './view-preferences'
 import {reminderItems,reminderKey,actionForReminder,deliverableReminders,proposedSnooze,proposedSnoozeUntil,dismissReminderBatch} from './reminders'
@@ -2186,5 +2187,71 @@ describe('C25 source-owned nearby event details navigation',()=>{
     const current=occurrencesBetween([a],'2026-10-19','2026-10-19')[0]
     expect(detailNeighbors([b,a],current)).toMatchObject({position:1,
       next:{recordId:'b'}})
+  })
+})
+
+describe('C26 contextual single-day finder original availability window',()=>{
+  it('validates a single selected day and extends explicit 7 or 14-day windows',()=>{
+    const one=finderDayWindow('2026-11-26',1,'2026-10-19')
+    expect(one).toEqual({from:'2026-11-26',through:'2026-11-26',days:1})
+    expect(finderDayWindow('2026-11-26',7,'2026-10-19').through).toBe('2026-12-02')
+    expect(finderDayWindow('2026-11-26',14,'2026-10-19').through).toBe('2026-12-09')
+    expect(finderDayWindow('2026-10-19',1,'2026-10-19').from).toBe('2026-10-19')
+  })
+  it('moves by local date safely across autumn clock transitions',()=>{
+    expect(advanceFinderDay('2026-10-24',1,'2026-10-24')).toBe('2026-10-25')
+    expect(advanceFinderDay('2026-10-25',1,'2026-10-24')).toBe('2026-10-26')
+    expect(advanceFinderDay('2026-10-26',-1,'2026-10-24')).toBe('2026-10-25')
+  })
+  it('never silently advances a past-day request into another date',()=>{
+    expect(()=>finderDayWindow('2026-10-18',1,'2026-10-19')).toThrow('past')
+    expect(()=>advanceFinderDay('2026-10-19',-1,'2026-10-19')).toThrow('past')
+    expect(()=>finderDayWindow('2026-11-26',2 as 1,'2026-10-19')).toThrow('range')
+    expect(()=>finderDayWindow('2026-02-30',1,'2026-10-19')).toThrow()
+    expect(()=>finderDayWindow('2026-11-26',1,'2026-02-30')).toThrow()
+  })
+  it('uses every original busy import even when the display hides it, and no future-day substitutes',()=>{
+    const imported=record({id:'busy-import',source:'ics',sourceCalendar:'Hidden course',
+      sourceKey:'original-source-id',transparent:false,
+      start:fromLocalDateTime('2026-11-26T08:00'),end:fromLocalDateTime('2026-11-26T19:00')})
+    const transparent=record({id:'free-import',source:'ics',sourceCalendar:'Visible course',
+      sourceKey:'transparent-source-id',transparent:true,
+      start:fromLocalDateTime('2026-11-27T08:00'),end:fromLocalDateTime('2026-11-27T09:00')})
+    const snapshot=JSON.stringify([imported,transparent])
+    const options={from:'2026-11-26',days:1,durationMinutes:60,startHour:8,endHour:19,
+      blockAllDay:true,now:new Date('2026-10-19T00:00:00.000Z'),maxResults:18}
+    expect(findFreeSlots([imported,transparent],options)).toEqual([])
+    const nextDay=findFreeSlots([imported,transparent],{...options,from:'2026-11-27'})
+    expect(nextDay[0].date).toBe('2026-11-27')
+    expect(nextDay[0].start).toBe(fromLocalDateTime('2026-11-27T08:00'))
+    expect(JSON.stringify([imported,transparent])).toBe(snapshot)
+    expect(imported.sourceKey).toBe('original-source-id')
+  })
+  it('keeps selected one-day dates precise when another busy day would consume multi-day result caps',()=>{
+    const busy=record({id:'first-day',start:fromLocalDateTime('2026-11-26T08:00'),
+      end:fromLocalDateTime('2026-11-26T09:00')})
+    const base={durationMinutes:60,startHour:8,endHour:19,blockAllDay:true,
+      now:new Date('2026-10-19T00:00:00.000Z'),maxResults:18}
+    const week=findFreeSlots([busy],{...base,from:'2026-11-26',days:7})
+    expect(week).toHaveLength(18)
+    expect(week[0].date).toBe('2026-11-26')
+    expect(week[week.length-1].date).toBe('2026-11-27')
+    const scoped=findFreeSlots([busy],{...base,...finderDayWindow('2026-11-28',1,'2026-10-19')})
+    expect(scoped.length).toBeGreaterThan(0)
+    expect(scoped.every(x=>x.date==='2026-11-28')).toBe(true)
+  })
+  it('preserves original reviewed saving authority after inspecting an exact day slot',()=>{
+    const hidden=record({id:'c26-school',source:'ics',sourceCalendar:'School',
+      sourceKey:'source-uid',start:fromLocalDateTime('2026-11-26T09:00'),
+      end:fromLocalDateTime('2026-11-26T10:00')})
+    const future={from:'2026-11-26',days:1,durationMinutes:60,startHour:8,endHour:19,
+      blockAllDay:true,now:new Date('2026-10-19T00:00:00.000Z'),maxResults:18}
+    const slots=findFreeSlots([hidden],future)
+    expect(slots.some(x=>x.start===hidden.start)).toBe(false)
+    const candidate=record({id:'same-original-draft',start:slots[0].start,end:slots[0].end})
+    expect(reviewDraft([hidden],candidate).collisionCount).toBe(0)
+    const changed=record({id:'another-tab',start:slots[0].start,end:slots[0].end})
+    expect(reviewDraft([hidden,changed],candidate).collisionCount).toBeGreaterThan(0)
+    expect(hidden.source).toBe('ics')
   })
 })
