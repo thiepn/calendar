@@ -1906,6 +1906,125 @@ async function exerciseC19MobileCustomSnoozeStaleSourceGuard(){
   await context.close()
 }
 
+
+async function exerciseC20DesktopSafeAlternativesAndActualSave(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const original={schemaVersion:1,records:[
+    {id:'c20-moving-original',title:'C20 personal appointment',
+      source:'personal',description:'Keep personal notes',location:'Personal room',
+      allDay:false,start:'2026-11-04T08:00:00.000Z',end:'2026-11-04T09:00:00.000Z',
+      updatedAt:'2026-10-18T00:00:00.000Z'},
+    {id:'c20-hidden-provider',title:'C20 hidden provider collision',
+      source:'ics',sourceCalendar:'Hidden University',
+      sourceKey:'Hidden University|c20',description:'Provider-owned notes',location:'Lecture room',
+      allDay:false,start:'2026-11-04T10:00:00.000Z',end:'2026-11-04T11:00:00.000Z',
+      updatedAt:'2026-10-18T00:00:00.000Z'},
+    {id:'c20-other-personal',title:'C20 other personal commitment',
+      source:'personal',description:'Keep separate',location:'Different address',
+      allDay:false,start:'2026-11-04T12:00:00.000Z',end:'2026-11-04T13:00:00.000Z',
+      updatedAt:'2026-10-18T00:00:00.000Z'}
+  ]}
+  await page.evaluate(state=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state)),original)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:'Toggle imported calendar Hidden University'}).click()
+  assert.equal(await page.getByRole('button',{name:'Toggle imported calendar Hidden University'}).getAttribute('aria-pressed'),'false')
+  await page.getByLabel('Jump to date').fill('2026-11-04')
+  await page.locator('.timeline-block').filter({hasText:'C20 personal appointment'}).first().click()
+  await page.getByRole('button',{name:'Adjust time & duration'}).click()
+  const dlg=page.getByRole('dialog',{name:'Confirm time adjustment'})
+  await dlg.locator('input[type="datetime-local"]').fill('2026-11-04T11:00')
+  await dlg.getByText('C20 hidden provider collision').waitFor()
+  assert.equal(await dlg.getByRole('button',{name:'Confirm change'}).isDisabled(),true)
+  assert.equal(await dlg.getByRole('button',{name:'Find conflict-free alternatives'}).count(),1)
+  await dlg.getByRole('button',{name:'Find conflict-free alternatives'}).click()
+  await dlg.getByLabel('Alternative search days').selectOption('1')
+  await dlg.getByLabel('Alternative spacing').selectOption('15')
+  const slots=dlg.locator('.adjust-alternative-list button')
+  assert.ok(await slots.count()>0,'Need real alternatives after hidden source blocks proposed move')
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.deepEqual(before,original,'Simply opening suggestions must not mutate original calendar')
+  const chosen=await slots.first().getAttribute('aria-label')
+  assert.match(chosen,/Use alternative 2026-11-04/)
+  await slots.first().click()
+  assert.equal(await dlg.getByRole('button',{name:'Confirm change'}).isDisabled(),false)
+  assert.equal(await dlg.locator('.adjust-conflicts').count(),0)
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records[0].start),
+    original.records[0].start,'Selecting an alternative must not save event prematurely')
+  await dlg.getByRole('button',{name:'Confirm change'}).click()
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(saved.records.length,3)
+  assert.equal(saved.records[0].id,original.records[0].id)
+  assert.notEqual(saved.records[0].start,original.records[0].start)
+  assert.notEqual(saved.records[0].start,original.records[1].start)
+  assert.deepEqual(saved.records.slice(1),original.records.slice(1),
+    'Hidden provider snapshot and other personal appointments remain byte-equivalent')
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C20_DESKTOP_HIDDEN_SOURCE_SAFE_ALTERNATIVE_SELECTED_AND_CONFIRMED_PASS')
+  await context.close()
+}
+async function exerciseC20MobileRecurringAlternativesAndStaleSourceGuard(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const original={schemaVersion:1,records:[
+    {id:'c20-recurring',title:'C20 recurring personal session',
+      source:'personal',description:'One original weekly series',location:'Private workroom',
+      allDay:false,start:'2026-11-06T09:00:00.000Z',end:'2026-11-06T10:00:00.000Z',
+      repeat:{frequency:'weekly',interval:1,weekdays:[5]},updatedAt:'2026-10-18T00:00:00.000Z'},
+    {id:'c20-hidden',title:'C20 imported busy interval',
+      source:'ics',sourceCalendar:'Imported Mobile',sourceKey:'Imported Mobile|event',
+      description:'Read-only external',location:'External hall',
+      allDay:false,start:'2026-11-13T10:00:00.000Z',end:'2026-11-13T11:00:00.000Z',
+      updatedAt:'2026-10-18T00:00:00.000Z'}
+  ]}
+  await page.evaluate(state=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state)),original)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-06')
+  await page.locator('.timeline-block').filter({hasText:'C20 recurring personal session'}).first().click()
+  await page.getByRole('button',{name:'Adjust time & duration'}).click()
+  const dlg=page.getByRole('dialog',{name:'Confirm time adjustment'})
+  await dlg.locator('input[type="datetime-local"]').fill('2026-11-13T11:00')
+  await dlg.getByText('C20 imported busy interval').waitFor()
+  await dlg.getByRole('button',{name:'Find conflict-free alternatives'}).click()
+  await dlg.getByLabel('Alternative search days').selectOption('1')
+  assert.ok(await dlg.locator('.adjust-alternative-list button').count()>0)
+  assert.equal(await dlg.getByRole('button',{name:/Use alternative 2026-11-13 10:00/}).count(),0,
+    'Other original recurring instance at 10:00 must remain busy')
+  assert.equal(await dlg.getByRole('button',{name:/Use alternative 2026-11-13 11:00/}).count(),0,
+    'Read-only imported snapshot at 11:00 must remain busy')
+  const geo=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(geo.scroll<=geo.width+2,'C20 mobile alternatives overflow '+JSON.stringify(geo))
+  const first=dlg.locator('.adjust-alternative-list button').first()
+  const old=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.deepEqual(old,original,'Finding alternatives must not alter series')
+  // Simulate an independently modified source tab without a storage event, so
+  // the visible alternative becomes stale but no calendar data may be saved.
+  await page.evaluate(()=>{
+    const state=JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))
+    state.records[1].title='Imported Mobile was independently refreshed'
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state))
+  })
+  await first.click()
+  assert.match(await page.locator('.notice').last().innerText(),/Alternative time not selected/)
+  assert.equal(await dlg.count(),1,'Stale preview stays open for deliberate review')
+  const after=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(after.records.length,2)
+  assert.deepEqual(after.records[0],original.records[0])
+  assert.equal(after.records[1].title,'Imported Mobile was independently refreshed')
+  await dlg.getByRole('button',{name:'Cancel adjustment'}).click().catch(async()=>{
+    await dlg.getByRole('button',{name:'Cancel',exact:true}).click()
+  })
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C20_MOBILE_RECURRING_INSTANCE_HIDDEN_SOURCE_AND_STALE_TAB_GUARD_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -1948,6 +2067,8 @@ try{
   await exerciseC18MobileFullExportAndStaleGuard()
   await exerciseC19ExactSnoozeDesktopAndOldSource()
   await exerciseC19MobileCustomSnoozeStaleSourceGuard()
+  await exerciseC20DesktopSafeAlternativesAndActualSave()
+  await exerciseC20MobileRecurringAlternativesAndStaleSourceGuard()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
