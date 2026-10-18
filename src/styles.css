@@ -504,3 +504,29 @@
    padding:12px 0;box-shadow:none;border-top:1px solid #dfe7e0}
  .details .editor-actions button{flex:1 1 145px;min-height:44px;white-space:normal}
 }
+
+/* C26 contextual day-scope handoff; original Finder alone decides free slots. */
+.planning-day-entry{display:grid;grid-template-rows:minmax(0,1fr) auto;min-width:0}
+.planning-day-entry .planning-day{width:100%;min-height:92px}
+.planning-day-find{display:flex;align-items:center;justify-content:center;gap:5px;width:100%;
+  min-height:34px;background:#eaf3ea;border:1px solid #c8dcca;border-top:0;
+  font-size:11px;font-weight:600;color:#245942;cursor:pointer}
+.planning-day-find:hover,.planning-day-find:focus-visible{background:#dcecdf}
+.planning-day-find:disabled{opacity:.4;cursor:not-allowed}
+.finder-day-navigation{display:grid;grid-template-columns:minmax(160px,1.3fr) minmax(0,1fr) minmax(0,1fr);
+ gap:8px;align-items:end;margin:12px 0}
+.finder-day-navigation label{display:grid;gap:5px;font-size:12px;color:#55715e}
+.finder-day-navigation input{width:100%;min-width:0;min-height:40px;border:1px solid #d2dfd4;
+ background:#fff;color:#253e2f;padding:8px;font-size:14px}
+.finder-day-navigation button{min-height:40px;font-size:11px;white-space:normal;min-width:0}
+.finder-day-navigation button:disabled{opacity:.4;cursor:not-allowed}
+.finder-day-scope{font-size:11px;color:#345e43;background:#edf5ed;padding:8px 10px;margin:8px 0}
+@media(max-width:740px){
+ .planning-overview-days>.planning-day-entry{flex:0 0 155px;scroll-snap-align:start}
+ .planning-day-entry .planning-day{flex:none;min-height:110px}
+ .planning-day-find{min-height:44px;font-size:12px}
+ .finder-day-navigation{grid-template-columns:1fr 1fr}
+ .finder-day-navigation label{grid-column:1/-1}
+ .finder-day-navigation input{min-height:44px;font-size:16px}
+ .finder-day-navigation button{min-height:44px}
+}

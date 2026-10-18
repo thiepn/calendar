@@ -5,6 +5,7 @@ import {addDays,addMonths,dateLabel,dateSeries,friendlyRange,localDate,monday,mo
 import {dayOccurrences,excludeOccurrence,occurrencesBetween} from './core/occurrences'
 import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,splitSeriesAt,endSeriesAt} from './core/series'
 import {findFreeSlots,type FreeSlot} from './core/availability'
+import {finderDayWindow,advanceFinderDay,type FinderDaySpan} from './core/finder-day'
 import {adjacentBusyDay,exportAgendaCsv} from './core/agenda'
 import {searchOccurrencePage} from './core/search-pages'
 import {detailNeighbors} from './core/detail-navigation'
@@ -76,7 +77,8 @@ export default function App(){
   const [importMode,setImportMode]=useState<'update'|'replace'>('update')
   const [finderOpen,setFinderOpen]=useState(false)
   const [finderDuration,setFinderDuration]=useState(60)
-  const [finderDays,setFinderDays]=useState(7)
+  const [finderDays,setFinderDays]=useState<FinderDaySpan>(7)
+  const [finderFrom,setFinderFrom]=useState<LocalDate>(()=>localDate())
   const [finderWindow,setFinderWindow]=useState<'daytime'|'evening'>('daytime')
   const [finderBlockAllDay,setFinderBlockAllDay]=useState(true)
   const [finderDaySelection,setFinderDaySelection]=useState<'all'|'weekdays'|'weekends'>('all')
@@ -289,12 +291,34 @@ export default function App(){
     }),error:''}}
     catch(error){return {items:[] as AdjustmentAlternative[],error:error instanceof Error?error.message:String(error)}}
   },[calendar,adjustmentReview.proposal,adjustAlternativesOpen,adjustAlternativeDays,adjustAlternativeBuffer])
-  const freeSlots=useMemo(()=>finderOpen?findFreeSlots(calendar.records,{
-    from:selected<localDate()?localDate():selected,days:finderDays,durationMinutes:finderDuration,
+  const finderSelection=useMemo(()=>{
+    if(!finderOpen)return {window:null as ReturnType<typeof finderDayWindow>|null,error:''}
+    try{return {window:finderDayWindow(finderFrom,finderDays,localDate()),error:''}}
+    catch(error){return {window:null,error:error instanceof Error?error.message:String(error)}}
+  },[finderOpen,finderFrom,finderDays])
+  const freeSlots=useMemo(()=>finderOpen&&finderSelection.window?findFreeSlots(calendar.records,{
+    from:finderSelection.window.from,days:finderSelection.window.days,durationMinutes:finderDuration,
     startHour:finderWindow==='daytime'?8:17,endHour:finderWindow==='daytime'?19:23,
     blockAllDay:finderBlockAllDay,daySelection:finderDaySelection,
     bufferMinutes:finderBufferMinutes,maxResults:18
-  }):[],[finderOpen,calendar,selected,finderDays,finderDuration,finderWindow,finderBlockAllDay,finderDaySelection,finderBufferMinutes])
+  }):[],[finderOpen,calendar,finderSelection.window,finderDuration,finderWindow,finderBlockAllDay,finderDaySelection,finderBufferMinutes])
+  function showFindTime(date?:LocalDate){
+    const target=date??(selected<localDate()?localDate():selected)
+    try{
+      finderDayWindow(target,date?1:7,localDate())
+      setFinderFrom(target)
+      setFinderDays(date?1:7)
+      setFinderOpen(true)
+    }catch(error){setNotice('Time finder not opened: '+String(error))}
+  }
+  function updateFinderDay(date:LocalDate){
+    try{finderDayWindow(date,finderDays,localDate());setFinderFrom(date)}
+    catch(error){setNotice('Finder date unchanged: '+String(error))}
+  }
+  function stepFinderDay(direction:-1|1){
+    try{updateFinderDay(advanceFinderDay(finderFrom,direction,localDate()))}
+    catch(error){setNotice('Finder date unchanged: '+String(error))}
+  }
 
   function create(date:LocalDate){setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setEditorDate(date)}
   function startFinderSlot(slot:FreeSlot){
@@ -308,8 +332,9 @@ export default function App(){
         setCalendar(latest.state)
         throw new Error('Calendar changed in another tab. Review refreshed suggestions before scheduling.')
       }
+      const validated=finderDayWindow(finderFrom,finderDays,localDate())
       const eligible=findFreeSlots(latest.state.records,{
-        from:selected<localDate()?localDate():selected,days:finderDays,durationMinutes:finderDuration,
+        from:validated.from,days:validated.days,durationMinutes:finderDuration,
         startHour:finderWindow==='daytime'?8:17,endHour:finderWindow==='daytime'?19:23,
         blockAllDay:finderBlockAllDay,daySelection:finderDaySelection,
         bufferMinutes:finderBufferMinutes,maxResults:18,now:new Date()
@@ -629,7 +654,7 @@ export default function App(){
              {query&&<button aria-label="Clear search" onClick={()=>setQuery('')}><X size={14}/></button>}</div>
           <button className="secondary compact reminder-launch" aria-label={'Local reminders'+(dueReminderCount?' ('+dueReminderCount+' due)':'')} onClick={()=>setRemindersOpen(true)}>
             <Bell size={15}/><span className="desktop-text">Reminders</span>{dueReminderCount>0&&<span className="reminder-count">{dueReminderCount}</span>}</button>
-          <button className="secondary compact" aria-label="Find time" onClick={()=>setFinderOpen(true)}><Clock3 size={15}/><span className="desktop-text">Find time</span></button>
+          <button className="secondary compact" aria-label="Find time" onClick={()=>showFindTime()}><Clock3 size={15}/><span className="desktop-text">Find time</span></button>
           <button className="secondary compact" onClick={()=>importInput.current?.click()}><Upload size={15}/><span className="desktop-text">Import ICS</span></button>
           <button className="icon-button" title="Review a privacy-first personal ICS snapshot" aria-label="Export personal events"
             onClick={()=>setPersonalExportOpen(true)}><Download size={17}/></button>
@@ -681,13 +706,18 @@ export default function App(){
             <small>Visible commitments · {filter==='all'?'shown sources':filter==='personal'?'personal only':'shown imports only'}{query.trim()?' · search filtered':''}</small>
           </div>
           <div className="planning-overview-days">
-            {planningDays.map(item=><button key={item.date} type="button" aria-label={'Open daily plan '+item.date}
-              onClick={()=>{setSelected(item.date);setMode('day')}} className={'planning-day '+(item.date===selected?'is-selected':'')}>
-              <time dateTime={item.date}>{dateLabel(item.date,{weekday:'short',month:'short',day:'numeric'})}</time>
-              <strong>{item.timedCount+item.allDayCount} event{item.timedCount+item.allDayCount===1?'':'s'}</strong>
-              <small>{item.busyMinutes?Math.floor(item.busyMinutes/60)+'h '+item.busyMinutes%60+'m timed':'No timed blocks'}{item.allDayCount?' · '+item.allDayCount+' all-day':''}</small>
-              {item.overlaps&&<span className="planning-overlap">Overlapping times</span>}
-            </button>)}
+            {planningDays.map(item=><div className="planning-day-entry" key={item.date}>
+              <button type="button" aria-label={'Open daily plan '+item.date}
+                onClick={()=>{setSelected(item.date);setMode('day')}} className={'planning-day '+(item.date===selected?'is-selected':'')}>
+                <time dateTime={item.date}>{dateLabel(item.date,{weekday:'short',month:'short',day:'numeric'})}</time>
+                <strong>{item.timedCount+item.allDayCount} event{item.timedCount+item.allDayCount===1?'':'s'}</strong>
+                <small>{item.busyMinutes?Math.floor(item.busyMinutes/60)+'h '+item.busyMinutes%60+'m timed':'No timed blocks'}{item.allDayCount?' · '+item.allDayCount+' all-day':''}</small>
+                {item.overlaps&&<span className="planning-overlap">Overlapping times</span>}
+              </button>
+              <button className="planning-day-find" type="button" aria-label={'Find free time on '+item.date}
+                disabled={item.date<localDate()} title={item.date<localDate()?'Past dates cannot be scheduled':'Find slots using all saved calendars'}
+                onClick={()=>showFindTime(item.date)}><Clock3 size={12}/> Find time</button>
+            </div>)}
           </div>
           <p className="fine-print">Busy timed minutes exclude imported free (TRANSP:TRANSPARENT) entries and never double-count overlaps across midnight or DST. All-day entries are listed separately; this is not a free-time guarantee. Open a day to plan a personal event.</p>
         </section>}
@@ -735,10 +765,20 @@ export default function App(){
     {finderOpen&&<div className="modal-backdrop" onMouseDown={ev=>{if(ev.target===ev.currentTarget)setFinderOpen(false)}}>
       <section className="finder-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Find an available time">
         <header className="editor-head"><div className="heading-inline"><Clock3 size={20}/><h2>Find time</h2></div><button className="icon-button" aria-label="Close time finder" onClick={()=>setFinderOpen(false)}><X size={19}/></button></header>
-        <p className="fine-print">Find a free time from {dateLabel(selected<localDate()?localDate():selected)} onward. All saved calendars are checked, including hidden imported events. A slot is only booked after you save a new personal event.</p>
+        <p className="fine-print">Find a free time from {dateLabel(finderFrom)} onward. All saved calendars are checked, including hidden imported events. A slot is only booked after you save a new personal event.</p>
+        <div className="finder-day-navigation" aria-label="Choose availability date">
+          <label>Search starts <input aria-label="Finder start date" type="date" min={localDate()} value={finderFrom}
+            onChange={e=>{if(e.target.value)updateFinderDay(e.target.value)}}/></label>
+          <button type="button" className="secondary compact" aria-label="Previous finder day"
+            disabled={finderFrom<=localDate()} onClick={()=>stepFinderDay(-1)}><ChevronLeft size={16}/> Previous day</button>
+          <button type="button" className="secondary compact" aria-label="Next finder day"
+            onClick={()=>stepFinderDay(1)}>Next day <ChevronRight size={16}/></button>
+        </div>
+        {finderSelection.error&&<p className="error" role="alert">{finderSelection.error}</p>}
+        {finderDays===1&&<p className="finder-day-scope">Single-day search · exact date selected · all saved sources checked</p>}
         <div className="finder-options">
           <label>Duration<select value={finderDuration} onChange={ev=>setFinderDuration(Number(ev.target.value))}><option value={30}>30 minutes</option><option value={60}>60 minutes</option><option value={90}>90 minutes</option><option value={120}>120 minutes</option></select></label>
-          <label>Look ahead<select value={finderDays} onChange={ev=>setFinderDays(Number(ev.target.value))}><option value={7}>7 days</option><option value={14}>14 days</option></select></label>
+          <label>Look ahead<select value={finderDays} onChange={ev=>setFinderDays(Number(ev.target.value) as FinderDaySpan)}><option value={1}>This day only</option><option value={7}>7 days</option><option value={14}>14 days</option></select></label>
           <label>Hours<select value={finderWindow} onChange={ev=>setFinderWindow(ev.target.value as 'daytime'|'evening')}><option value="daytime">08:00–19:00</option><option value="evening">17:00–23:00</option></select></label>
           <label>Days<select aria-label="Preferred days" value={finderDaySelection} onChange={ev=>setFinderDaySelection(ev.target.value as 'all'|'weekdays'|'weekends')}>
             <option value="all">Every day</option><option value="weekdays">Weekdays only</option><option value="weekends">Weekends only</option>
@@ -753,7 +793,7 @@ export default function App(){
           <span><strong>{dateLabel(slot.date,{weekday:'short',month:'short',day:'numeric'})}</strong><small>{new Date(slot.start).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})} – {new Date(slot.end).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small></span>
           <span className="finder-plan">Plan event <ChevronRight size={14}/></span>
         </button>)}
-        {!freeSlots.length&&<p className="empty-note">No available slots in this window. Try a shorter duration, evening hours or more days.</p>}</div>
+        {!freeSlots.length&&<p className="empty-note">{finderSelection.error?'Choose a current or future date to search.':'No available slots in this window. Try the next day, a shorter duration, evening hours or more days.'}</p>}</div>
         <p className="fine-print">Suggestions inspect every saved personal and read-only imported event regardless of visible source filters. Spacing is reserved both before and after timed commitments. Ambiguous/nonexistent local times are excluded rather than guessed. A selection is checked again against the latest local storage before the editor opens and still requires a guarded save. No provider or participant is booked.</p>
       </section></div>}
     {allDayAdjustment&&<AllDayDialog key={allDayAdjustment.item.key+allDayAdjustment.from+allDayAdjustment.through}

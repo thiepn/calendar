@@ -317,3 +317,25 @@ not a shadow index/store or an alternative event writer. Read-only ICS
 visual browsing but still participate in independently source-complete
 availability/conflicts. Recurrence exclusions and detached original IDs are
 unchanged, as are guarded CAS, recovery/checkpoints, privacy and Folio.
+
+## C26 — contextual single-day availability handoff from seven-day workload
+
+The original week/list workload strip previously offered only "Open daily plan".
+The existing Find time modal always searched 7–14 days and capped proposals at
+18; early days could exhaust the proposals before a learner's chosen date.
+Each future day now has a distinct **Find time** action which opens the existing
+canonical finder in **This day only** scope, preserving the current view and
+unmodified calendar until a suggested original free slot is selected.
+The modal now exposes its exact **Search starts** date, previous/next day
+navigation, and an explicit **1 / 7 / 14 day** horizon, so users can inspect
+another date without closing the finder. Past day actions are disabled and
+a selected search date that becomes past is explicitly rejected, never silently
+shifted into a different day's booking. Mobile tap targets are at least 44 px.
+
+`src/core/finder-day.ts` only validates the local date/window. The original
+`findFreeSlots(calendar.records,...)` still computes against **all** source
+records including hidden busy imports and excluding ICS TRANSP:TRANSPARENT;
+slot selection re-reads local storage and revalidates original full-source
+availability before pre-filling the **existing** EventEditor, which conducts
+its conflict/acknowledgement checks and guarded CAS save. No new event
+writer, calendar/availability store, external provider action, or Folio sync.
