@@ -11,7 +11,12 @@ export function parseFiniteAllDayRule(value:string,start:LocalDate):FiniteAllDay
   if(Object.keys(map).some(x=>!['FREQ','INTERVAL','COUNT','UNTIL','BYDAY','BYMONTHDAY','BYMONTH'].includes(x)))throw new Error('Unsupported RRULE qualifier')
   if(!['DAILY','WEEKLY','MONTHLY','YEARLY'].includes(map.FREQ))throw new Error('Unsupported RRULE frequency')
   const freq=map.FREQ as FiniteAllDayRule['frequency']
-  if(map.BYDAY&&freq!=='WEEKLY'&&freq!=='MONTHLY')throw new Error('BYDAY requires weekly or monthly recurrence')
+  if(map.BYDAY&&freq!=='WEEKLY'&&freq!=='MONTHLY'&&freq!=='YEARLY')
+    throw new Error('BYDAY requires weekly, monthly or bounded yearly recurrence')
+  if(freq==='YEARLY'&&map.BYDAY&&!map.BYMONTH)
+    throw new Error('Yearly BYDAY requires explicit BYMONTH to avoid ambiguous year-wide ordinal positions')
+  if(freq==='YEARLY'&&map.BYDAY&&map.BYMONTHDAY)
+    throw new Error('Combined yearly BYDAY and BYMONTHDAY are not supported in a bounded snapshot')
   if(map.BYMONTH&&freq!=='MONTHLY'&&freq!=='YEARLY')
     throw new Error('BYMONTH supports monthly or yearly recurrence only')
   if(freq==='MONTHLY'&&map.BYDAY&&map.BYMONTHDAY)
@@ -46,7 +51,7 @@ export function parseFiniteAllDayRule(value:string,start:LocalDate):FiniteAllDay
         return {ordinal:match[1]?Number(match[1]):0,weekday:weekdays[match[2]]}
       })
       if(!monthlyWeekdays.some(selector=>matchesMonthlyWeekday(day(start),selector)))
-        throw new Error('DTSTART is not included in monthly BYDAY')
+        throw new Error('DTSTART is not included in '+(freq==='YEARLY'?'yearly':'monthly')+' BYDAY')
     }
   }
   let months:number[]|undefined
@@ -74,7 +79,10 @@ export function parseFiniteAllDayRule(value:string,start:LocalDate):FiniteAllDay
   }
   return {frequency:freq,interval,count,until,weekdays:selected,monthdays,months,monthlyWeekdays}
 }
-/** RFC 5545 monthly selector: a positive ordinal counts from month start,
+/** Bounded RFC5545 monthly selector (and YEARLY only when BYMONTH is explicit):
+ * positive and negative ordinals are relative to the matching source month.
+ * Never interpret yearly bare ordinal BYDAY without BYMONTH as month-relative.
+ * RFC 5545 monthly selector: a positive ordinal counts from month start,
  * a negative ordinal from month end. Zero means every named weekday. */
 function matchesMonthlyWeekday(date:Date,rule:{ordinal:number;weekday:number}):boolean {
   if(date.getDay()!==rule.weekday)return false
