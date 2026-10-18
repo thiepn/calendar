@@ -2902,6 +2902,130 @@ async function exerciseC28DesktopAgendaAllDayContinuationAndBoundedEmpty(){
   await context.close()
 }
 
+
+async function exerciseC29MobileDayOriginalAppointmentNavigatorAndDensePagination(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const timed=Array.from({length:18},(_,i)=>({
+    id:'c29-timed-'+i,title:'C29 personal appointment '+i,description:'Canonical original '+i,location:'',
+    source:'personal',allDay:false,
+    start:new Date(Date.UTC(2026,10,26,3+i,0)).toISOString(),
+    end:new Date(Date.UTC(2026,10,26,3+i,30)).toISOString(),
+    updatedAt:'2026-10-18T09:00:00.000Z'
+  }))
+  const fixture={schemaVersion:1,records:[
+    ...timed,
+    {id:'c29-imported-free',source:'ics',sourceCalendar:'C29 Campus',sourceKey:'C29 Campus|original-free',
+      transparent:true,title:'C29 transparent seminar',description:'Keep read only',location:'',
+      allDay:false,start:'2026-11-26T07:30:00.000Z',end:'2026-11-26T08:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c29-hidden-busy',source:'ics',sourceCalendar:'C29 Hidden Lab',sourceKey:'C29 Hidden Lab|busy',
+      title:'C29 hidden source',description:'',location:'',allDay:false,
+      start:'2026-11-26T08:00:00.000Z',end:'2026-11-26T09:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c29-all-day-original',source:'ics',sourceCalendar:'C29 Campus',sourceKey:'C29 Campus|all-day',
+      title:'C29 full-day campus notice',description:'Unmodified ICS',location:'',allDay:true,
+      startDate:'2026-11-26',endDateExclusive:'2026-11-27',
+      start:'2026-11-25T23:00:00.000Z',end:'2026-11-26T23:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(value)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  const hidden=page.getByRole('button',{name:'Toggle imported calendar C29 Hidden Lab'})
+  await hidden.click()
+  assert.equal(await hidden.getAttribute('aria-pressed'),'false')
+  await page.getByRole('button',{name:'Close navigation'}).click({position:{x:350,y:340}})
+  const nav=page.getByRole('navigation',{name:"Navigate today's visible events"})
+  await nav.waitFor()
+  assert.match(await nav.innerText(),/20 visible · 19 timed · 1 all-day/)
+  assert.equal(await nav.locator('.day-jump-entry').count(),8)
+  const allDay=nav.locator('.day-jump-entry').filter({hasText:'C29 full-day campus notice'})
+  assert.equal(await allDay.getByRole('button',{name:/Locate in timeline/}).count(),0)
+  await allDay.getByRole('button',{name:/Open original event/}).click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.innerText(),/C29 full-day campus notice/)
+  assert.equal(await details.getByRole('button',{name:'Edit event'}).count(),0)
+  await details.getByRole('button',{name:'Close event'}).click()
+  await nav.getByRole('button',{name:'Next events'}).click()
+  assert.match(await nav.getByLabel('Day navigation pages').innerText(),/Page 2 of 3/)
+  assert.equal(await nav.locator('.day-jump-entry').count(),8)
+  await nav.getByRole('button',{name:'Next events'}).click()
+  assert.match(await nav.getByLabel('Day navigation pages').innerText(),/Events 17–20 of 20/)
+  assert.equal(await nav.locator('.day-jump-entry').count(),4)
+  const target=nav.getByRole('button',{name:'Locate in timeline c29-timed-17@2026-11-26'})
+  await target.click()
+  assert.match(await nav.getByRole('status').innerText(),/C29 personal appointment 17 located/)
+  const scroller=page.locator('.timeline-scroll')
+  assert.ok(await scroller.evaluate(node=>node.scrollTop)>300,'Late event should move the original Day timeline')
+  const focus=await page.evaluate(()=>document.activeElement?.getAttribute('data-occurrence-key'))
+  assert.equal(focus,'c29-timed-17@2026-11-26')
+  await nav.getByRole('button',{name:'Open original event c29-timed-17@2026-11-26'}).click()
+  await details.waitFor()
+  assert.match(await details.innerText(),/C29 personal appointment 17/)
+  await details.getByRole('button',{name:'Close event'}).click()
+  await page.getByLabel('Jump to date').fill('2026-11-27')
+  assert.match(await nav.innerText(),/0 visible/)
+  assert.equal(await nav.locator('.day-jump-entry').count(),0)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture,
+    'C29 jump/paging/open/details must preserve all original IDs and imported metadata')
+  const size=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(size.scroll<=size.width+2,'C29 mobile overflow: '+JSON.stringify(size))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C29_MOBILE_DAY_PAGED_EXACT_EVENT_LOCATE_AND_SOURCE_NO_WRITES_PASS')
+  await context.close()
+}
+async function exerciseC29DesktopRepeatedDstTimeNavigationAndReadOnlyOriginal(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const fixture={schemaVersion:1,records:[
+    {id:'c29-earlier-original',source:'personal',title:'C29 first physical 02:00',
+      description:'Earlier DST original',location:'',allDay:false,
+      start:'2026-10-25T00:00:00.000Z',end:'2026-10-25T00:30:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c29-later-ics-original',source:'ics',sourceCalendar:'C29 Clock Source',
+      sourceKey:'C29 Clock Source|absolute-uid',title:'C29 second physical 02:00',description:'Readonly fold',
+      location:'',allDay:false,transparent:true,
+      start:'2026-10-25T01:00:00.000Z',end:'2026-10-25T01:30:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(value)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-10-25')
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  const nav=page.getByRole('navigation',{name:"Navigate today's visible events"})
+  await nav.waitFor()
+  assert.match(await nav.innerText(),/2 visible · 2 timed · 0 all-day/)
+  assert.match(await nav.innerText(),/UTC\+02:00/)
+  assert.match(await nav.innerText(),/UTC\+01:00/)
+  const scroll=page.locator('.timeline-scroll')
+  await nav.getByRole('button',{name:'Locate in timeline c29-earlier-original@2026-10-25'}).click()
+  const first=await scroll.evaluate(node=>node.scrollTop)
+  await nav.getByRole('button',{name:'Locate in timeline c29-later-ics-original@2026-10-25'}).click()
+  const second=await scroll.evaluate(node=>node.scrollTop)
+  assert.ok(second-first>=60,'DST repeated 02:00 should jump to a different physical hour: '+first+'/'+second)
+  assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-occurrence-key')),
+    'c29-later-ics-original@2026-10-25')
+  await nav.getByRole('button',{name:'Open original event c29-later-ics-original@2026-10-25'}).click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.innerText(),/TRANSP:TRANSPARENT/)
+  assert.equal(await details.getByRole('button',{name:'Edit event'}).count(),0)
+  await details.getByRole('button',{name:'Close event'}).click()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C29_DESKTOP_ORIGINAL_DST_BOTH_FOLDS_READONLY_SOURCE_NO_WRITES_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -2963,6 +3087,8 @@ try{
   await exerciseC27DesktopMonthFilterAndDetachedOriginalIdentity()
   await exerciseC28MobileSkipEmptyAgendaReadOnlyFreeAndHiddenSource()
   await exerciseC28DesktopAgendaAllDayContinuationAndBoundedEmpty()
+  await exerciseC29MobileDayOriginalAppointmentNavigatorAndDensePagination()
+  await exerciseC29DesktopRepeatedDstTimeNavigationAndReadOnlyOriginal()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
