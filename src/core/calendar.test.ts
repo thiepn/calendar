@@ -1008,7 +1008,7 @@ describe('C13 explicitly bounded and source-safe RFC DURATION imports',()=>{
       'EXDATE;TZID=Europe/Berlin:20260331T093000',
       'END:VEVENT','END:VCALENDAR'].join('\r\n')
     const p=previewIcs(input)
-    expect(p.skippedEvents).toBe(0)
+    expect(p.skippedEvents,p.warnings.join(' | ')).toBe(0)
     expect(p.records.map(r=>r.start)).toEqual([
       '2026-03-24T08:30:00.000Z','2026-04-01T08:30:00.000Z','2026-04-07T07:30:00.000Z'])
     expect(p.records.map(r=>(Date.parse(r.end)-Date.parse(r.start))/60000)).toEqual([90,90,90])
