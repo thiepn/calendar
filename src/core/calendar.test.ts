@@ -25,6 +25,7 @@ import {detailNeighbors} from './detail-navigation'
 import {mobileTimedChange,mobileAllDayShift} from './mobile-editor'
 import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './source-visibility'
 import {adjacentBusyDay,exportAgendaCsv} from './agenda'
+import {adjacentAgendaRange} from './agenda-navigation'
 import {previewMissingPersonal} from './recover-missing'
 import {personalDraftFromImported} from './personal-copy'
 import {reviewPersonalExport,downloadPersonalExport} from './personal-export'
@@ -2316,5 +2317,78 @@ describe('C27 canonical month day preview and source-safe full event paging',()=
     const empty=searchOccurrencePage([original],'2026-11-26','2026-11-26','forward',0,20)
     expect(empty).toMatchObject({total:0,pages:1,page:0,items:[],fromIndex:0,throughIndex:0})
     expect(original.id).toBe('other-date')
+  })
+})
+
+describe('C28 source-filtered skip-empty Agenda windows',()=>{
+  it('skips a truly empty 14-day range and keeps a forward event at the new range start',()=>{
+    const far=record({id:'future-unique',start:fromLocalDateTime('2026-12-04T11:00'),
+      end:fromLocalDateTime('2026-12-04T12:00')})
+    const original=JSON.stringify([far])
+    expect(adjacentAgendaRange([far],'2026-10-19',14,1)).toEqual({
+      eventDate:'2026-12-04',selected:'2026-12-04'})
+    expect(JSON.stringify([far])).toBe(original)
+  })
+  it('places a previous visible event at the end of the restored 14-day window',()=>{
+    const earlier=record({id:'old-event',start:fromLocalDateTime('2026-09-17T10:00'),
+      end:fromLocalDateTime('2026-09-17T11:00')})
+    expect(adjacentAgendaRange([earlier],'2026-10-19',14,-1)).toEqual({
+      eventDate:'2026-09-17',selected:'2026-09-04'})
+    expect(adjacentAgendaRange([earlier],'2026-10-19',30,-1)).toEqual({
+      eventDate:'2026-09-17',selected:'2026-08-19'})
+  })
+  it('includes visible imported transparent sources but never hides independent busy authority',()=>{
+    const free=record({id:'free-campus',source:'ics',sourceCalendar:'Shown campus',
+      sourceKey:'source-free-uid',transparent:true,start:fromLocalDateTime('2026-11-18T08:00'),
+      end:fromLocalDateTime('2026-11-18T09:00')})
+    const hidden=record({id:'hidden-lab',source:'ics',sourceCalendar:'Hidden lab',
+      sourceKey:'source-busy-uid',start:fromLocalDateTime('2026-11-03T08:00'),
+      end:fromLocalDateTime('2026-11-03T09:00')})
+    const visible=visibleCalendarRecords([free,hidden],'all',new Set(['Hidden lab']))
+    expect(adjacentAgendaRange(visible,'2026-10-19',14,1)).toMatchObject({
+      eventDate:'2026-11-18',selected:'2026-11-18'})
+    expect(adjacentAgendaRange([free,hidden],'2026-10-19',14,1)?.eventDate).toBe('2026-11-03')
+    expect(reviewDraft([free,hidden],record({id:'collision',start:hidden.start,
+      end:hidden.end})).collisionCount).toBeGreaterThan(0)
+    expect(free.sourceKey).toBe('source-free-uid')
+    expect(hidden.sourceKey).toBe('source-busy-uid')
+  })
+  it('includes original detached occurrences, and never resurrects excluded parent dates',()=>{
+    const parent=record({id:'series-parent',start:fromLocalDateTime('2026-10-19T12:00'),
+      end:fromLocalDateTime('2026-10-19T13:00'),
+      repeat:{frequency:'weekly',interval:1,until:'2026-11-09'},
+      excludedDates:['2026-11-02']})
+    const detached=record({id:'detached-owned',start:fromLocalDateTime('2026-11-06T09:00'),
+      end:fromLocalDateTime('2026-11-06T10:00'),
+      recurrenceParentId:'series-parent',recurrenceDate:'2026-11-02'})
+    const later=adjacentAgendaRange([parent,detached],'2026-10-19',14,1)
+    expect(later?.eventDate).toBe('2026-11-06')
+    expect(detached.id).toBe('detached-owned')
+    expect(parent.excludedDates).toEqual(['2026-11-02'])
+  })
+  it('finds original all-day continuations that began before the next range',()=>{
+    const allDay=record({id:'multi-day',allDay:true,startDate:'2026-11-01',
+      endDateExclusive:'2026-11-15',start:fromLocalDateTime('2026-11-01T00:00'),
+      end:fromLocalDateTime('2026-11-15T00:00')})
+    expect(adjacentAgendaRange([allDay],'2026-10-19',14,1)?.eventDate).toBe('2026-11-02')
+    expect(adjacentAgendaRange([allDay],'2026-11-21',14,-1)?.eventDate).toBe('2026-11-14')
+  })
+  it('counts timed events spanning midnight and both Berlin DST folds',()=>{
+    const crosses=record({id:'overnight',start:fromLocalDateTime('2026-11-01T23:30'),
+      end:fromLocalDateTime('2026-11-02T00:30')})
+    expect(adjacentAgendaRange([crosses],'2026-10-19',14,1)?.eventDate).toBe('2026-11-02')
+    const repeated=record({id:'dst-fold',start:'2026-10-25T01:00:00.000Z',
+      end:'2026-10-25T01:30:00.000Z'})
+    expect(adjacentAgendaRange([repeated],'2026-10-01',14,1)?.eventDate).toBe('2026-10-25')
+  })
+  it('refuses invalid and unbounded searches; does not mutate selection on no match',()=>{
+    const match=record({id:'outside',start:fromLocalDateTime('2028-01-01T10:00'),
+      end:fromLocalDateTime('2028-01-01T11:00')})
+    expect(adjacentAgendaRange([match],'2026-10-19',14,1)).toBe(null)
+    expect(adjacentAgendaRange([],'2026-10-19',14,-1)).toBe(null)
+    expect(()=>adjacentAgendaRange([],'2026-10-19',13 as 14,1)).toThrow('range')
+    expect(()=>adjacentAgendaRange([],'2026-10-19',14,0 as 1)).toThrow('direction')
+    expect(()=>adjacentAgendaRange([],'2026-10-19',14,1,366)).toThrow('limit')
+    expect(()=>adjacentAgendaRange([],'2026-10-19',14,1,0)).toThrow('limit')
   })
 })
