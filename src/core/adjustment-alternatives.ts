@@ -65,7 +65,10 @@ export function findAdjustmentAlternatives(
       blockAllDay:true,bufferMinutes:options.bufferMinutes,maxResults:30,now
     })
     for(const slot of slots){
-      if(slot.start===proposal.start)continue
+      // Never present either the conflicting proposed time or the exact
+      // unchanged original appointment as an actionable 'alternative'.
+      if(slot.start===proposal.start||
+         slot.start===proposal.item.start&&slot.end===proposal.item.end)continue
       const instant=new Date(slot.start)
       const minute=instant.getHours()*60+instant.getMinutes()
       const reviewed=proposeTimedChange(state,proposal.item,'move',date,minute,duration)
