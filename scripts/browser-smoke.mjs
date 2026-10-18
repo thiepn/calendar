@@ -2103,6 +2103,94 @@ async function exerciseC21MobileFreeBusyFinder(){
   await context.close()
 }
 
+
+async function exerciseC22MobileFocusedWeekOriginalIdentityAndDST(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',err=>errors.push(err.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const saved={schemaVersion:1,records:[
+    {id:'c22-series',source:'personal',title:'C22 recurring source',description:'',location:'',
+      start:'2026-10-18T07:00:00.000Z',end:'2026-10-18T08:00:00.000Z',
+      allDay:false,repeat:{frequency:'weekly',interval:1},excludedDates:['2026-10-25'],
+      updatedAt:'2026-10-18T12:00:00.000Z'},
+    {id:'c22-detached',source:'personal',title:'C22 detached review',description:'',location:'',
+      start:'2026-10-25T08:00:00.000Z',end:'2026-10-25T09:00:00.000Z',
+      allDay:false,recurrenceParentId:'c22-series',recurrenceDate:'2026-10-25',
+      updatedAt:'2026-10-18T12:00:00.000Z'},
+    {id:'c22-free-ics',source:'ics',sourceCalendar:'C22 Campus',sourceKey:'C22 Campus|orig',
+      title:'C22 free seminar',description:'Imported original',location:'',
+      start:'2026-10-25T00:15:00.000Z',end:'2026-10-25T00:45:00.000Z',
+      allDay:false,transparent:true,updatedAt:'2026-10-18T12:00:00.000Z'},
+    {id:'c22-all-day',source:'ics',sourceCalendar:'C22 Campus',sourceKey:'C22 Campus|all',
+      title:'C22 all-day information',description:'',location:'',
+      start:'2026-10-24T22:00:00.000Z',end:'2026-10-25T23:00:00.000Z',
+      allDay:true,startDate:'2026-10-25',endDateExclusive:'2026-10-26',
+      updatedAt:'2026-10-18T12:00:00.000Z'}
+  ]}
+  await page.evaluate(state=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state)),saved)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-10-25')
+  const scroller=page.locator('.timeline-scroll')
+  const full=await scroller.evaluate(el=>({viewport:el.clientWidth,scroll:el.scrollWidth}))
+  assert.equal(await page.locator('.timeline-day').count(),7)
+  assert.ok(full.scroll>full.viewport,'C22 prior mobile full-week scroll must remain default')
+  await page.getByRole('button',{name:'Focus selected week day'}).click()
+  assert.equal(await page.locator('.timeline-day').count(),1,
+    'Focus day must display a genuine full-width selected calendar column')
+  assert.equal(await page.locator('.mobile-focus-date').count(),7)
+  assert.equal(await page.locator('.mobile-focus-date').nth(6).getAttribute('aria-pressed'),'true')
+  assert.match(await page.locator('.mobile-focus-date').nth(6).innerText(),/4 events/)
+  assert.ok(await page.locator('.timeline-block.imported').count()>=1)
+  const focused=await scroller.evaluate(el=>({viewport:el.clientWidth,scroll:el.scrollWidth,top:el.scrollTop}))
+  assert.ok(focused.scroll<=focused.viewport+2,'Focused timeline must not require horizontal scrolling')
+  assert.ok(Math.abs(focused.top-96)<=3,'DST first event should scroll using 02:15 exact elapsed instant: '+JSON.stringify(focused))
+  await page.locator('.mobile-focus-date').nth(4).click()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-10-23')
+  assert.equal(await page.locator('.timeline-day').count(),1)
+  assert.equal(await page.locator('.timeline-event-frame').count(),0)
+  await page.locator('.mobile-focus-date').nth(6).click()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-10-25')
+  await page.getByRole('button',{name:'07:00'}).click()
+  assert.ok(Math.abs(await scroller.evaluate(el=>el.scrollTop)-448)<=3)
+  await page.getByRole('button',{name:'First event'}).click()
+  assert.ok(Math.abs(await scroller.evaluate(el=>el.scrollTop)-96)<=3)
+  await page.locator('.timeline-block.imported').filter({hasText:'C22 free seminar'}).click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  assert.match(await details.innerText(),/TRANSP:TRANSPARENT/)
+  assert.equal(await details.getByRole('button',{name:'Edit event'}).count(),0)
+  await details.getByRole('button',{name:'Close event'}).click()
+  await page.locator('.timeline-slot').nth(24).click()
+  await page.getByRole('dialog',{name:'New event'}).waitFor()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),saved)
+  await page.getByRole('button',{name:'Close editor'}).click()
+  await page.getByRole('button',{name:'Show scrollable full week'}).click()
+  assert.equal(await page.locator('.timeline-day').count(),7)
+  const final=await scroller.evaluate(el=>({viewport:el.clientWidth,scroll:el.scrollWidth}))
+  assert.ok(final.scroll>final.viewport,'Full week must restore seven original columns')
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),saved,
+    'C22 only changes presentation, never original records or detached exceptions')
+  const viewport=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(viewport.scroll<=viewport.width+2,'Mobile outer document overflow: '+JSON.stringify(viewport))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C22_MOBILE_WEEK_FOCUS_DST_ORIGINAL_RECURRING_IMPORTED_SOURCE_PASS')
+  await context.close()
+}
+async function exerciseC22DesktopUnchangedFullWeek(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',err=>errors.push(err.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  assert.equal(await page.locator('.timeline-day').count(),7)
+  assert.equal(await page.getByRole('button',{name:'Focus selected week day'}).isVisible(),false)
+  assert.equal(await page.locator('.mobile-focus-strip').count(),0)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C22_DESKTOP_ORIGINAL_SEVEN_COLUMN_WEEK_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -2149,6 +2237,8 @@ try{
   await exerciseC20MobileRecurringAlternativesAndStaleSourceGuard()
   await exerciseC21DesktopTransparentSourceReview()
   await exerciseC21MobileFreeBusyFinder()
+  await exerciseC22MobileFocusedWeekOriginalIdentityAndDST()
+  await exerciseC22DesktopUnchangedFullWeek()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
