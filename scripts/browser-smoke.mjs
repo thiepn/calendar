@@ -2368,6 +2368,7 @@ async function exerciseC24MobileSearchPageNavigationAndCanonicalDetails(){
   assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture,
     'Pagination and details must not rewrite personal/recurring originals')
   // Opening a result selects its date; reset the search anchor before looking back.\n  await page.getByLabel('Jump to date').fill('2026-10-18')\n  await input.fill('C24 Free imported')
+  await panel.getByText('1 occurrence found',{exact:false}).waitFor()
   assert.match(await panel.innerText(),/1 occurrence found/)
   assert.equal(await panel.getByRole('button',{name:'Next results'}).count(),0)
   await panel.locator('.search-results-items button').first().click()
@@ -2404,6 +2405,7 @@ async function exerciseC24DesktopReverseSearchPagesAndFilterReset(){
   assert.match(await region.innerText(),/showing 31–60/)
   assert.match(await region.locator('.search-results-items button').first().innerText(),/1 Dec 2026/)
   await region.getByLabel('Search period').selectOption('forward')
+  await region.getByText('1 occurrence found',{exact:false}).waitFor()
   assert.match(await region.innerText(),/showing 1–/)
   assert.equal(await region.getByRole('button',{name:'Next results'}).count(),0)
   assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
