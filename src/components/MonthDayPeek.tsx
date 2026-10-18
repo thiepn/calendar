@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react'
-import {ChevronLeft,ChevronRight,Plus,X,CalendarDays} from 'lucide-react'
+import {ChevronRight,Plus,X,CalendarDays} from 'lucide-react'
 import type {CalendarOccurrence,CalendarRecord,LocalDate} from '../types'
 import {dateLabel} from '../core/dates'
 import {searchOccurrencePage} from '../core/search-pages'
