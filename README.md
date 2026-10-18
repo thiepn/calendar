@@ -295,3 +295,25 @@ and conflict review include hidden busy imports and exclude transparent ones.
 No record IDs, recurring exclusions, original source data, storage, security
 authority, recovery or Folio boundaries are modified. Searching/paging opens
 existing event details via original occurrence keys, without writing records.
+
+## C25 — nearby visible-event browsing in original details
+
+Event details no longer force repeated close-and-find navigation on phones.
+**Previous / Next visible event** traverses canonical materialized personal,
+detached recurring and read-only imported occurrences across dates, ordered by
+physical start instant and original occurrence key. The view is intentionally
+bounded to 30 calendar days before/after the active date. The label reports
+position within that displayed window; unavailable directions are disabled,
+not misreported as no events existing elsewhere. An adjacent **Show this day**
+action closes details and opens the existing Day view at the exact active
+occurrence date. Mobile has a large accessible navigation strip, a sticky
+details header and a readable wrapped action area; desktop navigation remains
+available without changing existing editor semantics.
+
+The pure `src/core/detail-navigation.ts` receives the original existing
+visibility/query filtered records and uses canonical `occurrencesBetween`,
+not a shadow index/store or an alternative event writer. Read-only ICS
+`TRANSP:TRANSPARENT` remains visible; hidden snapshots stay excluded from
+visual browsing but still participate in independently source-complete
+availability/conflicts. Recurrence exclusions and detached original IDs are
+unchanged, as are guarded CAS, recovery/checkpoints, privacy and Folio.

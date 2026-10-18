@@ -7,6 +7,7 @@ import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,split
 import {findFreeSlots,type FreeSlot} from './core/availability'
 import {adjacentBusyDay,exportAgendaCsv} from './core/agenda'
 import {searchOccurrencePage} from './core/search-pages'
+import {detailNeighbors} from './core/detail-navigation'
 import {sevenDayWorkload} from './core/planning'
 import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './core/source-visibility'
 import {previewMissingPersonal} from './core/recover-missing'
@@ -274,6 +275,7 @@ export default function App(){
   }
   const personalCount=calendar.records.filter(x=>x.source==='personal').length
   const activeRecord=active?calendar.records.find(x=>x.id===active.recordId):undefined
+  const detailsNavigation=useMemo(()=>active?detailNeighbors(visible,active):null,[visible,active])
   const adjustmentReview=useMemo(()=>{
     if(!adjustment)return {proposal:null,error:''}
     try{return {proposal:proposeTimedChange(calendar,adjustment.item,adjustment.action,adjustment.date,
@@ -839,7 +841,28 @@ export default function App(){
     {active&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setActive(null)}}>
       <section className="details dialog-surface" role="dialog" aria-modal="true" aria-label="Event details">
         <header className="editor-head"><span className="eyebrow">{active.source==='ics'?'IMPORTED SNAPSHOT — READ ONLY':'PERSONAL EVENT'}</span><button className="icon-button" aria-label="Close event" onClick={()=>setActive(null)}><X size={19}/></button></header>
+        <nav className="details-navigation" aria-label="Browse nearby visible events">
+          <button type="button" className="secondary compact" aria-label="Previous visible event"
+            disabled={!detailsNavigation?.previous}
+            onClick={()=>{if(detailsNavigation?.previous)open(detailsNavigation.previous)}}>
+            <ChevronLeft size={16}/><span>Previous</span>
+          </button>
+          <div className="details-navigation-current" aria-live="polite">
+            <strong>{detailsNavigation?.included?
+              'Event '+detailsNavigation.position+' of '+detailsNavigation.count:'Event outside current display filter'}</strong>
+            <small>Shown events · within 30 days either side</small>
+          </div>
+          <button type="button" className="secondary compact" aria-label="Next visible event"
+            disabled={!detailsNavigation?.next}
+            onClick={()=>{if(detailsNavigation?.next)open(detailsNavigation.next)}}>
+            <span>Next</span><ChevronRight size={16}/>
+          </button>
+        </nav>
         <h2>{active.title}</h2><p className="details-dates">{active.allDay?'All day · '+friendlyRange(active.startDate,addDays(active.endDateExclusive,-1)):new Date(active.start).toLocaleString()+' – '+new Date(active.end).toLocaleString()}</p>
+        <button type="button" className="details-show-day secondary compact"
+          onClick={()=>{setMode('day');setSelected(active.date);setActive(null)}}>
+          <CalendarDays size={15}/> Show this day
+        </button>
         {active.location&&<p><strong>Location:</strong> {active.location}</p>}{active.description&&<p className="description">{active.description}</p>}
         {active.transparent&&<div className="nonblocking-note">Imported as free (TRANSP:TRANSPARENT). This event remains visible but does not block Find time or produce overlap warnings. A separate personal copy is an ordinary busy event.</div>}
          {active.source==='ics'&&<div className="readonly-note"><AlertTriangle size={16}/> Imported from {active.sourceCalendar}. Editing the original requires the source calendar. This is only a local copy. You may create a separate personal event without modifying this snapshot.</div>}
