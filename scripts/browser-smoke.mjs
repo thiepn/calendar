@@ -2801,6 +2801,107 @@ async function exerciseC27DesktopMonthFilterAndDetachedOriginalIdentity(){
   await context.close()
 }
 
+
+async function exerciseC28MobileSkipEmptyAgendaReadOnlyFreeAndHiddenSource(){
+  const context=await browser.newContext({viewport:{width:390,height:844},
+    isMobile:true,hasTouch:true,timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const fixture={schemaVersion:1,records:[
+    {id:'c28-hidden-busy',title:'C28 Hidden busy import',source:'ics',
+      sourceCalendar:'C28 Hidden Lab',sourceKey:'source-original-busy',allDay:false,
+      description:'Original hidden source',location:'',
+      start:'2026-11-03T08:00:00.000Z',end:'2026-11-03T09:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c28-free-visible',title:'C28 Campus free appointment',source:'ics',
+      sourceCalendar:'C28 Campus',sourceKey:'source-original-free',
+      transparent:true,allDay:false,description:'Original TRANSP',location:'',
+      start:'2026-11-18T08:00:00.000Z',end:'2026-11-18T09:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c28-personal-future',title:'C28 Personal later',source:'personal',
+      allDay:false,description:'Private original',location:'',
+      start:'2027-01-15T10:00:00.000Z',end:'2027-01-15T11:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(x=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(x)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-10-19')
+  await page.getByRole('button',{name:'List',exact:true}).click()
+  await page.getByLabel('Only days with commitments').check()
+  assert.match(await page.getByRole('region',{name:'Upcoming agenda'}).innerText(),/No commitments in this period/)
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  const hide=page.getByRole('button',{name:'Toggle imported calendar C28 Hidden Lab'})
+  await hide.click()
+  assert.equal(await hide.getAttribute('aria-pressed'),'false')
+  await page.getByRole('button',{name:'Close navigation'}).click({position:{x:350,y:340}})
+  const next=page.getByRole('button',{name:'Next visible agenda range'})
+  await next.click()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-11-18')
+  assert.equal(await page.locator('.view-switch button.active').innerText(),'List')
+  assert.equal(await page.getByLabel('Agenda range').inputValue(),'14')
+  assert.equal(await page.getByLabel('Only days with commitments').isChecked(),true)
+  const agenda=page.getByRole('region',{name:'Upcoming agenda'})
+  assert.equal(await agenda.locator('.agenda-row').count(),1)
+  assert.match(await agenda.innerText(),/C28 Campus free appointment/)
+  assert.match(await agenda.innerText(),/Free \(non-blocking\)/)
+  assert.equal(await agenda.getByText('C28 Hidden busy import').count(),0)
+  await next.click()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2027-01-15')
+  assert.match(await agenda.innerText(),/C28 Personal later/)
+  await page.getByRole('button',{name:'Previous visible agenda range'}).click()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-11-05')
+  assert.match(await agenda.innerText(),/C28 Campus free appointment/)
+  assert.equal(await agenda.getByText('C28 Hidden busy import').count(),0)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  const size=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(size.scroll<=size.width+2,'C28 agenda mobile viewport overflow: '+JSON.stringify(size))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C28_MOBILE_AGENDA_SKIP_EMPTY_TRANSP_HIDDEN_BACKTRACK_NO_WRITES_PASS')
+  await context.close()
+}
+async function exerciseC28DesktopAgendaAllDayContinuationAndBoundedEmpty(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const fixture={schemaVersion:1,records:[
+    {id:'c28-all-day-original',title:'C28 Multi-day original',source:'personal',
+      allDay:true,description:'Keep original multi-day dates',location:'',
+      startDate:'2026-11-01',endDateExclusive:'2026-11-15',
+      start:'2026-10-31T23:00:00.000Z',end:'2026-11-14T23:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c28-off-filter',title:'C28 unrelated private source',source:'personal',
+      allDay:false,description:'',location:'',
+      start:'2026-11-21T09:00:00.000Z',end:'2026-11-21T10:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(value)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-10-19')
+  await page.getByRole('button',{name:'List',exact:true}).click()
+  await page.getByLabel('Only days with commitments').check()
+  await page.getByRole('button',{name:'Next visible agenda range'}).click()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-11-02',
+    'First day of continuation outside displayed window must be visible')
+  assert.match(await page.getByRole('region',{name:'Upcoming agenda'}).innerText(),/C28 Multi-day original/)
+  await page.getByLabel('Search calendar events').fill('No such C28 event')
+  const previous=await page.getByLabel('Jump to date').inputValue()
+  await page.getByRole('button',{name:'Next visible agenda range'}).click()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),previous)
+  assert.match(await page.getByRole('status').last().innerText(),/No later visible agenda commitments found within 365 days/)
+  await page.getByLabel('Search calendar events').fill('C28 unrelated')
+  await page.getByRole('button',{name:'Next visible agenda range'}).click()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-11-21',
+    'Query filtered navigation must not jump to other hidden search results')
+  assert.equal(await page.locator('.view-switch button.active').innerText(),'List')
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C28_DESKTOP_AGENDA_MULTIDAY_QUERY_BOUNDED_EMPTY_NO_WRITES_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -2860,6 +2961,8 @@ try{
   await exerciseC26DesktopFinderDayWindowAndStaleStorageGuard()
   await exerciseC27MobileMonthOverflowAllCanonicalEventsAndSafeHandoffs()
   await exerciseC27DesktopMonthFilterAndDetachedOriginalIdentity()
+  await exerciseC28MobileSkipEmptyAgendaReadOnlyFreeAndHiddenSource()
+  await exerciseC28DesktopAgendaAllDayContinuationAndBoundedEmpty()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
