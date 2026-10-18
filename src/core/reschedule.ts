@@ -34,7 +34,7 @@ export function proposeTimedChange(
   // All saved calendars, regardless of UI visibility filters, contribute to collision warnings.
   const last=localDate(new Date(Date.parse(end)-1))
   const hits=occurrencesBetween(state.records,targetDate,last).filter(x=>{
-    if(x.key===item.key)return false
+    if(x.key===item.key||x.transparent)return false
     if(x.allDay)return x.startDate<=last&&x.endDateExclusive>targetDate
     return Date.parse(x.start)<Date.parse(end)&&Date.parse(x.end)>Date.parse(start)
   })

@@ -24,7 +24,7 @@ function Events({date,records,onOpen,limit=30}:Pick<Props,'records'|'onOpen'>&{d
     {visible.map(item=><button key={item.key} className={'event-chip '+(item.source==='ics'?'imported ':'')+(conflicts.has(item.key)?'conflicted ':'')}
       type="button" onClick={e=>{e.stopPropagation();onOpen(item)}}>
       <span className="event-dot"/><span className="event-text"><span className="event-title">{item.title}</span>
-        <small>{shortTime(item)}{!belongs(item,date)?' · continues':''}</small></span>
+        <small>{shortTime(item)}{!belongs(item,date)?' · continues':''}{item.transparent?' · Free (non-blocking)':''}</small></span>
       {conflicts.has(item.key)&&<AlertTriangle size={12} aria-label="Overlapping event" />}
     </button>)}
     {all.length>limit&&<span className="more-events">+{all.length-limit} more</span>}

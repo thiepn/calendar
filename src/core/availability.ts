@@ -35,7 +35,7 @@ export function findFreeSlots(records:CalendarRecord[],options:AvailabilityOptio
     const weekday=day(date).getDay()
     if(daySelection==='weekdays'&&(weekday===0||weekday===6))continue
     if(daySelection==='weekends'&&weekday!==0&&weekday!==6)continue
-    const busy=dayOccurrences(records,date)
+    const busy=dayOccurrences(records,date).filter(item=>!item.transparent)
     if(blockAllDay&&busy.some(item=>item.allDay))continue
     const padding=bufferMinutes*60000
     const blocks=busy.filter(item=>!item.allDay).map(item=>[

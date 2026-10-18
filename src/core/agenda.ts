@@ -10,7 +10,7 @@ export function adjacentBusyDay(records:CalendarRecord[],selected:LocalDate,dire
   const end=addDays(selected,direction*limitDays)
   const first=direction===1?addDays(selected,1):end
   const last=direction===1?end:addDays(selected,-1)
-  const occurrences=occurrencesBetween(records,first,last)
+  const occurrences=occurrencesBetween(records,first,last).filter(item=>!item.transparent)
   const occupied=new Set<string>()
   for(const date of dateSeries(first,last,367)){
     const start=Date.parse(new Date(date+'T00:00:00').toISOString())

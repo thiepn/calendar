@@ -75,7 +75,13 @@ export function layoutTimedDay(items:CalendarOccurrence[],date:LocalDate):TimedB
       block.lane=lane
       laneEnds[lane]=Math.min(axis.end,Date.parse(block.occurrence.end))
     }
-    for(const block of cluster){block.lanes=laneEnds.length;block.overlaps=laneEnds.length>1}
+    for(const block of cluster){
+      block.lanes=laneEnds.length
+      block.overlaps=!block.occurrence.transparent&&cluster.some(other=>
+        other!==block&&!other.occurrence.transparent&&
+        Date.parse(other.occurrence.start)<Date.parse(block.occurrence.end)&&
+        Date.parse(other.occurrence.end)>Date.parse(block.occurrence.start))
+    }
   }
   return blocks
 }

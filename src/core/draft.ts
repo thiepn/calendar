@@ -34,6 +34,7 @@ export function reviewDraft(records:CalendarRecord[],candidate:CalendarRecord,op
   const candidates=occurrencesBetween([candidate],startDate,until)
   const earliest=addDays(startDate,-31)
   const existing=occurrencesBetween(records,earliest,addDays(until,31)).filter(x=>{
+    if(x.transparent)return false
     if(x.recordId===options.ignoreRecordId)return false
     if(options.ignoreParentFrom?.id===x.recordId&&x.date>=options.ignoreParentFrom.date)return false
     if(options.ignoreOccurrence?.id===x.recordId&&x.date===options.ignoreOccurrence.date)return false
