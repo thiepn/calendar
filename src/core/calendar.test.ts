@@ -21,6 +21,7 @@ import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './source-
 import {adjacentBusyDay,exportAgendaCsv} from './agenda'
 import {previewMissingPersonal} from './recover-missing'
 import {personalDraftFromImported} from './personal-copy'
+import {reviewPersonalExport,downloadPersonalExport} from './personal-export'
 const record=(patch:Partial<CalendarRecord>={}):CalendarRecord=>({
   id:'test',title:'Study',description:'',location:'',source:'personal',
   start:fromLocalDateTime('2026-10-12T10:00'),end:fromLocalDateTime('2026-10-12T11:00'),
@@ -1530,5 +1531,120 @@ describe('C17 original-source ICS event-level preview and envelope integrity',()
     expect(preview.skippedEvents).toBe(0)
     expect(preview.records[0].title).toBe('Event title')
     expect(preview.records[0].description).toBe('')
+  })
+})
+
+
+describe('C18 reviewed, privacy-graded and source-accurate personal ICS handoff',()=>{
+  const personal=record({id:'local-series',title:'Confidential weekly review',
+    description:'Private notes: case 42',location:'Private Room 12',
+    repeat:{frequency:'weekly',interval:1,weekdays:[1]},reminderMinutes:30})
+  const imported=record({id:'original-external',source:'ics',sourceCalendar:'External',
+    sourceKey:'External|opaque',title:'Read-only foreign obligation',
+    description:'Imported provider notes',location:'External office'})
+  const current:CalendarState={schemaVersion:1,records:[personal,imported]}
+  const options={from:'2026-10-12',through:'2026-10-19',
+    privacy:'busy' as const,includeReminders:false}
+  it('counts actual personal occurrences and rejects original imported entries without applying display filters',()=>{
+    const previous=JSON.stringify(current)
+    const review=reviewPersonalExport(current,options)
+    expect(review).toMatchObject({total:2,recurringInstances:2,allDayInstances:0,
+      timedInstances:2,reminderInstances:2,importedExcluded:1})
+    expect(review.occurrences.map(x=>x.date)).toEqual(['2026-10-12','2026-10-19'])
+    expect(JSON.stringify(current)).toBe(previous)
+  })
+  it('defaults export review to opaque busy-only identity, no personal titles, alarm or source IDs',()=>{
+    const before=JSON.stringify(current)
+    const first=downloadPersonalExport(current,options)
+    const second=downloadPersonalExport(current,options)
+    expect(first.match(/BEGIN:VEVENT/g)).toHaveLength(2)
+    expect(first.match(/SUMMARY:Busy/g)).toHaveLength(2)
+    expect(first).not.toContain('Confidential')
+    expect(first).not.toContain('Private Room')
+    expect(first).not.toContain('case 42')
+    expect(first).not.toContain('foreign obligation')
+    expect(first).not.toContain('External|opaque')
+    expect(first).not.toContain('local-series')
+    expect(first).not.toContain('DESCRIPTION:')
+    expect(first).not.toContain('LOCATION:')
+    expect(first).not.toContain('BEGIN:VALARM')
+    expect(first.match(/UID:[\da-f]{8}-[\da-f-]{27}@calendar\.thiepn\.local/g)).toHaveLength(2)
+    expect(first.match(/UID:.+/g)).not.toEqual(second.match(/UID:.+/g))
+    expect(JSON.stringify(current)).toBe(before)
+    const reimport=previewIcs(first)
+    expect(reimport.skippedEvents).toBe(0)
+    expect(reimport.records).toHaveLength(2)
+    expect(reimport.records.every(x=>x.title==='Busy'&&x.source==='ics')).toBe(true)
+  })
+  it('includes titles, but never private notes, locations or alarms, in the title-only profile',()=>{
+    const text=downloadPersonalExport(current,{...options,privacy:'titles'})
+    expect(text).toContain('SUMMARY:Confidential weekly review')
+    expect(text).toContain('UID:local-series@2026-10-12@calendar.thiepn.local')
+    expect(text).not.toContain('Private Room')
+    expect(text).not.toContain('case 42')
+    expect(text).not.toContain('BEGIN:VALARM')
+  })
+  it('allows details and alarm data only when deliberately requested',()=>{
+    const without=downloadPersonalExport(current,{...options,privacy:'details'})
+    expect(without).toContain('DESCRIPTION:Private notes: case 42')
+    expect(without).toContain('LOCATION:Private Room 12')
+    expect(without).not.toContain('BEGIN:VALARM')
+    const withAlarms=downloadPersonalExport(current,{...options,
+      privacy:'details',includeReminders:true})
+    expect(withAlarms.match(/BEGIN:VALARM/g)).toHaveLength(2)
+    expect(withAlarms).toContain('TRIGGER:-PT30M')
+    expect(()=>reviewPersonalExport(current,{...options,includeReminders:true})).toThrow('full details')
+    expect(()=>exportIcs(current,options.from,options.through,{privacy:'titles',includeReminders:true}))
+      .toThrow('full-details')
+  })
+  it('safely normalizes CR, NUL and multiline fields before any ICS property boundaries',()=>{
+    const injected=record({id:'personal-injection',
+      title:'Important\r\nBEGIN:VEVENT\rSUMMARY:Shadow\r\nUID:attacker',
+      description:'Safe\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:fake\u0000done',
+      location:'Office\rOther Floor'})
+    const state:CalendarState={schemaVersion:1,records:[injected]}
+    const out=downloadPersonalExport(state,{...options,privacy:'details'})
+    expect(out.split('\r\n').filter(line=>line==='BEGIN:VEVENT')).toHaveLength(1)
+    expect(out.split('\r\n').filter(line=>line==='END:VEVENT')).toHaveLength(1)
+    expect(out).not.toContain('\r\nUID:attacker')
+    expect(out).not.toContain('\r\nUID:fake')
+    expect(out).not.toContain('\u0000')
+    const parsed=previewIcs(out)
+    expect(parsed.skippedEvents,parsed.warnings.join(' | ')).toBe(0)
+    expect(parsed.records).toHaveLength(1)
+    expect(parsed.records[0].title).toContain('Shadow')
+  })
+  it('preserves detached personal recurrence edits and all-day dates without claiming full backup',()=>{
+    const parent=record({id:'series',title:'Recurring original',
+      repeat:{frequency:'weekly',interval:1,weekdays:[1]},reminderMinutes:15})
+    const modified=record({id:'one-edit',title:'One corrected occurrence',
+      start:fromLocalDateTime('2026-10-19T12:00'),end:fromLocalDateTime('2026-10-19T13:00'),
+      reminderMinutes:undefined})
+    const staged=replaceOccurrence({schemaVersion:1,records:[parent]},'series','2026-10-19',modified)
+    const allDay=record({id:'all-day',title:'Two-day retreat',allDay:true,
+      startDate:'2026-10-14',endDateExclusive:'2026-10-16',
+      start:fromLocalDateTime('2026-10-14T00:00'),end:fromLocalDateTime('2026-10-16T00:00'),
+      repeat:undefined})
+    const state:CalendarState={schemaVersion:1,records:[...staged.records,allDay,imported]}
+    const review=reviewPersonalExport(state,{...options,privacy:'titles'})
+    expect(review.total).toBe(3)
+    expect(review.occurrences.map(x=>x.title)).toEqual([
+      'Recurring original','Two-day retreat','One corrected occurrence'
+    ])
+    const text=downloadPersonalExport(state,{...options,privacy:'titles'})
+    expect(text).toContain('DTSTART;VALUE=DATE:20261014')
+    expect(text).toContain('DTEND;VALUE=DATE:20261016')
+    expect(text).toContain('SUMMARY:One corrected occurrence')
+    expect(text).not.toContain('Read-only foreign obligation')
+    expect(state.records.find(x=>x.id==='series')?.excludedDates).toEqual(['2026-10-19'])
+  })
+  it('refuses empty, reversed, oversized and invalid ranges without exporting wrong data',()=>{
+    expect(()=>reviewPersonalExport(current,{...options,from:'2026-10-20',through:'2026-10-12'}))
+      .toThrow('366')
+    expect(()=>reviewPersonalExport(current,{...options,through:'2028-10-19'})).toThrow('366')
+    expect(()=>reviewPersonalExport(current,{...options,from:'2026-02-30'})).toThrow('Invalid')
+    expect(()=>reviewPersonalExport(current,{...options,privacy:'none' as 'busy'})).toThrow('privacy')
+    expect(()=>downloadPersonalExport(current,{...options,from:'2026-11-01',through:'2026-11-10'}))
+      .toThrow('No personal events')
   })
 })
