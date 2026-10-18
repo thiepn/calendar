@@ -1297,3 +1297,137 @@ describe('C15 per-source visibility is an original-data-preserving display prefe
     expect(toggleImportedCalendarVisibility([], '__proto__')).toEqual(['__proto__'])
   })
 })
+
+
+describe('C16 bounded monthly BYSETPOS interoperability with genuine original UID',()=>{
+  it('materializes last weekday across short months and preserves read-only source keys on refresh',()=>{
+    const input=['BEGIN:VCALENDAR','X-WR-CALNAME:Payroll schedule',
+      'BEGIN:VEVENT','UID:last-workday','SUMMARY:Payroll cutoff',
+      'DTSTART;VALUE=DATE:20261030','DURATION:P1D',
+      'RRULE:FREQ=MONTHLY;COUNT=3;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const preview=previewIcs(input)
+    expect(preview.skippedEvents,preview.warnings.join(' | ')).toBe(0)
+    expect(preview.records.map(r=>r.startDate)).toEqual(['2026-10-30','2026-11-30','2026-12-31'])
+    expect(preview.records.every(r=>r.source==='ics'&&!r.repeat)).toBe(true)
+    const mine=record({id:'original-personal',title:'Untouched original'})
+    const first=mergeIcs({schemaVersion:1,records:[mine]},preview).state
+    const repeat=mergeIcs(first,previewIcs(input),'replace')
+    expect(repeat.duplicates).toBe(3)
+    expect(repeat.updated).toBe(0)
+    expect(repeat.state.records.map(r=>r.id)).toEqual(first.records.map(r=>r.id))
+    expect(repeat.state.records[0]).toEqual(mine)
+  })
+  it('respects sorted candidates for multiple BYSETPOS with duplicate-free source dates',()=>{
+    const rule=parseFiniteAllDayRule('FREQ=MONTHLY;COUNT=4;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=1,-1','2026-11-02')
+    expect(expandFiniteAllDay('2026-11-02',rule)).toEqual([
+      '2026-11-02','2026-11-30','2026-12-01','2026-12-31'])
+    const tuesdays=parseFiniteAllDayRule('FREQ=MONTHLY;COUNT=3;BYDAY=TU;BYSETPOS=2','2026-10-13')
+    expect(expandFiniteAllDay('2026-10-13',tuesdays)).toEqual([
+      '2026-10-13','2026-11-10','2026-12-08'])
+  })
+  it('keeps recurrence anchored to the imported named timezone, not the current device timezone',()=>{
+    const source=['BEGIN:VCALENDAR','X-WR-CALNAME:Local payroll','BEGIN:VEVENT','UID:monthly',
+      'SUMMARY:Local closing','DTSTART;TZID=Europe/Berlin:20261030T163000',
+      'DURATION:PT90M','RRULE:FREQ=MONTHLY;COUNT=3;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const p=previewIcs(source)
+    expect(p.skippedEvents,p.warnings.join(' | ')).toBe(0)
+    expect(p.records.map(r=>r.start)).toEqual([
+      '2026-10-30T15:30:00.000Z','2026-11-30T15:30:00.000Z','2026-12-31T15:30:00.000Z'])
+    expect(p.records.every(r=>Date.parse(r.end)-Date.parse(r.start)===90*60000)).toBe(true)
+  })
+  it('rejects unsupported weekly/yearly set positions and mismatched original DTSTART',()=>{
+    for(const rule of [
+      'FREQ=WEEKLY;COUNT=2;BYDAY=MO;BYSETPOS=-1',
+      'FREQ=YEARLY;COUNT=2;BYMONTH=10;BYDAY=MO;BYSETPOS=-1',
+      'FREQ=MONTHLY;COUNT=2;BYSETPOS=-1',
+      'FREQ=MONTHLY;COUNT=2;BYDAY=1MO;BYSETPOS=-1',
+      'FREQ=MONTHLY;COUNT=2;BYMONTHDAY=30;BYDAY=MO;BYSETPOS=-1',
+      'FREQ=MONTHLY;COUNT=2;BYDAY=MO,TU;BYSETPOS=0',
+      'FREQ=MONTHLY;COUNT=2;BYDAY=MO,TU;BYSETPOS=-1,-1',
+      'FREQ=MONTHLY;COUNT=2;BYDAY=MO,TU;BYSETPOS=32',
+      'FREQ=MONTHLY;COUNT=2;BYDAY=MO,TU;BYSETPOS=1,2,3,4,5,6,7',
+      'FREQ=MONTHLY;COUNT=2;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=1'
+    ])expect(()=>parseFiniteAllDayRule(rule,'2026-10-30')).toThrow()
+  })
+  it('leaves earlier complete imported source intact if later feed introduces unsupported BYSETPOS',()=>{
+    const good=['BEGIN:VCALENDAR','X-WR-CALNAME:Pay','BEGIN:VEVENT','UID:pay',
+      'SUMMARY:Cutoff','DTSTART;VALUE=DATE:20261030','DURATION:P1D',
+      'RRULE:FREQ=MONTHLY;COUNT=2;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const state=mergeIcs({schemaVersion:1,records:[record({id:'mine'})]},previewIcs(good)).state
+    const bad=previewIcs(good.replace('BYSETPOS=-1','BYSETPOS=0'))
+    expect(bad.skippedEvents).toBe(1)
+    expect(bad.records).toHaveLength(0)
+    expect(()=>mergeIcs(state,bad,'replace')).toThrow('incomplete')
+    expect(mergeIcs(state,bad,'update').state.records).toEqual(state.records)
+  })
+})
+
+describe('C16 source-clock integrity for recurrence exclusions and detached original keys',()=>{
+  const make=(uid:string,clock:string,extra:string[])=>[
+    'BEGIN:VCALENDAR','X-WR-CALNAME:Imported clocks','BEGIN:VEVENT',
+    'UID:'+uid,'SUMMARY:Important class',
+    'DTSTART'+clock+':20261019T100000','DURATION:PT1H',
+    'RRULE:FREQ=DAILY;COUNT=2',...extra,'END:VEVENT','END:VCALENDAR'].join('\r\n')
+  it('excludes a matching TZID EXDATE but refuses one carrying an unrelated source timezone',()=>{
+    const valid=make('class',';TZID=Europe/Berlin',['EXDATE;TZID=Europe/Berlin:20261020T100000'])
+    const p=previewIcs(valid)
+    expect(p.skippedEvents,p.warnings.join(' | ')).toBe(0)
+    expect(p.records).toHaveLength(1)
+    expect(p.records[0].start).toBe('2026-10-19T08:00:00.000Z')
+    const unsafe=previewIcs(make('class',';TZID=Europe/Berlin',['EXDATE;TZID=America/New_York:20261020T100000']))
+    expect(unsafe.records).toHaveLength(0)
+    expect(unsafe.skippedEvents).toBe(1)
+    expect(unsafe.warnings.join(' ')).toMatch(/EXDATE.*clock/)
+    const initial=mergeIcs({schemaVersion:1,records:[record({id:'mine'})]},p).state
+    expect(()=>mergeIcs(initial,unsafe,'replace')).toThrow('incomplete')
+    expect(mergeIcs(initial,unsafe,'update').state.records).toEqual(initial.records)
+  })
+  it('rejects UTC suffix and floating EXDATE mixtures without guessing their physical instant',()=>{
+    const input=['BEGIN:VCALENDAR','BEGIN:VEVENT','UID:fixed','SUMMARY:Fixed class',
+      'DTSTART:20261019T100000Z','DURATION:PT1H','RRULE:FREQ=DAILY;COUNT=2',
+      'EXDATE:20261020T100000','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const result=previewIcs(input)
+    expect(result.skippedEvents).toBe(1)
+    expect(result.records).toHaveLength(0)
+    expect(result.warnings.join(' ')).toMatch(/EXDATE.*clock/)
+  })
+  it('rejects mixed-zone RECURRENCE-ID that would silently create a second incorrect occurrence',()=>{
+    const master=['BEGIN:VCALENDAR','X-WR-CALNAME:Clocks',
+      'BEGIN:VEVENT','UID:series','SUMMARY:Class',
+      'DTSTART;TZID=Europe/Berlin:20261019T100000','DURATION:PT1H',
+      'RRULE:FREQ=DAILY;COUNT=2','END:VEVENT']
+    const child=['BEGIN:VEVENT','UID:series','RECURRENCE-ID;TZID=America/New_York:20261020T100000',
+      'SUMMARY:Wrong original identity','DTSTART;TZID=America/New_York:20261020T140000',
+      'DURATION:PT1H','END:VEVENT']
+    const invalid=previewIcs([...master,...child,'END:VCALENDAR'].join('\r\n'))
+    expect(invalid.skippedEvents).toBe(1)
+    expect(invalid.records).toHaveLength(0)
+    expect(invalid.warnings.join(' ')).toMatch(/RECURRENCE-ID.*clock/)
+    const valid=previewIcs([...master,...child.map(line=>line.startsWith('RECURRENCE-ID')?
+      'RECURRENCE-ID;TZID=Europe/Berlin:20261020T100000':line),'END:VCALENDAR'].join('\r\n'))
+    expect(valid.skippedEvents,valid.warnings.join(' | ')).toBe(0)
+    expect(valid.records).toHaveLength(2)
+    expect(valid.records[1].sourceKey).toBe('Clocks|series|2026-10-20T08:00:00.000Z')
+    expect(valid.records[1].title).toBe('Wrong original identity')
+  })
+  it('rejects all-day recurrence exclusions and original keys carrying TZID',()=>{
+    const prefix=['BEGIN:VCALENDAR','X-WR-CALNAME:All-day clock',
+      'BEGIN:VEVENT','UID:days','SUMMARY:Retreat','DTSTART;VALUE=DATE:20261019',
+      'DURATION:P1D','RRULE:FREQ=DAILY;COUNT=2']
+    const result=previewIcs([...prefix,'EXDATE;TZID=Europe/Berlin;VALUE=DATE:20261020',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n'))
+    expect(result.skippedEvents).toBe(1)
+    expect(result.records).toHaveLength(0)
+    const base=[...prefix,'END:VEVENT']
+    const child=['BEGIN:VEVENT','UID:days',
+      'RECURRENCE-ID;TZID=Europe/Berlin;VALUE=DATE:20261020',
+      'SUMMARY:Moved','DTSTART;VALUE=DATE:20261021',
+      'DURATION:P1D','END:VEVENT']
+    const mixed=previewIcs([...base,...child,'END:VCALENDAR'].join('\r\n'))
+    expect(mixed.records).toHaveLength(0)
+    expect(mixed.skippedEvents).toBe(1)
+  })
+})
