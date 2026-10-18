@@ -1,6 +1,6 @@
 import {Plus,AlertTriangle} from 'lucide-react'
 import type {CalendarRecord,CalendarOccurrence,LocalDate} from '../types'
-import {dateLabel,localDate} from '../core/dates'
+import {localDate} from '../core/dates'
 import {dayOccurrences,conflictsOnDay} from '../core/occurrences'
 import {TimelineView} from './TimelineView'
 import {AgendaDay} from './AgendaDay'
