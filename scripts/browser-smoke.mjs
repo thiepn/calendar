@@ -2664,6 +2664,143 @@ async function exerciseC26DesktopFinderDayWindowAndStaleStorageGuard(){
   await context.close()
 }
 
+
+async function exerciseC27MobileMonthOverflowAllCanonicalEventsAndSafeHandoffs(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const dense=Array.from({length:24},(_,i)=>({
+    id:'c27-original-'+String(i).padStart(2,'0'),source:'personal',
+    title:'C27 Dense original '+String(i).padStart(2,'0'),description:'Preserve original '+i,location:'',
+    start:'2026-11-26T09:00:00.000Z',end:'2026-11-26T09:30:00.000Z',
+    allDay:false,updatedAt:'2026-10-18T09:00:00.000Z'
+  }))
+  const fixture={schemaVersion:1,records:[...dense,
+    {id:'c27-free-ics-original',source:'ics',sourceCalendar:'C27 Campus',
+      sourceKey:'C27 Campus|uid-unchanged',title:'C27 Campus free event',
+      description:'Read only',location:'',transparent:true,
+      start:'2026-11-26T07:00:00.000Z',end:'2026-11-26T08:00:00.000Z',
+      allDay:false,updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c27-weekly-parent',source:'personal',title:'C27 Weekly parent',description:'',
+      location:'',start:'2026-11-19T11:00:00.000Z',end:'2026-11-19T12:00:00.000Z',
+      repeat:{frequency:'weekly',interval:1},excludedDates:['2026-11-26'],
+      allDay:false,updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c27-detached-original',source:'personal',title:'C27 Detached original',
+      description:'Original detached ID',location:'',start:'2026-11-26T08:00:00.000Z',
+      end:'2026-11-26T09:00:00.000Z',recurrenceParentId:'c27-weekly-parent',
+      recurrenceDate:'2026-11-26',allDay:false,updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(value)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.locator('.view-switch button').filter({hasText:'Month'}).click()
+  const dayCell=page.locator('.month-cell').filter({has:page.getByRole('button',{name:'View events 2026-11-26'})})
+  const more=dayCell.getByRole('button',{name:'View all 26 events on 2026-11-26'})
+  await more.waitFor()
+  assert.match(await more.innerText(),/\+23 more/)
+  assert.equal(await dayCell.locator('.event-chip').count(),3)
+  await more.click()
+  const peek=page.getByRole('dialog',{name:'Events on 2026-11-26'})
+  await peek.waitFor()
+  assert.match(await peek.innerText(),/26 visible events/)
+  assert.equal(await peek.locator('.month-peek-event').count(),20)
+  assert.match(await peek.getByRole('navigation',{name:'Day event pages'}).innerText(),/Page 1 of 2/)
+  const free=peek.locator('.month-peek-event').filter({hasText:'C27 Campus free event'})
+  assert.match(await free.innerText(),/Imported · read only · Free/)
+  await free.click()
+  await peek.waitFor({state:'hidden'})
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.innerText(),/TRANSP:TRANSPARENT/)
+  assert.equal(await details.getByRole('button',{name:'Edit event'}).count(),0)
+  await details.getByRole('button',{name:'Close event'}).click()
+  await details.waitFor({state:'hidden'})
+  await dayCell.getByRole('button',{name:'View events 2026-11-26'}).click()
+  await peek.waitFor()
+  await peek.getByRole('button',{name:'Next events'}).click()
+  assert.match(await peek.getByRole('navigation',{name:'Day event pages'}).innerText(),/Showing 21–26 of 26/)
+  assert.equal(await peek.locator('.month-peek-event').count(),6)
+  const last=peek.locator('.month-peek-event').last()
+  assert.match(await last.innerText(),/C27 Dense original/)
+  await last.click()
+  await details.waitFor()
+  assert.match(await details.innerText(),/C27 Dense original/)
+  await details.getByRole('button',{name:'Close event'}).click()
+  await details.waitFor({state:'hidden'})
+  await dayCell.getByRole('button',{name:'View events 2026-11-26'}).click()
+  await peek.waitFor()
+  await peek.getByRole('button',{name:'Open Day view'}).click()
+  await peek.waitFor({state:'hidden'})
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-11-26')
+  assert.equal(await page.locator('.view-switch button.active').innerText(),'Day')
+  await page.locator('.view-switch button').filter({hasText:'Month'}).click()
+  await page.getByRole('button',{name:'View events 2026-11-27'}).click()
+  await page.getByRole('dialog',{name:'Events on 2026-11-27'}).waitFor()
+  const empty=page.getByRole('dialog',{name:'Events on 2026-11-27'})
+  assert.match(await empty.innerText(),/0 visible events/)
+  await empty.getByRole('button',{name:'New personal event'}).click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.waitFor()
+  await editor.getByRole('button',{name:'Cancel'}).click()
+  await editor.waitFor({state:'hidden'})
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture,
+    'C27 month peek, overflow paging, transparent ICS, detail and canceled creation must not rewrite original records')
+  const overflow=await page.evaluate(()=>({w:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(overflow.scroll<=overflow.w+2,'C27 month mobile overflow: '+JSON.stringify(overflow))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C27_MOBILE_MONTH_ALL_EVENTS_ICS_PAGINATION_DAY_AND_CANCEL_PASS')
+  await context.close()
+}
+async function exerciseC27DesktopMonthFilterAndDetachedOriginalIdentity(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const fixture={schemaVersion:1,records:[
+    {id:'c27-desktop-personal',source:'personal',title:'C27 Desktop personal',description:'',
+      location:'',allDay:false,start:'2026-11-26T09:00:00.000Z',
+      end:'2026-11-26T10:00:00.000Z',updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c27-desktop-import',source:'ics',sourceCalendar:'Hidden Desk',sourceKey:'original-uid',
+      title:'C27 Desktop hidden busy',description:'',location:'',allDay:false,
+      start:'2026-11-26T08:00:00.000Z',end:'2026-11-26T09:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c27-desktop-parent',source:'personal',title:'C27 Desktop weekly parent',description:'',
+      location:'',allDay:false,repeat:{frequency:'weekly',interval:1},excludedDates:['2026-11-26'],
+      start:'2026-11-19T10:00:00.000Z',end:'2026-11-19T11:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c27-desktop-detached',source:'personal',recurrenceParentId:'c27-desktop-parent',
+      recurrenceDate:'2026-11-26',title:'C27 Desktop detached original',description:'',
+      location:'',allDay:false,start:'2026-11-26T11:00:00.000Z',
+      end:'2026-11-26T12:00:00.000Z',updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(state=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.locator('.view-switch button').filter({hasText:'Month'}).click()
+  await page.getByRole('button',{name:'Toggle imported calendar Hidden Desk'}).click()
+  await page.getByRole('button',{name:'View events 2026-11-26'}).click()
+  const peek=page.getByRole('dialog',{name:'Events on 2026-11-26'})
+  await peek.waitFor()
+  assert.match(await peek.innerText(),/2 visible events/)
+  assert.equal(await peek.locator('.month-peek-event').count(),2)
+  assert.equal(await peek.locator('.month-peek-event').filter({hasText:'C27 Desktop hidden busy'}).count(),0)
+  const detached=peek.locator('.month-peek-event').filter({hasText:'C27 Desktop detached original'})
+  await detached.click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.innerText(),/Original series date: 2026-11-26/)
+  assert.equal(await details.getByRole('button',{name:'Restore original date'}).count(),1)
+  await details.getByRole('button',{name:'Close event'}).click()
+  await details.waitFor({state:'hidden'})
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C27_DESKTOP_MONTH_HIDDEN_SOURCE_DETACHED_IDENTITY_NO_WRITES_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -2721,6 +2858,8 @@ try{
   await exerciseC25DesktopSourceFilteredNavigationAndNoWrites()
   await exerciseC26MobileContextualSingleDayFinderOriginalSources()
   await exerciseC26DesktopFinderDayWindowAndStaleStorageGuard()
+  await exerciseC27MobileMonthOverflowAllCanonicalEventsAndSafeHandoffs()
+  await exerciseC27DesktopMonthFilterAndDetachedOriginalIdentity()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
