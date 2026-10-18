@@ -268,3 +268,13 @@
  .planning-day{flex:0 0 137px;scroll-snap-align:start;min-height:102px}
 }
 @media(max-width:740px){.planning-overview{margin:0 0 10px;padding:10px}.planning-day{min-height:115px}.planning-overview-heading{display:grid}}
+
+/* C14: Five Find Time options, with accessible touch targets and no mobile overflow. */
+@media(min-width:521px){.finder-options{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:520px){
+ .finder-dialog .finder-options{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+ .finder-dialog .finder-options label:nth-child(5){grid-column:1/-1}
+ .finder-dialog .finder-options select{min-height:43px;font-size:13px}
+ .finder-dialog .finder-slot{min-height:56px}
+}
+@media(max-width:340px){.finder-dialog .finder-options{grid-template-columns:1fr}.finder-dialog .finder-options label:nth-child(5){grid-column:auto}}

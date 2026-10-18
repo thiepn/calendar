@@ -1238,6 +1238,104 @@ async function exerciseC13MobileDstPlanningAndStaleReminder(){
   await context.close()
 }
 
+
+async function exerciseC14YearlyFinderDesktop(){
+  const ctx=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await ctx.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const source=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C14 Annual',
+    'BEGIN:VEVENT','UID:c14-annual','SUMMARY:C14 annual review',
+    'DTSTART;VALUE=DATE:20260228','DTEND;VALUE=DATE:20260301',
+    'RRULE:FREQ=YEARLY;COUNT=2;BYMONTH=2;BYMONTHDAY=-1',
+    'END:VEVENT','END:VCALENDAR'].join('\r\n')
+  const choose=()=>page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'annual.ics',mimeType:'text/calendar',buffer:Buffer.from(source)})
+  await choose()
+  let review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  assert.match(await review.getByLabel('Import change preview').innerText(),/2 new/)
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const imported=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.deepEqual(imported.map(x=>x.startDate),['2026-02-28','2027-02-28'])
+  assert.ok(imported.every(x=>x.source==='ics'&&!x.repeat))
+  await choose()
+  review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  assert.match(await review.getByLabel('Import change preview').innerText(),/2 unchanged/)
+  await review.getByRole('button',{name:'Cancel'}).click()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records),imported)
+  console.log('BROWSER_C14_YEARLY_BYMONTH_ORIGINAL_UID_REFRESH_PASS')
+
+  const date=await page.evaluate(()=>{
+    const d=new Date('2031-03-10T12:00:00')
+    d.setDate(d.getDate()+(8-d.getDay())%7)
+    return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-')
+  })
+  await page.evaluate(date=>{
+    const state=JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))
+    state.records.push({id:'c14-imported-blocker',title:'Hidden imported session',
+      description:'',location:'',source:'ics',sourceCalendar:'Private ICS',sourceKey:'c14-block',
+      start:new Date(date+'T08:00:00').toISOString(),
+      end:new Date(date+'T12:00:00').toISOString(),allDay:false,updatedAt:new Date().toISOString()})
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state))
+  },date)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill(date)
+  await page.getByRole('button',{name:'Find time'}).click()
+  const finder=page.getByRole('dialog',{name:'Find an available time'})
+  await finder.waitFor()
+  await finder.getByLabel('Preferred days').selectOption('weekdays')
+  await finder.getByLabel('Spacing between commitments').selectOption('0')
+  assert.match(await finder.locator('.finder-slot').first().innerText(),/12:00/)
+  await finder.getByLabel('Spacing between commitments').selectOption('30')
+  assert.match(await finder.locator('.finder-slot').first().innerText(),/12:30/)
+  await finder.getByLabel('Preferred days').selectOption('weekends')
+  assert.match(await finder.locator('.finder-slot').first().innerText(),/Sat/)
+  await finder.getByLabel('Preferred days').selectOption('weekdays')
+  await page.evaluate(date=>{
+    const state=JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))
+    state.records.push({id:'c14-other-tab',title:'Another local event',
+      description:'',location:'',source:'personal',
+      start:new Date(date+'T12:30:00').toISOString(),
+      end:new Date(date+'T13:30:00').toISOString(),allDay:false,updatedAt:new Date().toISOString()})
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state))
+  },date)
+  await finder.locator('.finder-slot').first().click()
+  assert.equal(await page.getByRole('dialog',{name:'New event'}).count(),0,
+    'A stale finder suggestion must not open a prefilled personal event')
+  assert.match(await page.locator('.notice').last().innerText(),/Time proposal not opened/)
+  assert.equal(await finder.count(),1)
+  assert.equal((await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)).length,4)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C14_WEEKDAY_WEEKEND_BUFFER_CROSS_TAB_GUARD_PASS')
+  await ctx.close()
+}
+async function exerciseC14MobileFinder(){
+  const ctx=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await ctx.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2031-03-10')
+  await page.getByRole('button',{name:'Find time'}).click()
+  const finder=page.getByRole('dialog',{name:'Find an available time'})
+  await finder.getByLabel('Preferred days').selectOption('weekdays')
+  await finder.getByLabel('Spacing between commitments').selectOption('15')
+  assert.ok(await finder.locator('.finder-slot').count()>0)
+  const measure=await page.evaluate(()=>({viewport:innerWidth,content:document.documentElement.scrollWidth}))
+  assert.ok(measure.content<=measure.viewport+2,'C14 mobile finder overflow '+JSON.stringify(measure))
+  await finder.locator('.finder-slot').first().click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.waitFor()
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),null,
+    'Finding a time must not write source records until explicitly saved')
+  await editor.getByRole('button',{name:'Cancel'}).click()
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C14_MOBILE_PREFERENCES_AND_ORIGINAL_DRAFT_PASS')
+  await ctx.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -1268,6 +1366,8 @@ try{
   await exerciseC12MobileAdditiveRecovery()
   await exerciseC13DesktopIcsAndWorkload()
   await exerciseC13MobileDstPlanningAndStaleReminder()
+  await exerciseC14YearlyFinderDesktop()
+  await exerciseC14MobileFinder()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
