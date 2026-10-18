@@ -2311,6 +2311,107 @@ async function exerciseC23DesktopEditorUnchanged(){
   await context.close()
 }
 
+
+async function exerciseC24MobileSearchPageNavigationAndCanonicalDetails(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const fixture={schemaVersion:1,records:[
+    {id:'c24-original-daily',source:'personal',title:'C24 Recurring review',
+      description:'Original, never copied',location:'',
+      start:'2026-10-18T07:00:00.000Z',end:'2026-10-18T08:00:00.000Z',
+      allDay:false,repeat:{frequency:'daily',interval:1},excludedDates:['2026-10-20'],
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c24-detached',source:'personal',title:'C24 Recurring review — moved instance',
+      description:'Original detached identity',location:'',
+      start:'2026-10-20T10:00:00.000Z',end:'2026-10-20T11:00:00.000Z',
+      allDay:false,recurrenceParentId:'c24-original-daily',recurrenceDate:'2026-10-20',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c24-free-original',source:'ics',sourceCalendar:'C24 Campus',
+      sourceKey:'C24 Campus|c24-free-original',title:'C24 Free imported',
+      description:'Read-only original',location:'',
+      start:'2026-10-28T07:00:00.000Z',end:'2026-10-28T08:00:00.000Z',
+      allDay:false,transparent:true,updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(value)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-10-18')
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  const mobileTrigger=page.getByRole('button',{name:'Focus event search'})
+  assert.equal(await mobileTrigger.isVisible(),true,'C24 mobile must expose a real search activation control')
+  await mobileTrigger.click()
+  const input=page.getByLabel('Search calendar events')
+  assert.equal(await input.evaluate(el=>document.activeElement===el),true,'Mobile search must focus input')
+  await input.fill('C24 Recurring review')
+  const panel=page.getByRole('region',{name:'Calendar search results'})
+  await panel.getByRole('button',{name:'Next results'}).waitFor()
+  assert.match(await panel.innerText(),/365 occurrences found/)
+  assert.match(await panel.innerText(),/showing 1–30/)
+  assert.equal(await panel.locator('.search-results-items button').count(),30)
+  await panel.getByRole('button',{name:'Next results'}).click()
+  assert.match(await panel.innerText(),/showing 31–60/)
+  assert.match(await panel.innerText(),/Page 2 of 13/)
+  assert.equal(await panel.getByRole('button',{name:'Previous results'}).isEnabled(),true)
+  assert.equal(await panel.locator('.search-results-items button').count(),30)
+  await panel.getByRole('button',{name:'Previous results'}).click()
+  assert.match(await panel.innerText(),/showing 1–30/)
+  await panel.getByRole('button',{name:'Next results'}).click()
+  const third=panel.locator('.search-results-items button').first()
+  assert.match(await third.innerText(),/C24 Recurring review/)
+  await third.click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.innerText(),/C24 Recurring review/)
+  await details.getByRole('button',{name:'Close event'}).click()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture,
+    'Pagination and details must not rewrite personal/recurring originals')
+  await input.fill('C24 Free imported')
+  assert.match(await panel.innerText(),/1 occurrence found/)
+  assert.equal(await panel.getByRole('button',{name:'Next results'}).count(),0)
+  await panel.locator('.search-results-items button').first().click()
+  const imported=page.getByRole('dialog',{name:'Event details'})
+  assert.match(await imported.innerText(),/TRANSP:TRANSPARENT/)
+  assert.equal(await imported.getByRole('button',{name:'Edit event'}).count(),0)
+  await imported.getByRole('button',{name:'Close event'}).click()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  const overflow=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(overflow.scroll<=overflow.width+2,'Search mobile body overflow: '+JSON.stringify(overflow))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C24_MOBILE_EXPLICIT_SEARCH_PAGED_CANONICAL_RECURRING_ICS_PASS')
+  await context.close()
+}
+async function exerciseC24DesktopReverseSearchPagesAndFilterReset(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const fixture={schemaVersion:1,records:[{id:'c24-year-long',source:'personal',
+    title:'C24 Year series',description:'',location:'',
+    start:'2026-01-01T11:00:00.000Z',end:'2026-01-01T12:00:00.000Z',
+    allDay:false,repeat:{frequency:'daily',interval:1},updatedAt:'2026-01-01T00:00:00.000Z'}]}
+  await page.evaluate(state=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-12-31')
+  assert.equal(await page.getByRole('button',{name:'Focus event search'}).isVisible(),false)
+  await page.getByLabel('Search calendar events').fill('C24 Year series')
+  const region=page.getByRole('region',{name:'Calendar search results'})
+  await region.getByLabel('Search period').selectOption('backward')
+  assert.match(await region.innerText(),/365 occurrences found/)
+  assert.match(await region.locator('.search-results-items button').first().innerText(),/Dec 31, 2026/)
+  await region.getByRole('button',{name:'Next results'}).click()
+  assert.match(await region.innerText(),/showing 31–60/)
+  assert.match(await region.locator('.search-results-items button').first().innerText(),/Dec 1, 2026/)
+  await region.getByLabel('Search period').selectOption('forward')
+  assert.match(await region.innerText(),/showing 1–/)
+  assert.equal(await region.getByRole('button',{name:'Next results'}).count(),0)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C24_DESKTOP_REVERSE_CHRONOLOGY_SEARCH_RESET_SOURCE_INTACT_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -2362,6 +2463,8 @@ try{
   await exerciseC23MobileQuickDraftAndOriginalEdit()
   await exerciseC23MobileDstAndAllDayGuard()
   await exerciseC23DesktopEditorUnchanged()
+  await exerciseC24MobileSearchPageNavigationAndCanonicalDetails()
+  await exerciseC24DesktopReverseSearchPagesAndFilterReset()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
