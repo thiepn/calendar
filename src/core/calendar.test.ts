@@ -854,7 +854,7 @@ describe('C12 bounded source-owned monthly BYMONTHDAY interoperability',()=>{
       'DTSTART;TZID=Europe/Berlin:20260131T100000','DTEND;TZID=Europe/Berlin:20260131T110000',
       'RRULE:FREQ=MONTHLY;COUNT=4;BYMONTHDAY=-1','END:VEVENT','END:VCALENDAR'].join('\r\n')
     const p=previewIcs(input)
-    expect(p.skippedEvents).toBe(0)
+    expect(p.skippedEvents,p.warnings.join(' | ')).toBe(0)
     expect(p.records.map(r=>r.start)).toEqual([
       '2026-01-31T09:00:00.000Z','2026-02-28T09:00:00.000Z',
       '2026-03-31T08:00:00.000Z','2026-04-30T08:00:00.000Z'])
