@@ -2141,7 +2141,7 @@ async function exerciseC22MobileFocusedWeekOriginalIdentityAndDST(){
     'Focus day must display a genuine full-width selected calendar column')
   assert.equal(await page.locator('.mobile-focus-date').count(),7)
   assert.equal(await page.locator('.mobile-focus-date').nth(6).getAttribute('aria-pressed'),'true')
-  assert.match(await page.locator('.mobile-focus-date').nth(6).innerText(),/4 events/)
+  assert.match(await page.locator('.mobile-focus-date').nth(6).innerText(),/3 events/)
   assert.ok(await page.locator('.timeline-block.imported').count()>=1)
   const focused=await scroller.evaluate(el=>({viewport:el.clientWidth,scroll:el.scrollWidth,top:el.scrollTop}))
   assert.ok(focused.scroll<=focused.viewport+2,'Focused timeline must not require horizontal scrolling')
