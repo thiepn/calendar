@@ -70,6 +70,16 @@ function parseInstant(p:Property):{iso:string;date?:string} {
     throw new Error('Ambiguous floating local time (DST)')
   return {iso:local.toISOString()}
 }
+/** EXDATE and RECURRENCE-ID identify the ORIGINAL source-wall instant.
+ * Refuse a different TZID, UTC marker or value type rather than silently
+ * omitting the wrong instance while pretending the import is complete. */
+function ensureTimedOriginalClock(master:Property,part:Property,value:string,label:string):void {
+  if(part.params.VALUE&&part.params.VALUE!=='DATE-TIME')
+    throw new Error(label+' must be DATE-TIME')
+  if((part.params.TZID??'')!==(master.params.TZID??'')||
+     timedWallTemplate(value).suffix!==timedWallTemplate(master.value).suffix)
+    throw new Error(label+' must match original DTSTART clock system')
+}
 export function previewIcs(text:string):IcsPreview {
   if(text.length>2_000_000)throw new Error('ICS file is too large (2 MB maximum)')
   const lines=unfolded(text)
@@ -178,8 +188,10 @@ export function previewIcs(text:string):IcsPreview {
           const generated:CalendarRecord[]=[]
           const excluded=new Set<string>()
           for(const ex of props.filter(p=>p.name==='EXDATE')){
-            if(ex.params.VALUE==='DATE')throw new Error('Timed EXDATE cannot be date-only')
-            for(const value of ex.value.split(','))excluded.add(parseInstant({...ex,value}).iso)
+            for(const value of ex.value.split(',')){
+              ensureTimedOriginalClock(rawStart,ex,value,'Timed EXDATE')
+              excluded.add(parseInstant({...ex,value}).iso)
+            }
           }
           const overrides=new Map<string,Property[]>()
           for(const child of items){
@@ -191,7 +203,7 @@ export function previewIcs(text:string):IcsPreview {
                child.filter(p=>p.name==='DTEND').length>1||
                child.filter(p=>p.name==='DURATION').length>1)
               throw new Error('Duplicate timed override properties')
-            if(originalId.params.VALUE==='DATE')throw new Error('Timed RECURRENCE-ID cannot be date-only')
+            ensureTimedOriginalClock(rawStart,originalId,originalId.value,'Timed RECURRENCE-ID')
             const target=parseInstant(originalId).iso
             if(overrides.has(target))throw new Error('Duplicate timed RECURRENCE-ID override')
             overrides.set(target,child)
@@ -256,7 +268,8 @@ export function previewIcs(text:string):IcsPreview {
         const exdateValues=props.filter(p=>p.name==='EXDATE')
         const excluded:string[]=[]
         for(const ex of exdateValues){
-          if(ex.params.VALUE&&ex.params.VALUE!=='DATE')throw new Error('Unsupported EXDATE timezone; recurrence not imported')
+          if(ex.params.TZID||(ex.params.VALUE&&ex.params.VALUE!=='DATE'))
+            throw new Error('All-day EXDATE must use DATE without TZID')
           for(const v of ex.value.split(','))excluded.push(dateOnly(v))
         }
         const expanded=Array.from(eligible).filter(d=>!excluded.includes(d)).sort()
@@ -265,8 +278,11 @@ export function previewIcs(text:string):IcsPreview {
         for(const [key,replacement] of replacements){
           if(!key.startsWith(uid+'|'))continue
           if(duplicateAllDayOverrides.has(key))throw new Error('Duplicate all-day RECURRENCE-ID override')
-          if(replacement.find(p=>p.name==='RECURRENCE-ID')?.params.RANGE)
+          const originalId=replacement.find(p=>p.name==='RECURRENCE-ID')
+          if(originalId?.params.RANGE)
             throw new Error('All-day RECURRENCE-ID RANGE is unsupported')
+          if(originalId?.params.TZID||(originalId?.params.VALUE&&originalId.params.VALUE!=='DATE'))
+            throw new Error('All-day RECURRENCE-ID must use DATE without TZID')
           if(['DTSTART','DTEND','DURATION'].some(field=>replacement.filter(p=>p.name===field).length>1))
             throw new Error('Duplicate all-day override properties')
           const originalDate=dateOnly(key.slice(uid.length+1))
