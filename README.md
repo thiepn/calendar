@@ -228,3 +228,21 @@ The previous timed Move/Resize review disclosed collisions against imported and 
 - **Tests:** Source tests verify candidate eligibility against hidden imported events, only-one-instance recurrence exclusion, all-day blocks, busy buffers, unknown/changed original events, invalid or long time windows, fresh-source changes and unchanged saved record identities. Actual automated Chromium desktop/mobile workflows cover the dialog, alternative selection and explicit save, mobile series coexistence, touch/layout and a simulated stale-tab refusal.
 
 This remains **a local standalone calendar**: no remote attendee booking, Folio changes, provider authority transfer, notification changes, new storage schema, credentials, migrations or background scheduling are introduced. Physical devices, Safari/Firefox and live provider interoperability remain separate release gates.
+
+## C21 — source-accurate ICS free/busy transparency
+
+Finite read-only imported VEVENT entries with RFC 5545 `TRANSP:TRANSPARENT`
+remain visible and searchable but do not block Find time, adjusted-event
+alternatives, busy-day jumps, overlap reviews or busy-minute workload totals.
+Missing `TRANSP` and `TRANSP:OPAQUE` continue to block time. Bounded
+recurring masters and detached original-UID overrides inherit or override
+transparency without changing event IDs or RECURRENCE-ID identity.
+
+Unsupported and duplicate transparency values cause a guarded incomplete import:
+existing snapshots cannot be destructively replaced. Original imported free/busy
+flips appear in the per-event review; on confirmation the original source ID is
+retained. Only imported records can have a transparent field, optional in the
+existing schemaVersion 1 for backward-compatible device-only backups; personal
+copies become normal busy appointments. Every saved imported snapshot counts
+towards source-complete free/busy even if visually hidden. No Folio authority,
+external provider write, sync service or migration is introduced.

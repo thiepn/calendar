@@ -653,7 +653,7 @@ export default function App(){
           <div className="search-results-items">{searchMatches.map(item=><button key={item.key} type="button" onClick={()=>{setMode('day');open(item)}}>
             <span className="search-result-date">{dateLabel(item.startDate,{month:'short',day:'numeric',year:'numeric'})}</span>
             <span className="search-result-title">{item.title}</span>
-            <small>{item.source==='ics'?'Imported · read only':'Personal'} · {item.allDay?'All day':new Date(item.start).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small>
+            <small>{item.source==='ics'?'Imported · read only':'Personal'}{item.transparent?' · Free (non-blocking)':''} · {item.allDay?'All day':new Date(item.start).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small>
           </button>)}
           {!searchMatches.length&&<p className="empty-note">No matching saved events in this 365-day window. Choose previous/next year or change the selected date.</p>}</div>
         </section>}
@@ -671,7 +671,7 @@ export default function App(){
               {item.overlaps&&<span className="planning-overlap">Overlapping times</span>}
             </button>)}
           </div>
-          <p className="fine-print">Scheduled timed minutes are combined without counting overlaps twice, including entries crossing midnight or DST. All-day entries are listed separately; this is not a free-time guarantee. Open a day to plan a personal event.</p>
+          <p className="fine-print">Busy timed minutes exclude imported free (TRANSP:TRANSPARENT) entries and never double-count overlaps across midnight or DST. All-day entries are listed separately; this is not a free-time guarantee. Open a day to plan a personal event.</p>
         </section>}
         {mode==='agenda'&&<div className="agenda-options">
           <label>Agenda range<select aria-label="Agenda range" value={agendaSpan} onChange={e=>setAgendaSpan(Number(e.target.value) as 14|30)}>
@@ -825,7 +825,8 @@ export default function App(){
         <header className="editor-head"><span className="eyebrow">{active.source==='ics'?'IMPORTED SNAPSHOT — READ ONLY':'PERSONAL EVENT'}</span><button className="icon-button" aria-label="Close event" onClick={()=>setActive(null)}><X size={19}/></button></header>
         <h2>{active.title}</h2><p className="details-dates">{active.allDay?'All day · '+friendlyRange(active.startDate,addDays(active.endDateExclusive,-1)):new Date(active.start).toLocaleString()+' – '+new Date(active.end).toLocaleString()}</p>
         {active.location&&<p><strong>Location:</strong> {active.location}</p>}{active.description&&<p className="description">{active.description}</p>}
-        {active.source==='ics'&&<div className="readonly-note"><AlertTriangle size={16}/> Imported from {active.sourceCalendar}. Editing the original requires the source calendar. This is only a local copy. You may create a separate personal event without modifying this snapshot.</div>}
+        {active.transparent&&<div className="nonblocking-note">Imported as free (TRANSP:TRANSPARENT). This event remains visible but does not block Find time or produce overlap warnings. A separate personal copy is an ordinary busy event.</div>}
+         {active.source==='ics'&&<div className="readonly-note"><AlertTriangle size={16}/> Imported from {active.sourceCalendar}. Editing the original requires the source calendar. This is only a local copy. You may create a separate personal event without modifying this snapshot.</div>}
         {activeRecord?.recurrenceParentId&&<div className="readonly-note">Edited occurrence from a recurring series. Original series date: {activeRecord.recurrenceDate}.</div>}
         {active.source==='personal'&&<div className="move-control"><label>Move to date<input type="date" value={moveDate} onChange={ev=>setMoveDate(ev.target.value)}/></label>
           <button className="secondary" type="button" disabled={!moveDate||moveDate===active.startDate} onClick={()=>move(active)}>Move event</button>
@@ -891,7 +892,8 @@ export default function App(){
               {before&&<small>Before: {before.allDay?before.startDate:new Date(before.start).toLocaleString()}
                 {after&&before.title!==after.title?' · '+before.title:''}</small>}
               {after&&<small>After: {after.allDay?after.startDate:new Date(after.start).toLocaleString()}</small>}
-              {item.changedFields.length>0&&<small>Changed: {item.changedFields.join(', ')}</small>}
+              {after?.transparent&&<small>Free · does not block time</small>}
+              {item.changedFields.length>0&&<small>Changed: {item.changedFields.map(field=>field==='transparent'?'free/busy status':field).join(', ')}</small>}
             </div>
           })}
           {!importReview.changes.changes.some(item=>item.kind!=='unchanged')&&

@@ -407,3 +407,7 @@
  .adjust-alternative-options{grid-template-columns:1fr}
  .adjust-alternative-list button span:last-child{font-size:10px}
 }
+
+/* C21: original imported source transparency is visible, not editable. */
+.nonblocking-note{padding:12px;margin:14px 0;border:1px solid #cfe0d1;background:#f3f8f4;color:#345d45;font-size:12px;line-height:1.6}
+.event-chip.imported small{white-space:normal}
