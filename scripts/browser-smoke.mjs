@@ -1336,6 +1336,118 @@ async function exerciseC14MobileFinder(){
   await ctx.close()
 }
 
+
+async function exerciseC15OrdinalAnnualAndTwoIndependentSources(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const annual=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:University',
+    'BEGIN:VEVENT','UID:annual-thursday','SUMMARY:C15 annual study review',
+    'DTSTART;VALUE=DATE:20261126','DTEND;VALUE=DATE:20261127',
+    'RRULE:FREQ=YEARLY;COUNT=2;BYMONTH=11;BYDAY=4TH',
+    'END:VEVENT','END:VCALENDAR'].join('\r\n')
+  const work=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:Work',
+    'BEGIN:VEVENT','UID:busy-friday','SUMMARY:C15 hidden imported shift',
+    'DTSTART;TZID=Europe/Berlin:20261127T080000',
+    'DURATION:PT4H','END:VEVENT','END:VCALENDAR'].join('\r\n')
+  async function importOne(data,name,count){
+    await page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+      name,mimeType:'text/calendar',buffer:Buffer.from(data)})
+    const dialog=page.getByRole('dialog',{name:'ICS import review'})
+    await dialog.waitFor()
+    assert.match(await dialog.getByLabel('Import change preview').innerText(),new RegExp(count+' new'))
+    await dialog.getByRole('button',{name:'Apply reviewed changes'}).click()
+  }
+  await importOne(annual,'c15-yearly.ics',2)
+  await importOne(work,'c15-shift.ics',1)
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.deepEqual(before.records.filter(x=>x.sourceCalendar==='University').map(x=>x.startDate),
+    ['2026-11-26','2027-11-25'])
+  assert.equal(before.records.length,3)
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.locator('.view-switch button').filter({hasText:'Week'}).click()
+  const workload=page.getByRole('region',{name:'Seven-day planning overview'})
+  assert.match(await workload.getByRole('button',{name:'Open daily plan 2026-11-26'}).innerText(),/1 event/)
+  await page.getByRole('button',{name:'Toggle imported calendar University'}).click()
+  assert.equal(await page.getByRole('button',{name:'Toggle imported calendar University'}).getAttribute('aria-pressed'),'false')
+  assert.match(await workload.getByRole('button',{name:'Open daily plan 2026-11-26'}).innerText(),/0 events/)
+  await page.getByLabel('Search calendar events').fill('annual study review')
+  const search=page.getByRole('region',{name:'Calendar search results'})
+  assert.match(await search.innerText(),/No matching saved events/)
+  await page.getByLabel('Search calendar events').fill('')
+  await page.getByRole('button',{name:'Toggle imported calendar Work'}).click()
+  await page.getByLabel('Jump to date').fill('2026-11-27')
+  assert.match(await workload.getByRole('button',{name:'Open daily plan 2026-11-27'}).innerText(),/0 events/)
+  await page.getByRole('button',{name:'Find time'}).click()
+  const finder=page.getByRole('dialog',{name:'Find an available time'})
+  assert.match(await finder.locator('.finder-slot').first().innerText(),/12:00/,
+    'Find Time must still count visually hidden imported source commitments')
+  await finder.getByRole('button',{name:'Close time finder'}).click()
+  const after=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.deepEqual(after,before,'Visibility changes must never mutate any original calendar record')
+  await page.reload({waitUntil:'networkidle'})
+  assert.equal(await page.getByRole('button',{name:'Toggle imported calendar University'}).getAttribute('aria-pressed'),'false')
+  assert.equal(await page.getByRole('button',{name:'Toggle imported calendar Work'}).getAttribute('aria-pressed'),'false')
+  assert.match(await page.getByRole('region',{name:'Seven-day planning overview'})
+    .getByRole('button',{name:'Open daily plan 2026-11-27'}).innerText(),/0 events/)
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  const manage=page.getByRole('dialog',{name:'Calendar data management'})
+  const uni=manage.getByLabel('Show University on calendar')
+  const shift=manage.getByLabel('Show Work on calendar')
+  assert.equal(await uni.isChecked(),false)
+  assert.equal(await shift.isChecked(),false)
+  await uni.check()
+  assert.equal(await uni.isChecked(),true)
+  assert.equal(await shift.isChecked(),false)
+  await shift.check()
+  const final=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.deepEqual(final,before)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C15_ORDINAL_YEARLY_DUAL_SOURCE_DISPLAY_PERSISTENCE_AND_FIND_TIME_AUTHORITY_PASS')
+  await context.close()
+}
+async function exerciseC15MobileSourceVisibilityAndAccountBoundaries(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const original={
+    schemaVersion:1,records:[
+      {id:'mobile-uni',title:'University day',description:'',location:'',allDay:true,
+        start:'2026-11-26T00:00:00.000Z',end:'2026-11-27T00:00:00.000Z',
+        startDate:'2026-11-26',endDateExclusive:'2026-11-27',
+        source:'ics',sourceCalendar:'University',sourceKey:'University|a',updatedAt:'2026-10-18T00:00:00.000Z'},
+      {id:'mobile-work',title:'Work event',description:'',location:'',allDay:false,
+        start:'2026-11-26T08:00:00.000Z',end:'2026-11-26T09:00:00.000Z',
+        source:'ics',sourceCalendar:'Work',sourceKey:'Work|b',updatedAt:'2026-10-18T00:00:00.000Z'}
+    ]
+  }
+  await page.evaluate(state=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state)),original)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  const university=page.getByRole('button',{name:'Toggle imported calendar University'})
+  await university.click()
+  assert.equal(await university.getAttribute('aria-pressed'),'false')
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  const panel=page.getByRole('dialog',{name:'Calendar data management'})
+  const visible=panel.getByLabel('Show University on calendar')
+  assert.equal(await visible.isChecked(),false)
+  await visible.check()
+  assert.equal(await visible.isChecked(),true)
+  const size=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(size.scroll<=size.width+2,'C15 mobile source controls overflow '+JSON.stringify(size))
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),original)
+  await panel.getByRole('button',{name:'Close sources'}).click()
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  const result=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.view-preferences.v1'))
+  assert.ok(result&&JSON.parse(result).hiddenImportedCalendars.length===0)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C15_MOBILE_SNAPSHOT_TOGGLE_AND_ORIGINAL_DATA_BOUNDARY_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -1368,6 +1480,8 @@ try{
   await exerciseC13MobileDstPlanningAndStaleReminder()
   await exerciseC14YearlyFinderDesktop()
   await exerciseC14MobileFinder()
+  await exerciseC15OrdinalAnnualAndTwoIndependentSources()
+  await exerciseC15MobileSourceVisibilityAndAccountBoundaries()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
