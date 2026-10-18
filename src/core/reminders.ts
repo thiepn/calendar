@@ -1,5 +1,5 @@
 import type {CalendarOccurrence,CalendarRecord,CalendarState} from '../types'
-import {addDays,localDate} from './dates'
+import {addDays,localDate,fromUnambiguousLocalDateTime} from './dates'
 import {occurrencesBetween} from './occurrences'
 
 export const REMINDER_LEADS=[0,5,10,15,30,60,120,1440,10080] as const
@@ -35,7 +35,40 @@ export function reminderItems(state:CalendarState,nowIso:string,actions:Reminder
   const personal=state.records.filter(r=>r.source==='personal'&&validReminderLead(r.reminderMinutes))
   const parents=new Map(personal.map(r=>[r.id,r]))
   const result:ReminderItem[]=[]
-  for(const occ of occurrencesBetween(personal,from,to)){
+  const occurrenceCandidates=occurrencesBetween(personal,from,to)
+  // C19: An explicitly snoozed reminder must remain actionable after its
+  // ORIGINAL event moves out of the 24-hour / seven-day review window.
+  // Resolve ONLY original source IDs and occurrence dates referenced by
+  // currently relevant snoozes. Do not broaden all recurring events'
+  // expansion indefinitely or synthesize new source events.
+  const candidateKeys=new Set(occurrenceCandidates.map(occ=>{
+    const parent=parents.get(occ.recordId)
+    return parent?.reminderMinutes===undefined?'':reminderKey(occ,parent.reminderMinutes)
+  }))
+  for(const [key,action] of Object.entries(actions)){
+    if(action.kind!=='snooze'||!action.until)continue
+    const snoozed=Date.parse(action.until)
+    if(!Number.isFinite(snoozed)||snoozed<now-lookBackDays*86400000||
+      snoozed>now+lookAheadDays*86400000||candidateKeys.has(key))continue
+    // The original composite key is [recordId,sourceDate,sourceStart,lead].
+    // Parse from the RIGHT: externally restored personal IDs can contain "|".
+    const pieces=key.split('|')
+    if(pieces.length<4)continue
+    const sourceDate=pieces[pieces.length-3]
+    const recordId=pieces.slice(0,-3).join('|')
+    const parent=parents.get(recordId)
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(sourceDate)||!parent||
+      parent.reminderMinutes===undefined)continue
+    try{
+      const original=occurrencesBetween([parent],sourceDate,sourceDate)
+        .find(occ=>reminderKey(occ,parent.reminderMinutes!)===key)
+      if(original){occurrenceCandidates.push(original);candidateKeys.add(key)}
+    }catch{
+      // Corrupt or no-longer-valid date/action keys are not trusted reminders.
+      continue
+    }
+  }
+  for(const occ of occurrenceCandidates){
     const record=parents.get(occ.recordId)
     if(!record||record.reminderMinutes===undefined)continue
     // All-day occurrences use their real start instant, not midnight UTC.
@@ -58,6 +91,19 @@ export function proposedSnooze(item:ReminderItem,minutes:5|15|60,nowIso:string):
     throw new Error('Invalid snooze request')
   return actionForReminder(item.key,{kind:'snooze',
     until:new Date(Math.max(now,scheduled)+minutes*60000).toISOString()},nowIso)
+}
+/** Deliberately chosen device-local snooze, bounded to seven days. Never
+ * choose a DST fold silently or shift a nonexistent spring-forward time.
+ * Upcoming reminders cannot be pulled earlier than their actual due time. */
+export function proposedSnoozeUntil(item:ReminderItem,localWall:string,nowIso:string):ReminderAction{
+  const now=Date.parse(nowIso),prior=Date.parse(item.dueAt)
+  if(!Number.isFinite(now)||!Number.isFinite(prior))
+    throw new Error('Invalid reminder clock')
+  const exact=fromUnambiguousLocalDateTime(localWall)
+  const target=Date.parse(exact)
+  if(target<=Math.max(now,prior))
+    throw new Error('Choose a snooze time after the current reminder due time')
+  return actionForReminder(item.key,{kind:'snooze',until:exact},nowIso)
 }
 export function actionForReminder(key:string,action:ReminderAction,nowIso:string):ReminderAction{
   if(!key||key.length>600)throw new Error('Invalid reminder key')
