@@ -54,7 +54,7 @@ export function downloadPersonalExport(state:CalendarState,options:ReviewedPerso
   const ics=exportIcs(state,options.from,options.through,{
     privacy:options.privacy,includeReminders:options.includeReminders
   })
-  if((ics.match(/^BEGIN:VEVENT$/gm)??[]).length!==reviewed.total)
+  if(ics.split('\r\n').filter(line=>line==='BEGIN:VEVENT').length!==reviewed.total)
     throw new Error('Personal export count changed during preparation')
   return ics
 }
