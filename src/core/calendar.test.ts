@@ -16,6 +16,7 @@ import {reminderItems,reminderKey,actionForReminder,deliverableReminders,propose
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {parseIcsDuration} from './ics-duration'
 import {sevenDayWorkload} from './planning'
+import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './source-visibility'
 import {adjacentBusyDay,exportAgendaCsv} from './agenda'
 import {previewMissingPersonal} from './recover-missing'
 import {personalDraftFromImported} from './personal-copy'
@@ -1177,5 +1178,122 @@ describe('C14 finite yearly source recurrence and source-correct time proposals'
       blockAllDay:true,now:new Date('2026-10-15T00:00:00Z')}
     expect(()=>findFreeSlots([],{...base,bufferMinutes:17 as 15})).toThrow('Invalid')
     expect(()=>findFreeSlots([],{...base,daySelection:'public-holidays' as 'weekdays'})).toThrow('Invalid')
+  })
+})
+
+
+describe('C15 bounded yearly ordinal BYDAY with original imported source authority',()=>{
+  it('imports fourth-Thursday annual events with stable source keys and safe source refresh',()=>{
+    const ics=['BEGIN:VCALENDAR','X-WR-CALNAME:Annual coursework',
+      'BEGIN:VEVENT','UID:fourth-thu','SUMMARY:Annual study review',
+      'DTSTART;VALUE=DATE:20261126','DURATION:P1D',
+      'RRULE:FREQ=YEARLY;COUNT=2;BYMONTH=11;BYDAY=4TH',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const first=previewIcs(ics)
+    expect(first.skippedEvents,first.warnings.join(' | ')).toBe(0)
+    expect(first.records.map(x=>x.startDate)).toEqual(['2026-11-26','2027-11-25'])
+    const original:CalendarState={schemaVersion:1,records:[record({id:'personal-original'})]}
+    const saved=mergeIcs(original,first).state
+    expect(saved.records).toHaveLength(3)
+    expect(saved.records[0]).toEqual(original.records[0])
+    const refreshed=mergeIcs(saved,previewIcs(ics),'replace')
+    expect(refreshed.duplicates).toBe(2)
+    expect(refreshed.updated).toBe(0)
+    expect(refreshed.removed).toBe(0)
+    expect(refreshed.state.records.map(r=>r.id)).toEqual(saved.records.map(r=>r.id))
+  })
+  it('expands explicit yearly multiple BYMONTH selectors with month-relative ordinals only',()=>{
+    const rule=parseFiniteAllDayRule('FREQ=YEARLY;COUNT=3;BYMONTH=5,11;BYDAY=4TH','2026-05-28')
+    expect(expandFiniteAllDay('2026-05-28',rule)).toEqual([
+      '2026-05-28','2026-11-26','2027-05-27'])
+    expect(expandFiniteAllDay('2026-05-25',parseFiniteAllDayRule(
+      'FREQ=YEARLY;COUNT=2;BYMONTH=5;BYDAY=-1MO','2026-05-25'))).toEqual([
+      '2026-05-25','2027-05-31'])
+  })
+  it('honors the actual TZID wall time for finite annual ordinal BYDAY',()=>{
+    const input=['BEGIN:VCALENDAR','X-WR-CALNAME:Yearly Clock',
+      'BEGIN:VEVENT','UID:wall','SUMMARY:Wall time',
+      'DTSTART;TZID=Europe/Berlin:20261126T090000','DURATION:PT90M',
+      'RRULE:FREQ=YEARLY;COUNT=2;BYMONTH=11;BYDAY=4TH',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const first=previewIcs(input)
+    expect(first.skippedEvents,first.warnings.join(' | ')).toBe(0)
+    expect(first.records.map(x=>x.start)).toEqual([
+      '2026-11-26T08:00:00.000Z','2027-11-25T08:00:00.000Z'])
+    expect(first.records.map(x=>Date.parse(x.end)-Date.parse(x.start))).toEqual([5400000,5400000])
+    expect(first.records.every(x=>x.source==='ics'&&!x.repeat)).toBe(true)
+  })
+  it('refuses ambiguous year-wide BYDAY, unsupported combined selectors and unmatched DTSTART',()=>{
+    const invalid=[
+      'FREQ=YEARLY;COUNT=2;BYDAY=4TH',
+      'FREQ=YEARLY;COUNT=2;BYDAY=MO',
+      'FREQ=YEARLY;COUNT=2;BYMONTH=11;BYDAY=1TH',
+      'FREQ=YEARLY;COUNT=2;BYMONTH=11;BYDAY=0TH',
+      'FREQ=YEARLY;COUNT=2;BYMONTH=11;BYDAY=4TH;BYMONTHDAY=26',
+      'FREQ=YEARLY;COUNT=2;BYMONTH=11;BYDAY=4TH,4TH'
+    ]
+    for(const rule of invalid)
+      expect(()=>parseFiniteAllDayRule(rule,'2026-11-26')).toThrow()
+    const unsupported=previewIcs(['BEGIN:VCALENDAR','BEGIN:VEVENT','UID:calendar-original',
+      'SUMMARY:Unsupported year-wide ordinal',
+      'DTSTART;VALUE=DATE:20261126','DURATION:P1D',
+      'RRULE:FREQ=YEARLY;COUNT=2;BYDAY=4TH','END:VEVENT','END:VCALENDAR'].join('\r\n'))
+    expect(unsupported.records).toHaveLength(0)
+    expect(unsupported.skippedEvents).toBe(1)
+    expect(()=>mergeIcs({schemaVersion:1,records:[]},unsupported,'replace')).toThrow('incomplete')
+  })
+})
+
+describe('C15 per-source visibility is an original-data-preserving display preference',()=>{
+  const imported=(id:string,sourceCalendar:string,title:string)=>record({
+    id,source:'ics',sourceCalendar,sourceKey:sourceCalendar+'|'+id,title
+  })
+  it('filters two independent imported snapshots in calendar, search and agenda without altering original records',()=>{
+    const saved=[record({id:'private',title:'Personal schedule'}),
+      imported('uni','University','University seminar'),imported('work','Work','Work meeting')]
+    const source=JSON.stringify(saved)
+    const hidden=new Set(['University'])
+    expect(visibleCalendarRecords(saved,'all',hidden).map(x=>x.id)).toEqual(['private','work'])
+    expect(visibleCalendarRecords(saved,'ics',hidden).map(x=>x.id)).toEqual(['work'])
+    expect(visibleCalendarRecords(saved,'personal',hidden).map(x=>x.id)).toEqual(['private'])
+    expect(visibleCalendarRecords(saved,'all',hidden,'seminar')).toEqual([])
+    expect(visibleCalendarRecords(saved,'all',hidden,'WORK').map(x=>x.id)).toEqual(['work'])
+    expect(JSON.stringify(saved)).toBe(source)
+    expect(visibleCalendarRecords(saved,'all',new Set()).map(x=>x.id)).toEqual(['private','uni','work'])
+  })
+  it('keeps hidden imported commitments authoritative for conflict-free time suggestions',()=>{
+    const original=imported('university','University','Hidden class')
+    const saved=[{...original,start:fromLocalDateTime('2026-10-19T10:00'),
+      end:fromLocalDateTime('2026-10-19T11:00')}]
+    const shown=visibleCalendarRecords(saved,'all',new Set(['University']))
+    expect(shown).toHaveLength(0)
+    const options={from:'2026-10-19',days:1,durationMinutes:30,startHour:9,endHour:12,
+      blockAllDay:true,now:new Date('2026-10-15T00:00:00Z')}
+    expect(findFreeSlots(saved,options).some(slot=>
+      slot.start===fromLocalDateTime('2026-10-19T10:00'))).toBe(false)
+    expect(findFreeSlots(shown,options).some(slot=>
+      slot.start===fromLocalDateTime('2026-10-19T10:00'))).toBe(true)
+    // The app intentionally passes original saved records to Find Time.
+  })
+  it('round-trips a v1 display preference without changing older preference payloads',()=>{
+    const prior={mode:'week' as const,filter:'all' as const,
+      agendaSpan:14 as const,agendaBusyOnly:false}
+    expect(validateViewPreferences(prior)).toEqual(prior)
+    const next={...prior,hiddenImportedCalendars:['University','Work']}
+    expect(validateViewPreferences(next)).toEqual(next)
+    expect(()=>validateViewPreferences({...next,hiddenImportedCalendars:['Work','Work']}))
+      .toThrow('hidden')
+    expect(()=>validateViewPreferences({...next,hiddenImportedCalendars:['x'.repeat(101)]}))
+      .toThrow('hidden')
+    expect(()=>validateViewPreferences({...next,hiddenImportedCalendars:Array.from({length:81},(_,i)=>String(i))}))
+      .toThrow('hidden')
+  })
+  it('toggles source visibility safely without renaming, deleting or silently filtering source metadata',()=>{
+    expect(toggleImportedCalendarVisibility([], 'University')).toEqual(['University'])
+    expect(toggleImportedCalendarVisibility(['University'],'University')).toEqual([])
+    expect(toggleImportedCalendarVisibility(['Work'],'University')).toEqual(['Work','University'])
+    expect(toggleImportedCalendarVisibility(['Work','University'],'Work')).toEqual(['University'])
+    expect(()=>toggleImportedCalendarVisibility([], '')).toThrow('Invalid source')
+    expect(toggleImportedCalendarVisibility([], '__proto__')).toEqual(['__proto__'])
   })
 })
