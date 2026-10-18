@@ -6,6 +6,7 @@ import {draftTimedRange,reviewDraft} from './draft'
 import {proposeAllDayChange,applyAllDayChange} from './all-day'
 import {occurrencesBetween,excludeOccurrence,conflictsOnDay} from './occurrences'
 import {previewIcs,mergeIcs,exportIcs} from './ics'
+import {reviewImportedChanges,exportImportedChangeCsv} from './ics-change-review'
 import {validateState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCalendar,restoreUnreadableCalendar,RECOVERY_STORAGE_KEY,STORAGE_KEY} from './storage'
 import {replaceOccurrence,restoreOccurrence,shiftOccurrence,saveWholeEvent,splitSeriesAt,endSeriesAt} from './series'
 import {layoutTimedDay,slotRange,dayAxis,slotAt} from './timeline'
@@ -1429,5 +1430,105 @@ describe('C16 source-clock integrity for recurrence exclusions and detached orig
     const mixed=previewIcs([...base,...child,'END:VCALENDAR'].join('\r\n'))
     expect(mixed.records).toHaveLength(0)
     expect(mixed.skippedEvents).toBe(1)
+  })
+})
+
+
+describe('C17 original-source ICS event-level preview and envelope integrity',()=>{
+  const event=(uid:string,title:string,start:string,end:string)=>[
+    'BEGIN:VEVENT','UID:'+uid,'SUMMARY:'+title,
+    'DTSTART:'+start,'DTEND:'+end,'END:VEVENT']
+  const source=(...parts:string[][])=>['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C17 Faculty',
+    ...parts.flat(),'END:VCALENDAR'].join('\r\n')
+  const initial=source(event('alpha','Lab','20261109T100000Z','20261109T110000Z'),
+    event('beta','Consultation','20261110T120000Z','20261110T130000Z'),
+    event('gamma','Unchanged','20261111T080000Z','20261111T090000Z'))
+  const update=source(event('alpha','Moved lab','20261109T140000Z','20261109T150000Z'),
+    event('gamma','Unchanged','20261111T080000Z','20261111T090000Z'),
+    event('delta','New seminar','20261112T090000Z','20261112T100000Z'))
+  it('distinguishes removals from retained omissions while preserving personal and original source IDs',()=>{
+    const personal=record({id:'person-private',title:'Private event',description:'Personal note'})
+    const original=mergeIcs({schemaVersion:1,records:[personal]},previewIcs(initial)).state
+    const snapshot=JSON.stringify(original)
+    const parsed=previewIcs(update)
+    const conservative=reviewImportedChanges(original,parsed,'update')
+    expect(conservative.counts).toEqual({added:1,updated:1,unchanged:1,removed:0})
+    expect(conservative.changes.map(x=>x.kind)).toEqual(['updated','added','unchanged'])
+    const updating=mergeIcs(original,parsed,'update').state
+    expect(updating.records.some(x=>x.sourceKey==='C17 Faculty|beta|')).toBe(true)
+    expect(updating.records[0]).toEqual(personal)
+    const replacing=reviewImportedChanges(original,parsed,'replace')
+    expect(replacing.counts).toEqual({added:1,updated:1,unchanged:1,removed:1})
+    expect(replacing.changes.map(x=>x.kind)).toEqual(['removed','updated','added','unchanged'])
+    expect(replacing.changes[0].original?.title).toBe('Consultation')
+    expect(replacing.changes[1].changedFields).toContain('start')
+    expect(replacing.changes[1].changedFields).toContain('title')
+    const next=mergeIcs(original,parsed,'replace').state
+    expect(next.records[0]).toEqual(personal)
+    expect(next.records.some(x=>x.sourceKey==='C17 Faculty|beta|')).toBe(false)
+    expect(next.records.find(x=>x.sourceKey==='C17 Faculty|alpha|')?.id)
+      .toBe(original.records.find(x=>x.sourceKey==='C17 Faculty|alpha|')?.id)
+    expect(JSON.stringify(original)).toBe(snapshot)
+  })
+  it('reports removed original start and new source clocks without leaking personal records',()=>{
+    const original=mergeIcs({schemaVersion:1,records:[record({id:'personal-secret',
+      title:'Confidential private event'})]},previewIcs(initial)).state
+    const changes=reviewImportedChanges(original,previewIcs(update),'replace')
+    const csv=exportImportedChangeCsv(changes)
+    expect(csv).toContain('"removed","C17 Faculty","Consultation",""')
+    expect(csv).toContain('2026-11-10T12:00:00.000Z to 2026-11-10T13:00:00.000Z')
+    expect(csv).toContain('2026-11-09T14:00:00.000Z')
+    expect(csv).not.toContain('Confidential private event')
+    expect(csv).not.toContain('C17 Faculty|alpha|')
+    expect(csv.trimEnd().split('\r\n')).toHaveLength(5)
+  })
+  it('neutralizes formula prefixes in imported titles, including whitespace before formula markers',()=>{
+    const risky=source(event('formula','=HYPERLINK("https://invalid.test")',
+      '20261109T100000Z','20261109T110000Z'),
+      event('formula-two','  +SUM(1,2)','20261109T120000Z','20261109T130000Z'))
+    const current:CalendarState={schemaVersion:1,records:[]}
+    const report=exportImportedChangeCsv(reviewImportedChanges(current,previewIcs(risky),'update'))
+    expect(report).toContain("'=HYPERLINK")
+    expect(report).toContain("'  +SUM(1,2)")
+  })
+  it('refuses incomplete source-wide replacement even when the remaining entries can be reviewed',()=>{
+    const original=mergeIcs({schemaVersion:1,records:[]},previewIcs(initial)).state
+    const invalid=source(event('alpha','Lab','20261109T100000Z','20261109T110000Z'),[
+      'BEGIN:VEVENT','UID:broken','DTSTART:20261112T100000Z','DTEND:20261112T110000Z',
+      'RRULE:FREQ=DAILY','END:VEVENT'])
+    const preview=previewIcs(invalid)
+    expect(preview.skippedEvents).toBe(1)
+    expect(reviewImportedChanges(original,preview,'update').counts).toEqual(
+      {added:0,updated:0,unchanged:1,removed:0})
+    expect(()=>reviewImportedChanges(original,preview,'replace')).toThrow('incomplete')
+  })
+  it('rejects structurally truncated and multiple-calendar sources before any preview can be applied',()=>{
+    const missingEnd=initial.replace('END:VCALENDAR','')
+    expect(()=>previewIcs(missingEnd)).toThrow('Incomplete ICS')
+    expect(()=>previewIcs(initial.replace('END:VEVENT','END:VALARM'))).toThrow('Unbalanced ICS')
+    expect(()=>previewIcs(initial+'\r\n'+initial)).toThrow()
+    expect(()=>previewIcs('BEGIN:VCALENDAR\r\nEND:VCALENDAR')).toThrow('no VEVENT')
+  })
+  it('refuses iTIP cancellation/request messages as complete snapshots',()=>{
+    const canceled=initial.replace('VERSION:2.0','VERSION:2.0\r\nMETHOD:CANCEL')
+    const request=initial.replace('VERSION:2.0','VERSION:2.0\r\nMETHOD:REQUEST')
+    expect(()=>previewIcs(canceled)).toThrow('METHOD')
+    expect(()=>previewIcs(request)).toThrow('METHOD')
+    expect(previewIcs(initial.replace('VERSION:2.0','VERSION:2.0\r\nMETHOD:PUBLISH')).records)
+      .toHaveLength(3)
+  })
+  it('supports BOM, VTIMEZONE and VALARM nesting without reading nested source metadata as event names',()=>{
+    const input=['\uFEFFBEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:Authoritative',
+      'BEGIN:VTIMEZONE','TZID:Europe/Berlin','X-WR-CALNAME:Bad nested name',
+      'BEGIN:STANDARD','TZNAME:CET','END:STANDARD','END:VTIMEZONE',
+      'BEGIN:VEVENT','UID:local',
+      'SUMMARY:Event title','DTSTART:20261109T100000Z','DTEND:20261109T110000Z',
+      'BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:Notification, not event details',
+      'END:VALARM','END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const preview=previewIcs(input)
+    expect(preview.name).toBe('Authoritative')
+    expect(preview.skippedEvents).toBe(0)
+    expect(preview.records[0].title).toBe('Event title')
+    expect(preview.records[0].description).toBe('')
   })
 })
