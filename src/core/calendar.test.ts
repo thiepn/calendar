@@ -2487,3 +2487,54 @@ describe('C29 exact original-event Day timeline navigation',()=>{
     expect(()=>dayJumpPage([one],'2026-02-30',0)).toThrow()
   })
 })
+
+describe('C30 complete Agenda-day original occurrence paging',()=>{
+  it('makes every canonical event reachable beyond the former 30-event cap',()=>{
+    const records=Array.from({length:53},(_,i)=>record({
+      id:'c30-original-'+String(i).padStart(3,'0'),title:'C30 event '+i,
+      start:fromLocalDateTime('2026-11-26T09:00'),end:fromLocalDateTime('2026-11-26T09:30')}))
+    const original=JSON.stringify(records)
+    const pages=Array.from({length:5},(_,p)=>dayJumpPage(records,'2026-11-26',p,12))
+    expect(pages.map(x=>x.items.length)).toEqual([12,12,12,12,5])
+    expect(pages[4]).toMatchObject({page:4,pages:5,total:53,fromIndex:49,throughIndex:53,hasNext:false})
+    expect(pages.flatMap(x=>x.items.map(v=>v.occurrence.recordId))).toEqual(records.map(x=>x.id))
+    expect(JSON.stringify(records)).toBe(original)
+  })
+  it('keeps imported transparent and all-day events navigable in visible Agenda, while hidden busy stays authoritative',()=>{
+    const imported=record({id:'c30-readonly-free',title:'Imported free',source:'ics',
+      sourceCalendar:'Shown campus',sourceKey:'c30-free-uid',transparent:true,
+      start:fromLocalDateTime('2026-11-26T08:00'),end:fromLocalDateTime('2026-11-26T09:00')})
+    const allDay=record({id:'c30-all-day-original',source:'ics',sourceCalendar:'Shown campus',
+      sourceKey:'c30-all-day-uid',allDay:true,startDate:'2026-11-25',
+      endDateExclusive:'2026-11-28',start:fromLocalDateTime('2026-11-25T00:00'),
+      end:fromLocalDateTime('2026-11-28T00:00')})
+    const hidden=record({id:'c30-hidden-busy',source:'ics',sourceCalendar:'Hidden lab',
+      sourceKey:'c30-hidden-uid',start:fromLocalDateTime('2026-11-26T10:00'),
+      end:fromLocalDateTime('2026-11-26T11:00')})
+    const visible=visibleCalendarRecords([imported,allDay,hidden],'all',new Set(['Hidden lab']))
+    const page=dayJumpPage(visible,'2026-11-26',0,12)
+    expect(page.items.map(x=>x.occurrence.recordId)).toEqual(['c30-all-day-original','c30-readonly-free'])
+    expect(page.items[1].occurrence.transparent).toBe(true)
+    expect(page.items[0].occurrence.startDate).toBe('2026-11-25')
+    expect(page.items[1].occurrence.sourceCalendar).toBe('Shown campus')
+    expect(reviewDraft([imported,allDay,hidden],record({
+      id:'c30-draft',start:hidden.start,end:hidden.end})).collisionCount).toBeGreaterThan(0)
+    expect(hidden.sourceKey).toBe('c30-hidden-uid')
+  })
+  it('preserves detached ownership and all event identities when paginating overlapping agenda entries',()=>{
+    const parent=record({id:'c30-parent',start:fromLocalDateTime('2026-11-19T10:00'),
+      end:fromLocalDateTime('2026-11-19T11:00'),
+      repeat:{frequency:'weekly',interval:1},excludedDates:['2026-11-26']})
+    const detached=record({id:'c30-detached',recurrenceParentId:'c30-parent',
+      recurrenceDate:'2026-11-26',
+      start:fromLocalDateTime('2026-11-26T10:00'),end:fromLocalDateTime('2026-11-26T11:00')})
+    const overlap=record({id:'c30-overlap',start:fromLocalDateTime('2026-11-26T10:30'),
+      end:fromLocalDateTime('2026-11-26T11:15')})
+    const originals=[parent,detached,overlap]
+    const originalJson=JSON.stringify(originals)
+    const items=dayJumpPage(originals,'2026-11-26',0,12).items.map(x=>x.occurrence)
+    expect(items.map(x=>x.key)).toEqual(['c30-detached@2026-11-26','c30-overlap@2026-11-26'])
+    expect(conflictsOnDay(items)).toEqual(new Set(['c30-detached@2026-11-26','c30-overlap@2026-11-26']))
+    expect(JSON.stringify(originals)).toBe(originalJson)
+  })
+})
