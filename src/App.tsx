@@ -264,7 +264,7 @@ export default function App(){
   }):[],[finderOpen,calendar,selected,finderDays,finderDuration,finderWindow,finderBlockAllDay,finderDaySelection,finderBufferMinutes])
 
   function create(date:LocalDate){setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setEditorDate(date)}
-  function startSlot(slot:FreeSlot){
+  function startFinderSlot(slot:FreeSlot){
     try{
       // A suggested slot can expire or become occupied in another tab.
       // Re-read original local storage and re-run *all* source conflict checks
@@ -284,6 +284,9 @@ export default function App(){
       if(!eligible.some(candidate=>candidate.start===slot.start&&candidate.end===slot.end))
         throw new Error('Suggested slot is no longer free. Review fresh recommendations.')
     }catch(error){setNotice('Time proposal not opened: '+String(error));return}
+    startSlot(slot)
+  }
+  function startSlot(slot:FreeSlot){
     setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null)
     setNewAllDay(null);setNewEventRange({start:slot.start,end:slot.end});setEditorDate(slot.date)
     setSelected(slot.date);setFinderOpen(false)
@@ -651,7 +654,7 @@ export default function App(){
         </div>
         <label className="finder-checkbox"><input type="checkbox" checked={finderBlockAllDay} onChange={ev=>setFinderBlockAllDay(ev.target.checked)}/> Treat all-day entries as unavailable</label>
         <h3>Available start times <small>({freeSlots.length} shown)</small></h3>
-        <div className="finder-results">{freeSlots.map(slot=><button key={slot.start} type="button" className="finder-slot" onClick={()=>startSlot(slot)}>
+        <div className="finder-results">{freeSlots.map(slot=><button key={slot.start} type="button" className="finder-slot" onClick={()=>startFinderSlot(slot)}>
           <span><strong>{dateLabel(slot.date,{weekday:'short',month:'short',day:'numeric'})}</strong><small>{new Date(slot.start).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})} – {new Date(slot.end).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</small></span>
           <span className="finder-plan">Plan event <ChevronRight size={14}/></span>
         </button>)}
