@@ -19,6 +19,7 @@ import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {parseIcsDuration} from './ics-duration'
 import {sevenDayWorkload} from './planning'
 import {focusDaySummary,focusScrollMinute} from './mobile-focus'
+import {searchOccurrencePage} from './search-pages'
 import {mobileTimedChange,mobileAllDayShift} from './mobile-editor'
 import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './source-visibility'
 import {adjacentBusyDay,exportAgendaCsv} from './agenda'
@@ -2024,5 +2025,81 @@ describe('C23 local-only mobile draft schedule actions',()=>{
     expect(reviewDraft([hidden],draft).collisionCount).toBe(1)
     expect(hidden.sourceKey).toBe('source-original')
     expect(draft.id).toBe('original-personal-id')
+  })
+})
+
+describe('C24 bounded canonical occurrence discovery and result pagination',()=>{
+  it('reaches recurring occurrences beyond the former first-30 ceiling without cloning IDs',()=>{
+    const original=record({id:'parent-stable',title:'Series',repeat:{frequency:'daily',interval:1},
+      start:fromLocalDateTime('2026-10-18T09:00'),end:fromLocalDateTime('2026-10-18T09:30')})
+    const before=JSON.stringify(original)
+    const first=searchOccurrencePage([original],'2026-10-18','2027-10-17','forward',0)
+    const second=searchOccurrencePage([original],'2026-10-18','2027-10-17','forward',1)
+    const last=searchOccurrencePage([original],'2026-10-18','2027-10-17','forward',99)
+    expect(first).toMatchObject({total:365,pages:13,page:0,hasPrevious:false,hasNext:true,
+      fromIndex:1,throughIndex:30})
+    expect(second).toMatchObject({page:1,fromIndex:31,throughIndex:60,hasPrevious:true,hasNext:true})
+    expect(first.items[0].key).toBe('parent-stable@2026-10-18')
+    expect(second.items[0].key).toBe('parent-stable@2026-11-17')
+    expect(second.items[0].recordId).toBe('parent-stable')
+    expect(last).toMatchObject({page:12,fromIndex:361,throughIndex:365,hasNext:false})
+    expect(last.items).toHaveLength(5)
+    expect(JSON.stringify(original)).toBe(before)
+  })
+  it('pages previous year in reverse chronology while preserving original occurrence dates',()=>{
+    const series=record({id:'prev-series',repeat:{frequency:'daily',interval:1},
+      start:fromLocalDateTime('2026-01-01T12:00'),end:fromLocalDateTime('2026-01-01T13:00')})
+    const recent=searchOccurrencePage([series],'2026-01-01','2026-12-31','backward',0)
+    const older=searchOccurrencePage([series],'2026-01-01','2026-12-31','backward',1)
+    expect(recent.items[0].date).toBe('2026-12-31')
+    expect(recent.items[29].date).toBe('2026-12-02')
+    expect(older.items[0].date).toBe('2026-12-01')
+    expect(older.items[0].key).toBe('prev-series@2026-12-01')
+  })
+  it('includes detached personal exceptions but not their excluded original recurrence',()=>{
+    const parent=record({id:'parent',repeat:{frequency:'weekly',interval:1},
+      excludedDates:['2026-10-26'],start:fromLocalDateTime('2026-10-19T10:00'),
+      end:fromLocalDateTime('2026-10-19T11:00')})
+    const detached=record({id:'detached-real-id',recurrenceParentId:'parent',recurrenceDate:'2026-10-26',
+      start:fromLocalDateTime('2026-10-26T12:00'),end:fromLocalDateTime('2026-10-26T13:00')})
+    const page=searchOccurrencePage([parent,detached],'2026-10-19','2026-11-02','forward',0)
+    expect(page.items.map(x=>x.key)).toEqual([
+      'parent@2026-10-19','detached-real-id@2026-10-26','parent@2026-11-02'])
+    expect(page.items[1].recordId).toBe('detached-real-id')
+  })
+  it('does not claim invisible sources should disappear from canonical availability',()=>{
+    const hidden=record({id:'hidden-source',source:'ics',sourceCalendar:'University',
+      sourceKey:'uid',start:fromLocalDateTime('2026-10-19T09:00'),
+      end:fromLocalDateTime('2026-10-19T10:00')})
+    const shown=record({id:'visible-personal',title:'Review',
+      start:fromLocalDateTime('2026-10-19T11:00'),
+      end:fromLocalDateTime('2026-10-19T12:00')})
+    const filtered=visibleCalendarRecords([hidden,shown],'all',new Set(['University']),'Review')
+    const page=searchOccurrencePage(filtered,'2026-10-19','2026-10-19','forward',0)
+    expect(page.items.map(x=>x.recordId)).toEqual(['visible-personal'])
+    expect(reviewDraft([hidden,shown],record({id:'new',start:hidden.start,end:hidden.end})).collisionCount)
+      .toBeGreaterThan(0)
+    expect(hidden.sourceKey).toBe('uid')
+  })
+  it('keeps ICS TRANSP occurrence identity and local fold offsets without performing edits',()=>{
+    const free=record({id:'imported-free',source:'ics',sourceCalendar:'School',sourceKey:'uid-keep',
+      transparent:true,start:'2026-10-25T00:15:00.000Z',end:'2026-10-25T00:45:00.000Z'})
+    const late=record({id:'imported-later',source:'ics',sourceCalendar:'School',sourceKey:'uid-later',
+      start:'2026-10-25T01:15:00.000Z',end:'2026-10-25T01:45:00.000Z'})
+    const result=searchOccurrencePage([late,free],'2026-10-25','2026-10-25','forward',0)
+    expect(result.items.map(x=>x.recordId)).toEqual(['imported-free','imported-later'])
+    expect(result.items[0].transparent).toBe(true)
+    expect(result.items[1].start).toBe('2026-10-25T01:15:00.000Z')
+    expect(free.sourceKey).toBe('uid-keep')
+  })
+  it('never expands unbounded page/window inputs and clamps stale page requests',()=>{
+    expect(()=>searchOccurrencePage([],'2026-01-01','2027-01-01','forward',0)).toThrow('365')
+    expect(()=>searchOccurrencePage([],'2026-10-20','2026-10-19','forward',0)).toThrow()
+    expect(()=>searchOccurrencePage([],'2026-10-19','2026-10-19','forward',-1)).toThrow()
+    expect(()=>searchOccurrencePage([],'2026-10-19','2026-10-19','forward',0,31)).toThrow()
+    expect(()=>searchOccurrencePage([],'2026-10-19','2026-10-19','sideways' as 'forward',0)).toThrow()
+    expect(searchOccurrencePage([],'2026-10-19','2026-10-19','forward',99))
+      .toMatchObject({items:[],page:0,pages:1,total:0,fromIndex:0,throughIndex:0,
+        hasPrevious:false,hasNext:false})
   })
 })
