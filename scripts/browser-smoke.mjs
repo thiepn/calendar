@@ -2421,6 +2421,126 @@ async function exerciseC24DesktopReverseSearchPagesAndFilterReset(){
   await context.close()
 }
 
+
+async function exerciseC25MobileReadOnlySourceAndDetachedEventBrowsing(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',err=>errors.push(err.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const fixture={schemaVersion:1,records:[
+    {id:'c25-a',title:'C25 Morning appointment',source:'personal',allDay:false,
+      description:'Original private note',location:'',
+      start:'2026-10-19T07:00:00.000Z',end:'2026-10-19T08:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c25-b',title:'C25 Afternoon appointment',source:'personal',allDay:false,
+      description:'',location:'',
+      start:'2026-10-19T11:00:00.000Z',end:'2026-10-19T12:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c25-series',title:'C25 Weekly practice',source:'personal',allDay:false,
+      description:'',location:'',
+      start:'2026-10-19T13:00:00.000Z',end:'2026-10-19T14:00:00.000Z',
+      repeat:{frequency:'weekly',interval:1},excludedDates:['2026-10-26'],
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c25-import-free',title:'C25 Free campus',source:'ics',
+      sourceCalendar:'C25 Campus',sourceKey:'C25 Campus|original-uid',
+      transparent:true,allDay:false,description:'Original imported notes',location:'',
+      start:'2026-10-20T08:00:00.000Z',end:'2026-10-20T09:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c25-detached',title:'C25 Detached appointment',source:'personal',allDay:false,
+      recurrenceParentId:'c25-series',recurrenceDate:'2026-10-26',
+      description:'Original detached ID',location:'',
+      start:'2026-10-21T09:00:00.000Z',end:'2026-10-21T10:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(x=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(x)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-10-19')
+  await page.getByRole('button',{name:'Focus event search'}).click()
+  const input=page.getByLabel('Search calendar events')
+  await input.fill('C25')
+  const list=page.getByRole('region',{name:'Calendar search results'})
+  await list.locator('.search-results-items button').filter({hasText:'C25 Morning appointment'}).first().click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.innerText(),/C25 Morning appointment/)
+  assert.match(await details.locator('.details-navigation-current').innerText(),/Event 1 of/)
+  assert.equal(await details.getByRole('button',{name:'Previous visible event'}).isEnabled(),false)
+  const next=details.getByRole('button',{name:'Next visible event'})
+  assert.equal(await next.isEnabled(),true)
+  const firstNav=await details.locator('.details-navigation').boundingBox()
+  assert.ok(firstNav&&firstNav.width>260,'Mobile navigation strip must be readable')
+  await next.click()
+  await details.getByRole('heading',{name:'C25 Afternoon appointment'}).waitFor()
+  await next.click()
+  await details.getByRole('heading',{name:'C25 Weekly practice'}).waitFor()
+  assert.equal(await details.getByRole('button',{name:'Edit this occurrence'}).count(),1)
+  await next.click()
+  await details.getByRole('heading',{name:'C25 Free campus'}).waitFor()
+  assert.match(await details.innerText(),/TRANSP:TRANSPARENT/)
+  assert.equal(await details.getByRole('button',{name:'Edit event'}).count(),0)
+  assert.equal(await details.getByRole('button',{name:'Make personal copy'}).count(),1)
+  await details.getByRole('button',{name:'Previous visible event'}).click()
+  await details.getByRole('heading',{name:'C25 Weekly practice'}).waitFor()
+  await next.click()
+  await details.getByRole('heading',{name:'C25 Free campus'}).waitFor()
+  await next.click()
+  await details.getByRole('heading',{name:'C25 Detached appointment'}).waitFor()
+  assert.match(await details.innerText(),/Original series date: 2026-10-26/)
+  await details.getByRole('button',{name:'Show this day'}).click()
+  await details.waitFor({state:'hidden'})
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-10-21')
+  assert.equal(await page.locator('.view-switch button.active').innerText(),'Day')
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture,
+    'C25 browsing, read-only imported details and day handoff must never alter original IDs/records')
+  const size=await page.evaluate(()=>({viewport:innerWidth,page:document.documentElement.scrollWidth}))
+  assert.ok(size.page<=size.viewport+2,'Mobile page overflow: '+JSON.stringify(size))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C25_MOBILE_DETAIL_PREV_NEXT_ICS_RECURRENCE_AND_DAY_HANDOFF_PASS')
+  await context.close()
+}
+async function exerciseC25DesktopSourceFilteredNavigationAndNoWrites(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',err=>errors.push(err.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const fixture={schemaVersion:1,records:[
+    {id:'c25-desktop-1',title:'C25 Desktop first',source:'personal',allDay:false,
+      description:'',location:'',start:'2026-10-19T07:00:00.000Z',
+      end:'2026-10-19T08:00:00.000Z',updatedAt:'2026-10-18T10:00:00.000Z'},
+    {id:'c25-desktop-import',title:'C25 Desktop hidden imported',source:'ics',
+      sourceCalendar:'C25 Hidden',sourceKey:'C25 Hidden|original',allDay:false,
+      description:'',location:'',start:'2026-10-19T08:00:00.000Z',
+      end:'2026-10-19T09:00:00.000Z',updatedAt:'2026-10-18T10:00:00.000Z'},
+    {id:'c25-desktop-2',title:'C25 Desktop next',source:'personal',allDay:false,
+      description:'',location:'',start:'2026-10-19T09:00:00.000Z',
+      end:'2026-10-19T10:00:00.000Z',updatedAt:'2026-10-18T10:00:00.000Z'}
+  ]}
+  await page.evaluate(x=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(x)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-10-19')
+  await page.getByRole('button',{name:'Toggle imported calendar C25 Hidden'}).click()
+  await page.getByLabel('Search calendar events').fill('C25 Desktop')
+  const panel=page.getByRole('region',{name:'Calendar search results'})
+  await panel.locator('.search-results-items button').filter({hasText:'C25 Desktop first'}).first().click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.locator('.details-navigation-current').innerText(),/Event 1 of 2/)
+  const next=details.getByRole('button',{name:'Next visible event'})
+  await next.click()
+  await details.getByRole('heading',{name:'C25 Desktop next'}).waitFor()
+  assert.equal(await next.isEnabled(),false)
+  await details.getByRole('button',{name:'Previous visible event'}).click()
+  await details.getByRole('heading',{name:'C25 Desktop first'}).waitFor()
+  assert.equal(await details.getByRole('button',{name:'Edit event'}).count(),1)
+  await details.getByRole('button',{name:'Close event'}).click()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C25_DESKTOP_VISIBLE_FILTER_BOUNDED_NAV_NO_SOURCE_WRITES_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -2474,6 +2594,8 @@ try{
   await exerciseC23DesktopEditorUnchanged()
   await exerciseC24MobileSearchPageNavigationAndCanonicalDetails()
   await exerciseC24DesktopReverseSearchPagesAndFilterReset()
+  await exerciseC25MobileReadOnlySourceAndDetachedEventBrowsing()
+  await exerciseC25DesktopSourceFilteredNavigationAndNoWrites()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
