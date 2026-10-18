@@ -18,6 +18,7 @@ import {reminderItems,reminderKey,actionForReminder,deliverableReminders,propose
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {parseIcsDuration} from './ics-duration'
 import {sevenDayWorkload} from './planning'
+import {focusDaySummary,focusScrollMinute} from './mobile-focus'
 import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './source-visibility'
 import {adjacentBusyDay,exportAgendaCsv} from './agenda'
 import {previewMissingPersonal} from './recover-missing'
@@ -1913,5 +1914,52 @@ describe('C21 imported ICS TRANSP source-safe availability and local planning',(
     expect(findFreeSlots([{...free,transparent:undefined}],options)).toHaveLength(0)
     expect(occurrencesBetween([free],'2026-11-09','2026-11-09')[0].transparent).toBe(true)
     expect(sevenDayWorkload([free],'2026-11-09')[0].allDayCount).toBe(1)
+  })
+})
+
+describe('C22 device-local focused-week original-event navigation',()=>{
+  it('counts filtered originals and computes a real first-event scroll target without writes',()=>{
+    const ordinary=record({id:'own',start:fromLocalDateTime('2026-10-19T09:00'),
+      end:fromLocalDateTime('2026-10-19T10:00')})
+    const transparent=record({id:'ics',source:'ics',sourceCalendar:'Read only',sourceKey:'uid',
+      transparent:true,start:fromLocalDateTime('2026-10-19T11:00'),
+      end:fromLocalDateTime('2026-10-19T12:00')})
+    const frozen=JSON.stringify([ordinary,transparent])
+    expect(focusDaySummary([ordinary,transparent],'2026-10-19')).toEqual({
+      count:2,allDay:0,firstTimedMinute:540})
+    expect(focusScrollMinute([ordinary,transparent],'2026-10-19')).toBe(495)
+    expect(focusDaySummary([ordinary],'2026-10-19').count).toBe(1)
+    expect(JSON.stringify([ordinary,transparent])).toBe(frozen)
+    expect(focusScrollMinute([],'2026-10-19')).toBe(420)
+  })
+  it('clips previous-night spanning appointments at selected local midnight',()=>{
+    const overnight=record({id:'night',
+      start:fromLocalDateTime('2026-10-24T23:30'),
+      end:fromLocalDateTime('2026-10-25T01:00')})
+    expect(focusDaySummary([overnight],'2026-10-25').firstTimedMinute).toBe(0)
+    expect(focusScrollMinute([overnight],'2026-10-25')).toBe(0)
+    expect(focusDaySummary([overnight],'2026-10-24').firstTimedMinute).toBe(1410)
+  })
+  it('distinguishes both local repeated-hour instants on a 25-hour Berlin day',()=>{
+    const early=record({id:'early',start:'2026-10-25T00:15:00.000Z',
+      end:'2026-10-25T00:45:00.000Z'})
+    const late=record({id:'late',start:'2026-10-25T01:15:00.000Z',
+      end:'2026-10-25T01:45:00.000Z'})
+    expect(dayAxis('2026-10-25').minutes).toBe(1500)
+    expect(focusDaySummary([late],'2026-10-25').firstTimedMinute).toBe(195)
+    expect(focusDaySummary([late,early],'2026-10-25').firstTimedMinute).toBe(135)
+    expect(focusScrollMinute([late],'2026-10-25')).toBe(150)
+  })
+  it('uses elapsed time through spring DST gap and includes visible all-day sources',()=>{
+    const spring=record({id:'spring',start:'2026-03-29T01:30:00.000Z',
+      end:'2026-03-29T02:00:00.000Z'})
+    const allDay=record({id:'imported-day',source:'ics',
+      sourceCalendar:'Imported',sourceKey:'imported-day',
+      allDay:true,startDate:'2026-03-29',endDateExclusive:'2026-03-30',
+      start:fromLocalDateTime('2026-03-29T00:00'),end:fromLocalDateTime('2026-03-30T00:00')})
+    expect(dayAxis('2026-03-29').minutes).toBe(1380)
+    expect(focusDaySummary([spring,allDay],'2026-03-29')).toEqual({
+      count:2,allDay:1,firstTimedMinute:150})
+    expect(focusScrollMinute([spring,allDay],'2026-03-29')).toBe(105)
   })
 })
