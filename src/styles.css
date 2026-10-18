@@ -362,3 +362,19 @@
  .personal-export-dialog .editor-actions{display:grid;grid-template-columns:1fr;gap:9px}
  .personal-export-dialog .editor-actions button{min-height:45px;width:100%}
 }
+
+
+/* C19 — explicit locally chosen snooze; confined to the reminder's original
+ * source occurrence and an unambiguous device-local civil time. */
+.reminder-custom-snooze{display:grid;gap:9px;padding:13px;margin:5px 0 8px;border:1px solid #cbded0;background:#f7faf7;min-width:0}
+.reminder-custom-snooze>label{display:grid;gap:6px;color:#315741;font-size:12px;font-weight:650;min-width:0}
+.reminder-custom-snooze input[type="datetime-local"]{box-sizing:border-box;width:100%;min-width:0;max-width:100%;border:1px solid #c4d8c9;padding:10px;background:#fff;color:#293d31;font-size:14px;border-radius:4px;min-height:44px}
+.reminder-custom-snooze .fine-print{line-height:1.6}
+.reminder-custom-actions{display:flex;flex-wrap:wrap;gap:9px;justify-content:flex-start}
+.reminder-custom-actions button{min-height:40px}
+@media(max-width:740px){
+ .reminder-custom-snooze{padding:10px}
+ .reminder-custom-actions{display:grid;grid-template-columns:1fr;width:100%}
+ .reminder-custom-actions button{width:100%;min-height:44px}
+ .reminder-actions>button{min-height:40px}
+}
