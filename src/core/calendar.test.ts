@@ -13,7 +13,7 @@ import {layoutTimedDay,slotRange,dayAxis,slotAt} from './timeline'
 import {findFreeSlots} from './availability'
 import {DEFAULT_REMINDER_SETTINGS,validateReminderSettings,inQuietHours,foregroundNotificationText} from './reminder-settings'
 import {validateViewPreferences,loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY} from './view-preferences'
-import {reminderItems,reminderKey,actionForReminder,deliverableReminders,proposedSnooze,dismissReminderBatch} from './reminders'
+import {reminderItems,reminderKey,actionForReminder,deliverableReminders,proposedSnooze,proposedSnoozeUntil,dismissReminderBatch} from './reminders'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {parseIcsDuration} from './ics-duration'
 import {sevenDayWorkload} from './planning'
@@ -1646,5 +1646,76 @@ describe('C18 reviewed, privacy-graded and source-accurate personal ICS handoff'
     expect(()=>reviewPersonalExport(current,{...options,privacy:'none' as 'busy'})).toThrow('privacy')
     expect(()=>downloadPersonalExport(current,{...options,from:'2026-10-20',through:'2026-10-21'}))
       .toThrow('No personal events')
+  })
+})
+
+
+describe('C19 source-verified custom snooze and original-date-window continuity',()=>{
+  const now=fromLocalDateTime('2026-10-20T09:00')
+  const tomorrow=fromLocalDateTime('2026-10-21T11:30')
+  it('resolves a unique device-local chosen due time without altering any original calendar record',()=>{
+    const event=record({id:'custom-reminder',start:fromLocalDateTime('2026-10-20T10:00'),
+      end:fromLocalDateTime('2026-10-20T11:00'),reminderMinutes:15})
+    const state:CalendarState={schemaVersion:1,records:[event]}
+    const original=JSON.stringify(state)
+    const due=reminderItems(state,now)[0]
+    const action=proposedSnoozeUntil(due,'2026-10-21T11:30',now)
+    expect(action).toEqual({kind:'snooze',until:tomorrow})
+    const active=reminderItems(state,now,{[due.key]:action})[0]
+    expect(active).toMatchObject({key:due.key,dueAt:tomorrow,status:'upcoming'})
+    expect(deliverableReminders([active],now,new Set())).toHaveLength(0)
+    expect(JSON.stringify(state)).toBe(original)
+  })
+  it('retains explicitly snoozed old personal appointments after original overdue range expires',()=>{
+    const old=record({id:'old|id-with-delimiter',title:'Old but snoozed',
+      start:fromLocalDateTime('2026-10-01T10:00'),end:fromLocalDateTime('2026-10-01T11:00'),
+      reminderMinutes:15})
+    const imported=record({id:'import',source:'ics',sourceCalendar:'Imported',
+      sourceKey:'Imported|event',start:old.start,end:old.end})
+    const state:CalendarState={schemaVersion:1,records:[old,imported]}
+    const original=occurrencesBetween([old],'2026-10-01','2026-10-01')[0]
+    const key=reminderKey(original,15)
+    expect(reminderItems(state,now,{},14,1)).toHaveLength(0)
+    const actions={[key]:{kind:'snooze' as const,until:tomorrow}}
+    const reminders=reminderItems(state,now,actions,14,1)
+    expect(reminders).toHaveLength(1)
+    expect(reminders[0]).toMatchObject({recordId:old.id,key,dueAt:tomorrow,status:'upcoming'})
+    expect(reminders[0].occurrence.title).toBe('Old but snoozed')
+    expect(reminderItems(state,now,actions,14,7)).toHaveLength(1)
+    expect(reminderItems(state,fromLocalDateTime('2026-10-21T11:31'),actions,14,1)[0]?.status).toBe('due')
+    expect(state.records).toEqual([old,imported])
+  })
+  it('ignores stale snooze actions after changing or removing the original event or detached occurrence',()=>{
+    const old=record({id:'original',start:fromLocalDateTime('2026-10-01T10:00'),
+      end:fromLocalDateTime('2026-10-01T11:00'),reminderMinutes:15})
+    const key=reminderKey(occurrencesBetween([old],'2026-10-01','2026-10-01')[0],15)
+    const action={[key]:{kind:'snooze' as const,until:tomorrow}}
+    const changed=record({...old,start:fromLocalDateTime('2026-10-01T12:00'),
+      end:fromLocalDateTime('2026-10-01T13:00')})
+    expect(reminderItems({schemaVersion:1,records:[changed]},now,action)).toHaveLength(0)
+    expect(reminderItems({schemaVersion:1,records:[]},now,action)).toHaveLength(0)
+    expect(reminderItems({schemaVersion:1,records:[old]},now,
+      {['irrelevant|2026-10-01|2026-10-01T08:00:00.000Z|15']:{kind:'snooze',until:tomorrow}}))
+      .toHaveLength(0)
+  })
+  it('refuses earlier/equal snoozes and anything beyond the seven-day limit',()=>{
+    const event=record({id:'future',start:fromLocalDateTime('2026-10-20T16:00'),
+      end:fromLocalDateTime('2026-10-20T17:00'),reminderMinutes:15})
+    const item=reminderItems({schemaVersion:1,records:[event]},now)[0]
+    expect(item.status).toBe('upcoming')
+    expect(()=>proposedSnoozeUntil(item,'2026-10-20T15:45',now)).toThrow('after')
+    expect(()=>proposedSnoozeUntil(item,'2026-10-20T08:00',now)).toThrow('after')
+    expect(()=>proposedSnoozeUntil(item,'2026-10-28T09:01',now)).toThrow('Invalid reminder snooze time')
+    expect(()=>proposedSnoozeUntil(item,'2026-10-20T18:00',now)).not.toThrow()
+  })
+  it('refuses nonexistent spring-forward and ambiguous autumn-fold device wall times',()=>{
+    if(Intl.DateTimeFormat().resolvedOptions().timeZone!=='Europe/Berlin')return
+    const event=record({id:'dst',reminderMinutes:30})
+    const item=reminderItems({schemaVersion:1,records:[event]},
+      fromLocalDateTime('2026-10-12T09:45'))[0]
+    expect(()=>proposedSnoozeUntil(item,'2026-03-29T02:30',
+      fromLocalDateTime('2026-03-28T10:00'))).toThrow('does not exist')
+    expect(()=>proposedSnoozeUntil(item,'2026-10-25T02:30',
+      fromLocalDateTime('2026-10-24T10:00'))).toThrow('occurs twice')
   })
 })
