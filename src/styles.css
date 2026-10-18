@@ -573,3 +573,13 @@
  .month-cell .date-number{min-width:26px;min-height:29px}
  .month-cell .more-events{min-height:30px;font-size:10px;overflow-wrap:anywhere}
 }
+
+/* C28 skip empty Agenda windows without changing persisted events or filters. */
+.agenda-jump-controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.agenda-jump-controls button{min-height:36px;gap:5px;white-space:normal}
+.agenda-jump-note{width:100%;line-height:1.4;font-size:10px;margin:0}
+@media(max-width:740px){
+ .agenda-jump-controls{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+ .agenda-jump-controls button{width:100%;min-width:0;min-height:44px;font-size:12px}
+ .agenda-jump-note{font-size:11px}
+}

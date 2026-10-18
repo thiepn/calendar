@@ -7,6 +7,7 @@ import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,split
 import {findFreeSlots,type FreeSlot} from './core/availability'
 import {finderDayWindow,advanceFinderDay,type FinderDaySpan} from './core/finder-day'
 import {adjacentBusyDay,exportAgendaCsv} from './core/agenda'
+import {adjacentAgendaRange} from './core/agenda-navigation'
 import {searchOccurrencePage} from './core/search-pages'
 import {detailNeighbors} from './core/detail-navigation'
 import {sevenDayWorkload} from './core/planning'
@@ -509,6 +510,21 @@ export default function App(){
       else setNotice('No visible commitments found in '+(direction===1?'the next':'the previous')+' 365 days')
     }catch(error){setNotice('Busy-day navigation unavailable: '+String(error))}
   }
+  function jumpAgenda(direction:-1|1){
+    try{
+      const found=adjacentAgendaRange(visible,selected,agendaSpan,direction)
+      if(!found){
+        setNotice('No '+(direction===1?'later':'earlier')+
+          ' visible agenda commitments found within 365 days outside this range. Try changing source filters or searching dates.')
+        return
+      }
+      setSelected(found.selected)
+      // Agenda/List mode and original source filter must remain untouched.
+      setNotice('Showing '+(direction===1?'next':'previous')+
+        ' visible agenda commitment on '+dateLabel(found.eventDate,{weekday:'long',month:'short',day:'numeric'})+
+        '. All-day, imported free and recurring events remain in the visible agenda.')
+    }catch(error){setNotice('Agenda navigation unavailable: '+String(error))}
+  }
   function saveDisplayedAgenda(){
     try{
       const start=days[0],end=days[days.length-1]
@@ -728,7 +744,14 @@ export default function App(){
             <option value={14}>14 days</option><option value={30}>30 days</option>
           </select></label>
           <label><input type="checkbox" checked={agendaBusyOnly} onChange={e=>setAgendaBusyOnly(e.target.checked)}/> Only days with commitments</label>
+          <nav className="agenda-jump-controls" aria-label="Skip empty agenda ranges">
+            <button className="secondary compact" type="button" aria-label="Previous visible agenda range"
+              onClick={()=>jumpAgenda(-1)}><ChevronLeft size={15}/> Previous events</button>
+            <button className="secondary compact" type="button" aria-label="Next visible agenda range"
+              onClick={()=>jumpAgenda(1)}>Next events <ChevronRight size={15}/></button>
+          </nav>
           <button className="secondary compact" type="button" onClick={saveDisplayedAgenda} aria-label="Download visible agenda CSV"><Download size={14}/> Download visible agenda CSV</button>
+          <p className="fine-print agenda-jump-note">Skip directly to the nearest visible event outside this displayed range, up to 365 days away. Keeps List view and displayed source filters; hidden busy imports still count independently for Find time.</p>
         </div>}
         <div className="content-grid">
           <div className="calendar-surface"><CalendarViews mode={mode} days={days} selected={selected} records={visible} onSelect={setSelected} onOpen={open} onCreate={create} onCreateAt={(date,start,end)=>startSlot({date,start,end})}

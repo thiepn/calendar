@@ -363,3 +363,29 @@ events still count in the independent source-complete availability and
 conflict checks; ICS `TRANSP:TRANSPARENT` remains visible and nonblocking.
 Original record IDs, recurrence dates and exclusions, backups/recovery,
 privacy, Folio separation, and original CAS writer remain unchanged.
+
+## C28 — previous/next visible agenda commitments across empty windows
+
+In List/Agenda mode, **Only days with commitments** could show no rows for
+14/30 days. The period arrows then required multiple repeated taps across
+weeks with no events. The older global **Next busy day** jumps into Day mode
+and intentionally ignores imported `TRANSP:TRANSPARENT` entries that should
+still be shown as read-only visible calendar events.
+
+C28 introduces explicit **Previous events / Next events** within the
+original Agenda controls, retaining List mode, range (14/30), the exact
+visible source/search filter, and the busy-only choice. A new pure
+`adjacentAgendaRange` projection of `occurrencesBetween` scans no
+more than 365 calendar days **outside** the currently displayed window,
+including multi-day ongoing all-day and timed events and read-only
+transparent ICS. Forward hops put the first encountered event at the start
+of the new visible range; backward hops place it at the end, so it is
+visible without losing the ability to inspect preceding days. Explicit
+no-result notice distinguishes an empty bounded search from a globally
+empty calendar; it never changes the date on failure.
+
+This is navigation-only: the original personal records, source/UIDs,
+recurrence exceptions/detached IDs, view persistence, guarded CAS
+writer, backup/recovery, original all-source availability/conflicts,
+local privacy and Folio boundary are unchanged. No second store,
+external provider action, or implicit event booking.
