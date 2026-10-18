@@ -2256,3 +2256,65 @@ describe('C26 contextual single-day finder original availability window',()=>{
     expect(hidden.source).toBe('ics')
   })
 })
+
+describe('C27 canonical month day preview and source-safe full event paging',()=>{
+  it('reaches every original event on a busy day beyond the inert three-chip month limit',()=>{
+    const originals=Array.from({length:47},(_,i)=>record({id:'month-original-'+i,title:'Event '+i,
+      start:fromLocalDateTime('2026-11-26T10:00'),end:fromLocalDateTime('2026-11-26T10:30')}))
+    const frozen=JSON.stringify(originals)
+    const first=searchOccurrencePage(originals,'2026-11-26','2026-11-26','forward',0,20)
+    const second=searchOccurrencePage(originals,'2026-11-26','2026-11-26','forward',1,20)
+    const third=searchOccurrencePage(originals,'2026-11-26','2026-11-26','forward',2,20)
+    expect(first).toMatchObject({total:47,pages:3,page:0,fromIndex:1,throughIndex:20,
+      hasPrevious:false,hasNext:true})
+    expect(second).toMatchObject({total:47,page:1,fromIndex:21,throughIndex:40})
+    expect(third).toMatchObject({page:2,fromIndex:41,throughIndex:47,hasNext:false})
+    const all=[...first.items,...second.items,...third.items]
+    expect(new Set(all.map(item=>item.recordId)).size).toBe(47)
+    expect(new Set(all.map(item=>item.key)).size).toBe(47)
+    expect(JSON.stringify(originals)).toBe(frozen)
+  })
+  it('keeps parent exclusions and detached original IDs intact in month preview',()=>{
+    const parent=record({id:'month-parent',repeat:{frequency:'daily',interval:1},
+      excludedDates:['2026-11-26'],start:fromLocalDateTime('2026-11-24T11:00'),
+      end:fromLocalDateTime('2026-11-24T12:00')})
+    const detached=record({id:'month-detached',recurrenceParentId:'month-parent',recurrenceDate:'2026-11-26',
+      start:fromLocalDateTime('2026-11-26T13:00'),end:fromLocalDateTime('2026-11-26T14:00')})
+    const result=searchOccurrencePage([parent,detached],'2026-11-26','2026-11-26','forward',0,20)
+    expect(result.items.map(item=>item.key)).toEqual(['month-detached@2026-11-26'])
+    expect(result.items[0].recordId).toBe('month-detached')
+    expect(parent.excludedDates).toEqual(['2026-11-26'])
+    expect(detached.recurrenceParentId).toBe('month-parent')
+  })
+  it('preserves free imported metadata in visible preview and excludes hidden source only from display',()=>{
+    const busy=record({id:'hidden-month-busy',source:'ics',sourceKey:'UID-hidden',
+      sourceCalendar:'Hidden Month',start:fromLocalDateTime('2026-11-26T11:00'),
+      end:fromLocalDateTime('2026-11-26T12:00')})
+    const free=record({id:'month-free',source:'ics',sourceKey:'UID-free',sourceCalendar:'Campus',
+      transparent:true,start:fromLocalDateTime('2026-11-26T09:00'),
+      end:fromLocalDateTime('2026-11-26T10:00')})
+    const shown=visibleCalendarRecords([busy,free],'all',new Set(['Hidden Month']))
+    const peek=searchOccurrencePage(shown,'2026-11-26','2026-11-26','forward',0,20)
+    expect(peek.items).toMatchObject([{recordId:'month-free',source:'ics',transparent:true}])
+    expect(peek.total).toBe(1)
+    const attempted=record({id:'candidate',start:busy.start,end:busy.end})
+    expect(reviewDraft([busy,free],attempted).collisionCount).toBeGreaterThan(0)
+    expect(busy.sourceKey).toBe('UID-hidden')
+    expect(free.sourceKey).toBe('UID-free')
+  })
+  it('shows the original multi-day all-day event on its continuation date',()=>{
+    const span=record({id:'original-multiday',allDay:true,
+      startDate:'2026-11-25',endDateExclusive:'2026-11-28',
+      start:fromLocalDateTime('2026-11-25T00:00'),end:fromLocalDateTime('2026-11-28T00:00')})
+    const page=searchOccurrencePage([span],'2026-11-26','2026-11-26','forward',0,20)
+    expect(page.items).toMatchObject([{recordId:'original-multiday',startDate:'2026-11-25',
+      endDateExclusive:'2026-11-28',allDay:true}])
+  })
+  it('displays empty selected dates without synthesizing or persisting records',()=>{
+    const original=record({id:'other-date',start:fromLocalDateTime('2026-11-27T09:00'),
+      end:fromLocalDateTime('2026-11-27T10:00')})
+    const empty=searchOccurrencePage([original],'2026-11-26','2026-11-26','forward',0,20)
+    expect(empty).toMatchObject({total:0,pages:1,page:0,items:[],fromIndex:0,throughIndex:0})
+    expect(original.id).toBe('other-date')
+  })
+})
