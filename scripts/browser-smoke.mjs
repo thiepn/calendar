@@ -1131,6 +1131,113 @@ async function exerciseC12MobileAdditiveRecovery(){
   await context.close()
 }
 
+
+async function exerciseC13DesktopIcsAndWorkload(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const source=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C13 University',
+    'BEGIN:VEVENT','UID:c13-month','SUMMARY:C13 Second Tuesday',
+    'DTSTART;TZID=Europe/Berlin:20260113T090000','DURATION:PT90M',
+    'RRULE:FREQ=MONTHLY;COUNT=4;BYDAY=2TU','END:VEVENT',
+    'BEGIN:VEVENT','UID:c13-retreat','SUMMARY:C13 Retreat',
+    'DTSTART;VALUE=DATE:20260114','DURATION:P2D','END:VEVENT','END:VCALENDAR'].join('\r\n')
+  const choose=()=>page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'c13.ics',mimeType:'text/calendar',buffer:Buffer.from(source)})
+  await choose()
+  const review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  assert.match(await review.getByLabel('Import change preview').innerText(),/5 new/)
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const records=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.equal(records.length,5)
+  assert.deepEqual(records.filter(r=>r.title==='C13 Second Tuesday').map(r=>r.start),[
+    '2026-01-13T08:00:00.000Z','2026-02-10T08:00:00.000Z',
+    '2026-03-10T08:00:00.000Z','2026-04-14T07:00:00.000Z'])
+  assert.equal(records.find(r=>r.title==='C13 Retreat').endDateExclusive,'2026-01-16')
+  assert.ok(records.every(r=>r.source==='ics'&&!r.repeat))
+  await choose()
+  const refreshed=page.getByRole('dialog',{name:'ICS import review'})
+  await refreshed.waitFor()
+  assert.match(await refreshed.getByLabel('Import change preview').innerText(),/5 unchanged/)
+  await refreshed.getByRole('button',{name:'Cancel'}).click()
+  console.log('BROWSER_C13_ORDINAL_MONTHLY_EXPLICIT_DURATION_SOURCE_IDS_PASS')
+  await page.getByLabel('Jump to date').fill('2026-01-13')
+  await page.locator('.view-switch button').filter({hasText:'Week'}).click()
+  const strip=page.getByRole('region',{name:'Seven-day planning overview'})
+  await strip.waitFor()
+  const tue=strip.getByRole('button',{name:'Open daily plan 2026-01-13'})
+  assert.match(await tue.innerText(),/1 event/)
+  assert.match(await tue.innerText(),/1h 30m timed/)
+  const wed=strip.getByRole('button',{name:'Open daily plan 2026-01-14'})
+  assert.match(await wed.innerText(),/1 all-day/)
+  await page.locator('.source-entry').filter({hasText:'Personal'}).click()
+  const privateStrip=page.getByRole('region',{name:'Seven-day planning overview'})
+  assert.match(await privateStrip.getByRole('button',{name:'Open daily plan 2026-01-13'}).innerText(),/0 events/)
+  await page.locator('.source-entry').filter({hasText:'Imported snapshots'}).click()
+  await strip.getByRole('button',{name:'Open daily plan 2026-01-14'}).click()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-01-14')
+  assert.match(await page.locator('.inspector').innerText(),/C13 Retreat/)
+  const latest=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records)
+  assert.deepEqual(latest,records)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C13_SOURCE_FILTERED_SEVEN_DAY_PLAN_AND_DAY_JUMP_PASS')
+  await context.close()
+}
+async function exerciseC13MobileDstPlanningAndStaleReminder(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const cross={id:'c13-midnight',title:'C13 overnight preparation',description:'',location:'',
+    source:'personal',allDay:false,start:'2026-03-28T22:30:00.000Z',
+    end:'2026-03-29T01:30:00.000Z',updatedAt:'2026-03-28T00:00:00.000Z'}
+  await page.evaluate(record=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records:[record]})),cross)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-03-28')
+  await page.locator('.view-switch button').filter({hasText:'List'}).click()
+  const strip=page.getByRole('region',{name:'Seven-day planning overview'})
+  const first=strip.getByRole('button',{name:'Open daily plan 2026-03-28'})
+  const second=strip.getByRole('button',{name:'Open daily plan 2026-03-29'})
+  assert.match(await first.innerText(),/0h 30m timed/)
+  assert.match(await second.innerText(),/2h 30m timed/)
+  const geometry=await page.evaluate(()=>({window:innerWidth,document:document.documentElement.scrollWidth}))
+  assert.ok(geometry.document<=geometry.window+2,'C13 mobile plan overflow '+JSON.stringify(geometry))
+  await second.click()
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),'2026-03-29')
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const reminders=page.getByRole('dialog',{name:'Local reminders'})
+  await reminders.waitFor()
+  await reminders.getByRole('button',{name:'Close',exact:true}).click()
+  await page.evaluate(()=>{
+    const begin=new Date(Date.now()+10*60000).toISOString()
+    const end=new Date(Date.now()+70*60000).toISOString()
+    const current={schemaVersion:1,records:[{id:'c13-now',title:'C13 due soon',description:'',location:'',
+      source:'personal',allDay:false,start:begin,end,reminderMinutes:15,updatedAt:new Date().toISOString()}]}
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(current))
+  })
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:/Local reminders/}).click()
+  const panel=page.getByRole('dialog',{name:'Local reminders'})
+  await panel.getByRole('button',{name:'Dismiss C13 due soon'}).waitFor()
+  await page.evaluate(()=>{
+    const data=JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))
+    data.records[0].title='Latest change from other tab'
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(data))
+  })
+  await panel.getByRole('button',{name:'Dismiss C13 due soon'}).click()
+  assert.match(await page.locator('.notice').last().innerText(),/Reminder preference not saved/)
+  const actions=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.reminder-actions.v1'))
+  assert.ok(!actions||JSON.stringify(JSON.parse(actions))==='{}')
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C13_MOBILE_DST_PLAN_AND_STALE_REMINDER_GUARD_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -1159,6 +1266,8 @@ try{
   await exerciseC11MobileOverdueTriage()
   await exerciseC12DesktopMonthlyPersonalWorkflow()
   await exerciseC12MobileAdditiveRecovery()
+  await exerciseC13DesktopIcsAndWorkload()
+  await exerciseC13MobileDstPlanningAndStaleReminder()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
