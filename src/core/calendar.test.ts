@@ -1087,3 +1087,95 @@ describe('C13 source-filtered local seven-day planning',()=>{
     expect(week[1].timedCount).toBe(1)
   })
 })
+
+
+describe('C14 finite yearly source recurrence and source-correct time proposals',()=>{
+  it('materializes a leap-safe last-February-day yearly source master and retains matching original UIDs',()=>{
+    const ics=['BEGIN:VCALENDAR','X-WR-CALNAME:Annual checkpoints','BEGIN:VEVENT',
+      'UID:last-feb','SUMMARY:Annual reporting',
+      'DTSTART;VALUE=DATE:20260228','DTEND;VALUE=DATE:20260301',
+      'RRULE:FREQ=YEARLY;COUNT=2;BYMONTH=2;BYMONTHDAY=-1',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const preview=previewIcs(ics)
+    expect(preview.skippedEvents,preview.warnings.join(' | ')).toBe(0)
+    expect(preview.records.map(r=>r.startDate)).toEqual(['2026-02-28','2027-02-28'])
+    const saved=mergeIcs({schemaVersion:1,records:[record({id:'private'})]},preview).state
+    const refreshed=mergeIcs(saved,previewIcs(ics),'replace')
+    expect(refreshed.duplicates).toBe(2)
+    expect(refreshed.removed).toBe(0)
+    expect(refreshed.state.records.map(x=>x.id)).toEqual(saved.records.map(x=>x.id))
+    expect(refreshed.state.records[0]).toEqual(saved.records[0])
+  })
+  it('materializes a finite TZID yearly source series with real UTC daylight offsets',()=>{
+    const ics=['BEGIN:VCALENDAR','X-WR-CALNAME:Training','BEGIN:VEVENT',
+      'UID:annual-eu','SUMMARY:Annual training','DTSTART;TZID=Europe/Berlin:20260318T093000',
+      'DURATION:PT1H30M','RRULE:FREQ=YEARLY;COUNT=2;BYMONTH=3',
+      'END:VEVENT','END:VCALENDAR'].join('\r\n')
+    const parsed=previewIcs(ics)
+    expect(parsed.skippedEvents,parsed.warnings.join(' | ')).toBe(0)
+    expect(parsed.records.map(r=>r.start)).toEqual([
+      '2026-03-18T08:30:00.000Z','2027-03-18T08:30:00.000Z'])
+    expect(parsed.records.every(r=>r.source==='ics'&&!r.repeat)).toBe(true)
+  })
+  it('honors finite BYMONTH monthly selections without shifting the original monthly anchor',()=>{
+    const result=expandFiniteAllDay('2026-01-15',parseFiniteAllDayRule(
+      'FREQ=MONTHLY;COUNT=3;BYMONTH=1,4,7;BYMONTHDAY=15','2026-01-15'))
+    expect(result).toEqual(['2026-01-15','2026-04-15','2026-07-15'])
+  })
+  it('refuses unsafe yearly selector metadata and bounded COUNT that extends past 730 days',()=>{
+    for(const rule of ['FREQ=YEARLY;COUNT=2;BYMONTH=0','FREQ=YEARLY;COUNT=2;BYMONTH=13',
+      'FREQ=YEARLY;COUNT=2;BYMONTH=2,2','FREQ=YEARLY;COUNT=2;BYMONTH=3',
+      'FREQ=YEARLY;COUNT=2;BYDAY=1MO','FREQ=YEARLY;COUNT=2;BYMONTHDAY=32',
+      'FREQ=DAILY;COUNT=3;BYMONTH=2'])
+      expect(()=>parseFiniteAllDayRule(rule,'2026-02-28')).toThrow()
+    const missing=previewIcs(['BEGIN:VCALENDAR','BEGIN:VEVENT','UID:annual','SUMMARY:Not finite',
+      'DTSTART;VALUE=DATE:20260228','DTEND;VALUE=DATE:20260301',
+      'RRULE:FREQ=YEARLY;COUNT=4;BYMONTH=2','END:VEVENT','END:VCALENDAR'].join('\r\n'))
+    expect(missing.records).toHaveLength(0)
+    expect(missing.skippedEvents).toBe(1)
+    expect(()=>mergeIcs({schemaVersion:1,records:[]},missing,'replace')).toThrow('incomplete')
+  })
+  it('filters free slot weekdays and weekends independently of hidden imported commitments',()=>{
+    const imported=record({id:'import',source:'ics',sourceCalendar:'external',sourceKey:'u',
+      start:fromLocalDateTime('2026-10-19T10:00'),end:fromLocalDateTime('2026-10-19T11:00')})
+    const base={from:'2026-10-17',days:4,durationMinutes:30,startHour:8,endHour:12,
+      blockAllDay:true,maxResults:100,now:new Date('2026-10-15T06:00:00Z')}
+    const weekdays=findFreeSlots([imported],{...base,daySelection:'weekdays'})
+    expect(weekdays.length).toBeGreaterThan(0)
+    expect(weekdays.every(slot=>slot.date>='2026-10-19')).toBe(true)
+    expect(weekdays.some(slot=>slot.date==='2026-10-19'&&slot.start===fromLocalDateTime('2026-10-19T10:00'))).toBe(false)
+    const weekend=findFreeSlots([imported],{...base,daySelection:'weekends'})
+    expect(weekend.length).toBeGreaterThan(0)
+    expect(weekend.every(slot=>slot.date==='2026-10-17'||slot.date==='2026-10-18')).toBe(true)
+  })
+  it('reserves a before/after margin for all original timed sources',()=>{
+    const imported=record({id:'busy',source:'ics',sourceCalendar:'class',sourceKey:'unit',
+      start:fromLocalDateTime('2026-10-19T10:00'),end:fromLocalDateTime('2026-10-19T11:00')})
+    const base={from:'2026-10-19',days:1,durationMinutes:30,startHour:8,endHour:13,
+      blockAllDay:true,maxResults:100,now:new Date('2026-10-15T06:00:00Z')}
+    const plain=findFreeSlots([imported],base).map(slot=>slot.start)
+    const padded=findFreeSlots([imported],{...base,bufferMinutes:15}).map(slot=>slot.start)
+    const start=(clock:string)=>fromLocalDateTime('2026-10-19T'+clock)
+    expect(plain).toContain(start('09:30'))
+    expect(padded).not.toContain(start('09:30'))
+    expect(plain).toContain(start('11:00'))
+    expect(padded).not.toContain(start('11:00'))
+    expect(padded).toContain(start('11:15'))
+    expect(padded).toContain(start('09:15'))
+    expect(padded.length).toBeLessThan(plain.length)
+  })
+  it('omits DST fold start minutes rather than guessing either physical instant',()=>{
+    const result=findFreeSlots([],{from:'2026-10-25',days:1,durationMinutes:30,
+      startHour:1,endHour:4,blockAllDay:true,maxResults:100,
+      now:new Date('2026-10-20T00:00:00Z')})
+    expect(result.every(slot=>!slot.start.startsWith('2026-10-25T00:00:00'))).toBe(true)
+    expect(result.every(slot=>new Date(slot.start).getHours()!==2)).toBe(true)
+    expect(result.some(slot=>new Date(slot.start).getHours()===3)).toBe(true)
+  })
+  it('validates selected scheduling preferences instead of generating invented slots',()=>{
+    const base={from:'2026-10-19',days:1,durationMinutes:30,startHour:8,endHour:12,
+      blockAllDay:true,now:new Date('2026-10-15T00:00:00Z')}
+    expect(()=>findFreeSlots([],{...base,bufferMinutes:17 as 15})).toThrow('Invalid')
+    expect(()=>findFreeSlots([],{...base,daySelection:'public-holidays' as 'weekdays'})).toThrow('Invalid')
+  })
+})
