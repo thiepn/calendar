@@ -2023,6 +2023,86 @@ async function exerciseC20MobileRecurringAlternativesAndStaleSourceGuard(){
   await context.close()
 }
 
+
+async function exerciseC21DesktopTransparentSourceReview(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const source=value=>['BEGIN:VCALENDAR','VERSION:2.0',
+    'X-WR-CALNAME:C21 College','BEGIN:VEVENT','UID:original-c21',
+    'SUMMARY:C21 free office hours','DTSTART:20261109T080000Z',
+    'DTEND:20261109T090000Z','TRANSP:'+value,
+    'END:VEVENT','END:VCALENDAR'].join('\r\n')
+  const put=async text=>page.locator('input[accept=".ics,text/calendar"]')
+    .setInputFiles({name:'c21-college.ics',mimeType:'text/calendar',buffer:Buffer.from(text)})
+  await put(source('TRANSPARENT'))
+  let review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  await page.getByLabel('Jump to date').fill('2026-11-09')
+  await page.locator('.view-switch button').filter({hasText:'List'}).click()
+  assert.match(await page.locator('.calendar-surface').innerText(),/Free \\(non-blocking\\)/)
+  await page.locator('.event-chip').filter({hasText:'C21 free office hours'}).first().click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  assert.match(await details.innerText(),/TRANSP:TRANSPARENT/)
+  await page.getByRole('button',{name:'Close event'}).click()
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  await put(source('OPAQUE'))
+  review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  assert.match(await review.getByRole('region',{name:'Imported changes by event'}).innerText(),/free\\/busy status/)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),before,
+    'Import preview must never write to the source calendar')
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const after=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(after.records[0].id,before.records[0].id)
+  assert.equal(after.records[0].sourceKey,before.records[0].sourceKey)
+  assert.equal(after.records[0].transparent,undefined)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C21_DESKTOP_TRANSPARENT_REIMPORT_ORIGINAL_ID_PASS')
+  await context.close()
+}
+async function exerciseC21MobileFreeBusyFinder(){
+  const context=await browser.newContext({viewport:{width:390,height:844},
+    isMobile:true,hasTouch:true,timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const source=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C21 Mobile',
+    'BEGIN:VEVENT','UID:day','SUMMARY:C21 flexible day',
+    'DTSTART;VALUE=DATE:20261109','DTEND;VALUE=DATE:20261110',
+    'TRANSP:TRANSPARENT','END:VEVENT',
+    'BEGIN:VEVENT','UID:busy','SUMMARY:C21 busy morning',
+    'DTSTART:20261109T070000Z','DTEND:20261109T080000Z',
+    'TRANSP:OPAQUE','END:VEVENT',
+    'BEGIN:VEVENT','UID:free','SUMMARY:C21 flexible office hours',
+    'DTSTART:20261109T080000Z','DTEND:20261109T090000Z',
+    'TRANSP:TRANSPARENT','END:VEVENT','END:VCALENDAR'].join('\r\n')
+  await page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'c21-mobile.ics',mimeType:'text/calendar',buffer:Buffer.from(source)})
+  const review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  await page.getByLabel('Jump to date').fill('2026-11-09')
+  await page.getByRole('button',{name:'Find time'}).click()
+  const finder=page.getByRole('dialog',{name:'Find an available time'})
+  await finder.waitFor()
+  assert.match(await finder.locator('.finder-slot').first().innerText(),/09:00.*10:00/,
+    'C21 09:00 suggestion must remain free despite all-day and timed transparent imports')
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  await finder.locator('.finder-slot').first().click()
+  await page.getByRole('dialog',{name:'New event'}).waitFor()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),before,
+    'Provisional planner must not write canonical source data')
+  const widths=await page.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth}))
+  assert.ok(widths.document<=widths.viewport+2,'C21 mobile overflow: '+JSON.stringify(widths))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C21_MOBILE_TRANSPARENT_FREE_BUSY_FINDER_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -2067,6 +2147,8 @@ try{
   await exerciseC19MobileCustomSnoozeStaleSourceGuard()
   await exerciseC20DesktopSafeAlternativesAndActualSave()
   await exerciseC20MobileRecurringAlternativesAndStaleSourceGuard()
+  await exerciseC21DesktopTransparentSourceReview()
+  await exerciseC21MobileFreeBusyFinder()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
