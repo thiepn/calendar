@@ -2191,6 +2191,126 @@ async function exerciseC22DesktopUnchangedFullWeek(){
   await context.close()
 }
 
+
+async function exerciseC23MobileQuickDraftAndOriginalEdit(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-10-19')
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  await page.getByRole('button',{name:'New event'}).click()
+  let editor=page.getByRole('dialog',{name:'New event'})
+  const start=editor.locator('input[type="datetime-local"]').first()
+  const end=editor.locator('input[type="datetime-local"]').nth(1)
+  assert.equal(await editor.locator('.mobile-editor-shortcuts').isVisible(),true)
+  assert.equal(await editor.getByRole('button',{name:'30 min later'}).isVisible(),true)
+  assert.equal(await editor.getByRole('button',{name:'2 h',exact:true}).isVisible(),true)
+  assert.notEqual(await page.evaluate(()=>document.activeElement?.getAttribute('placeholder')),'What are you planning?',
+    'Mobile draft should not force the on-screen keyboard before scheduling')
+  await editor.getByLabel('Event name').fill('C23 original mobile event')
+  await start.fill('2026-10-19T09:00')
+  await end.fill('2026-10-19T10:00')
+  await editor.getByRole('button',{name:'30 min later'}).click()
+  assert.equal(await start.inputValue(),'2026-10-19T09:30')
+  assert.equal(await end.inputValue(),'2026-10-19T10:30')
+  await editor.getByRole('button',{name:'2 h',exact:true}).click()
+  assert.equal(await end.inputValue(),'2026-10-19T11:30')
+  await editor.getByRole('button',{name:'Next day'}).click()
+  assert.equal(await start.inputValue(),'2026-10-20T09:30')
+  assert.equal(await end.inputValue(),'2026-10-20T11:30')
+  await editor.getByRole('button',{name:'Previous day'}).click()
+  assert.equal(await start.inputValue(),'2026-10-19T09:30')
+  assert.equal(await end.inputValue(),'2026-10-19T11:30')
+  await editor.getByLabel('Notes').fill('Local unsaved notes')
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before,
+    'All shortcut actions must stay in memory before Save')
+  await editor.evaluate(el=>{el.scrollTop=el.scrollHeight})
+  const footer=editor.locator('.editor-actions')
+  const sticky=await footer.evaluate(el=>getComputedStyle(el).position)
+  assert.equal(sticky,'sticky')
+  const bounds=await Promise.all([editor.boundingBox(),footer.boundingBox()])
+  assert.ok(bounds[0]&&bounds[1]&&bounds[1].y+bounds[1].height<=bounds[0].y+bounds[0].height+2,
+    'Mobile save controls must remain within the editor viewport')
+  await editor.getByRole('button',{name:'Create event'}).click()
+  await editor.waitFor({state:'hidden'})
+  const created=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records
+    .find(x=>x.title==='C23 original mobile event'))
+  assert.ok(created?.id)
+  assert.equal(new Date(created.start).toISOString(),'2026-10-19T07:30:00.000Z')
+  assert.equal(new Date(created.end).toISOString(),'2026-10-19T09:30:00.000Z')
+  assert.equal(created.description,'Local unsaved notes')
+  await page.locator('.timeline-block').filter({hasText:'C23 original mobile event'}).first().click()
+  await page.getByRole('button',{name:'Edit event'}).click()
+  editor=page.getByRole('dialog',{name:'Edit event'})
+  await editor.getByRole('button',{name:'Next day'}).click()
+  assert.equal(await editor.locator('input[type="datetime-local"]').first().inputValue(),'2026-10-20T09:30')
+  await editor.getByRole('button',{name:'Save changes'}).click()
+  await editor.waitFor({state:'hidden'})
+  const updated=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records
+    .find(x=>x.title==='C23 original mobile event'))
+  assert.equal(updated.id,created.id,'C23 editing must keep the exact original personal record ID')
+  assert.equal(new Date(updated.start).toISOString(),'2026-10-20T07:30:00.000Z')
+  assert.equal(updated.description,created.description)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C23_MOBILE_QUICK_DRAFT_STICKY_SAVE_AND_ORIGINAL_EDIT_PASS')
+  await context.close()
+}
+async function exerciseC23MobileDstAndAllDayGuard(){
+  const context=await browser.newContext({viewport:{width:360,height:780},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-10-24')
+  const baseline=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  await page.getByRole('button',{name:'New event'}).click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  const start=editor.locator('input[type="datetime-local"]').first()
+  const end=editor.locator('input[type="datetime-local"]').nth(1)
+  await start.fill('2026-10-24T02:30')
+  await end.fill('2026-10-24T03:30')
+  await editor.getByRole('button',{name:'Next day'}).click()
+  assert.equal(await start.inputValue(),'2026-10-24T02:30')
+  assert.equal(await end.inputValue(),'2026-10-24T03:30')
+  assert.match(await editor.getByRole('alert').last().innerText(),/occurs twice/)
+  await editor.getByRole('button',{name:'30 min later'}).click()
+  assert.equal(await start.inputValue(),'2026-10-24T03:00')
+  assert.equal(await end.inputValue(),'2026-10-24T04:00')
+  await editor.getByLabel('All-day event').check()
+  const dates=editor.locator('input[type="date"]')
+  await dates.first().fill('2026-10-30')
+  await dates.nth(1).fill('2026-11-02')
+  await editor.getByRole('button',{name:'Next day'}).click()
+  assert.equal(await dates.first().inputValue(),'2026-10-31')
+  assert.equal(await dates.nth(1).inputValue(),'2026-11-03')
+  assert.equal(await editor.getByRole('button',{name:'30 min later'}).count(),0)
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),baseline)
+  await editor.getByRole('button',{name:'Cancel'}).click()
+  const viewport=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(viewport.scroll<=viewport.width+2,'Mobile outer overflow: '+JSON.stringify(viewport))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C23_MOBILE_DST_REJECTION_ALL_DAY_DRAFT_AND_CANCEL_NO_WRITES_PASS')
+  await context.close()
+}
+async function exerciseC23DesktopEditorUnchanged(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.getByRole('button',{name:'New event'}).click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  assert.equal(await editor.locator('.mobile-editor-shortcuts').isVisible(),false)
+  assert.equal(await editor.locator('.editor-actions').evaluate(el=>getComputedStyle(el).position),'static')
+  assert.equal(await editor.getByRole('button',{name:'Create event'}).isVisible(),true)
+  await editor.getByRole('button',{name:'Cancel'}).click()
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C23_DESKTOP_ORIGINAL_EDITOR_BEHAVIOR_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -2239,6 +2359,9 @@ try{
   await exerciseC21MobileFreeBusyFinder()
   await exerciseC22MobileFocusedWeekOriginalIdentityAndDST()
   await exerciseC22DesktopUnchangedFullWeek()
+  await exerciseC23MobileQuickDraftAndOriginalEdit()
+  await exerciseC23MobileDstAndAllDayGuard()
+  await exerciseC23DesktopEditorUnchanged()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
