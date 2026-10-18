@@ -12,11 +12,13 @@ import {previewMissingPersonal} from './core/recover-missing'
 import {personalDraftFromImported} from './core/personal-copy'
 import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
 import {exportBackup,importBackup,loadState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCalendar,restoreUnreadableCalendar,STORAGE_KEY,type RecoverySnapshot} from './core/storage'
-import {exportIcs,mergeIcs,previewIcs,type IcsPreview} from './core/ics'
+import {mergeIcs,previewIcs,type IcsPreview} from './core/ics'
+import {downloadPersonalExport,type ReviewedPersonalExportOptions} from './core/personal-export'
 import {reviewImportedChanges,exportImportedChangeCsv} from './core/ics-change-review'
 import {EventEditor} from './components/EventEditor'
 import {AllDayDialog} from './components/AllDayDialog'
 import {RestoreDialog} from './components/RestoreDialog'
+import {PersonalExportDialog} from './components/PersonalExportDialog'
 import {ReminderCenter} from './components/ReminderCenter'
 import {OfflineReadiness} from './components/OfflineReadiness'
 import {loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY,type ViewPreferences} from './core/view-preferences'
@@ -79,6 +81,7 @@ export default function App(){
   const [active,setActive]=useState<CalendarOccurrence|null>(null)
   const [pending,setPending]=useState<IcsPreview|null>(null)
   const [sourcePanel,setSourcePanel]=useState(false)
+  const [personalExportOpen,setPersonalExportOpen]=useState(false)
   const [mobileNav,setMobileNav]=useState(false)
   const importInput=useRef<HTMLInputElement>(null)
   const restoreInput=useRef<HTMLInputElement>(null)
@@ -214,7 +217,7 @@ export default function App(){
       const target=e.target as HTMLElement
       if(['INPUT','TEXTAREA','SELECT'].includes(target.tagName)||target.isContentEditable)return
       if(e.ctrlKey||e.metaKey||e.altKey)return
-      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setFinderOpen(false);setRemindersOpen(false);setAdjustment(null);setAllDayAdjustment(null)}
+      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setPersonalExportOpen(false);setFinderOpen(false);setRemindersOpen(false);setAdjustment(null);setAllDayAdjustment(null)}
       if(e.key==='n'){e.preventDefault();create(selected)}
       if(e.key==='t'){e.preventDefault();setSelected(localDate())}
       if(e.key==='/'){e.preventDefault();searchInput.current?.focus()}
@@ -523,6 +526,18 @@ export default function App(){
     const result=mergeIcs(calendar,pending,importMode)
     if(commit(result.state,`Imported ${result.added}; updated ${result.updated}; unchanged ${result.duplicates}; removed from prior snapshot ${result.removed}`))setPending(null)
   }
+  function exportReviewedPersonalIcs(options:ReviewedPersonalExportOptions){
+    try{
+      const latest=loadState()
+      if(latest.error||JSON.stringify(latest.state)!==JSON.stringify(calendar))
+        throw new Error('The saved calendar changed or cannot be read. Review the latest events before exporting.')
+      const contents=downloadPersonalExport(latest.state,options)
+      download('thiepn-calendar-personal-'+options.from+'-to-'+options.through+'.ics',contents,'text/calendar;charset=utf-8')
+      setPersonalExportOpen(false)
+      setNotice('Downloaded reviewed '+options.privacy+' personal ICS snapshot for '+options.from+' to '+options.through+
+        '. Use the full JSON backup for device recovery.')
+    }catch(error){setNotice('Personal ICS export failed: '+String(error))}
+  }
   function downloadUnreadable(){
     const raw=rawCalendarBackup()
     if(raw===null){setNotice('No raw calendar text found');return}
@@ -573,9 +588,8 @@ export default function App(){
             <Bell size={15}/><span className="desktop-text">Reminders</span>{dueReminderCount>0&&<span className="reminder-count">{dueReminderCount}</span>}</button>
           <button className="secondary compact" aria-label="Find time" onClick={()=>setFinderOpen(true)}><Clock3 size={15}/><span className="desktop-text">Find time</span></button>
           <button className="secondary compact" onClick={()=>importInput.current?.click()}><Upload size={15}/><span className="desktop-text">Import ICS</span></button>
-          <button className="icon-button" title="Export personal events as finite ICS snapshot" aria-label="Export personal events" onClick={()=>{
-            try{download('thiepn-calendar-snapshot.ics',exportIcs(calendar,addDays(selected,-30),addDays(selected,365)),'text/calendar');setNotice('Exported a finite 395-day personal event snapshot, not continuous sync')}
-            catch(error){setNotice('Export failed: '+String(error))}}}><Download size={17}/></button>
+          <button className="icon-button" title="Review a privacy-first personal ICS snapshot" aria-label="Export personal events"
+            onClick={()=>setPersonalExportOpen(true)}><Download size={17}/></button>
           <button className="primary top-create" onClick={()=>create(selected)}><Plus size={16}/> <span>New event</span></button>
         </div>
       </header>
@@ -831,6 +845,8 @@ export default function App(){
       <p className="fine-print">Read-only local snapshot; not live sync. Unsupported RRULE masters are skipped with warnings. Neither method modifies Google, Folio, KLIPS or personal events.</p>
       <footer className="editor-actions"><button className="secondary" onClick={()=>setPending(null)}>Cancel</button><button className="primary" onClick={applyImport} disabled={!importReview?.result}>Apply reviewed changes</button></footer>
     </section></div>}
+    {personalExportOpen&&<PersonalExportDialog state={calendar} selected={selected}
+      onClose={()=>setPersonalExportOpen(false)} onExport={exportReviewedPersonalIcs}/>}
     {sourcePanel&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setSourcePanel(false)}}>
       <section className="sources-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Calendar data management">
         <header className="editor-head"><h2>Sources & data</h2><button className="icon-button" aria-label="Close sources" onClick={()=>setSourcePanel(false)}><X size={19}/></button></header>
@@ -848,6 +864,7 @@ export default function App(){
         {!sources.length&&<p className="empty-note">No imported ICS snapshots.</p>}
         <hr/><h3>Backups & interop</h3><div className="button-stack">
           <button className="secondary" onClick={()=>importInput.current?.click()}><Upload size={16}/> Import ICS snapshot</button>
+          <button className="secondary" onClick={()=>{setSourcePanel(false);setPersonalExportOpen(true)}}><Download size={16}/> Review personal ICS export</button>
           <button className="secondary" onClick={()=>download('thiepn-calendar-backup.json',exportBackup(calendar),'application/json')}><Download size={16}/> Save full JSON backup</button>
           <button className="secondary" onClick={()=>restoreInput.current?.click()}><Upload size={16}/> Review JSON backup restoration</button>
           <button className="secondary" disabled={!recovery} onClick={proposeRecovery}><RotateCcw size={16}/> Review previous-version checkpoint</button>
