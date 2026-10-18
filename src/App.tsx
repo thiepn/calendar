@@ -7,6 +7,7 @@ import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,split
 import {findFreeSlots,type FreeSlot} from './core/availability'
 import {adjacentBusyDay,exportAgendaCsv} from './core/agenda'
 import {sevenDayWorkload} from './core/planning'
+import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './core/source-visibility'
 import {previewMissingPersonal} from './core/recover-missing'
 import {personalDraftFromImported} from './core/personal-copy'
 import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
@@ -52,6 +53,7 @@ export default function App(){
   const [agendaSpan,setAgendaSpan]=useState<14|30>(initialView.agendaSpan)
   const [agendaBusyOnly,setAgendaBusyOnly]=useState(initialView.agendaBusyOnly)
   const [filter,setFilter]=useState<Filter>(initialView.filter)
+  const [hiddenImportedCalendars,setHiddenImportedCalendars]=useState<string[]>(initialView.hiddenImportedCalendars??[])
   const [query,setQuery]=useState('')
   const [searchDirection,setSearchDirection]=useState<'forward'|'backward'>('forward')
   const [editing,setEditing]=useState<CalendarRecord|null>(null)
@@ -178,13 +180,13 @@ export default function App(){
     }catch(error){setNotice('Foreground notification unavailable: '+String(error))}
   },[notifyEnabled,notifyPermission,reminders,reminderNow,reminderSettings])
   useEffect(()=>{
-    try{saveViewPreferences({mode,filter,agendaSpan,agendaBusyOnly})}
+    try{saveViewPreferences({mode,filter,agendaSpan,agendaBusyOnly,hiddenImportedCalendars})}
     catch(error){setNotice('Display preferences could not be saved: '+String(error))}
-  },[mode,filter,agendaSpan,agendaBusyOnly])
+  },[mode,filter,agendaSpan,agendaBusyOnly,hiddenImportedCalendars])
   function resetDisplayPreferences(){
     try{
       resetViewPreferences()
-      setMode('week');setFilter('all');setAgendaSpan(14);setAgendaBusyOnly(false)
+      setMode('week');setFilter('all');setAgendaSpan(14);setAgendaBusyOnly(false);setHiddenImportedCalendars([])
       setNotice('Local display preferences reset to defaults')
     }catch(error){setNotice('Display preferences could not be reset: '+String(error))}
   }
@@ -197,6 +199,7 @@ export default function App(){
           const updated:ViewPreferences=loadViewPreferences()
           setMode(updated.mode);setFilter(updated.filter)
           setAgendaSpan(updated.agendaSpan);setAgendaBusyOnly(updated.agendaBusyOnly)
+          setHiddenImportedCalendars(updated.hiddenImportedCalendars??[])
         }catch{}
       }
       if(e.key===STORAGE_KEY||e.key===null){const read=loadState();if(read.error){setNotice(read.error);setUnreadable(true)}
@@ -225,8 +228,9 @@ export default function App(){
     }
     window.addEventListener('keydown',key);return ()=>window.removeEventListener('keydown',key)
   },[selected,mode,agendaSpan])
-  const visible=useMemo(()=>calendar.records.filter(x=>(filter==='all'||x.source===filter)&&
-    (!query.trim()||[x.title,x.description,x.location,x.sourceCalendar??''].some(s=>s.toLowerCase().includes(query.toLowerCase().trim())))),[calendar,filter,query])
+  const hiddenImportedSet=useMemo(()=>new Set(hiddenImportedCalendars),[hiddenImportedCalendars])
+  const visible=useMemo(()=>visibleCalendarRecords(calendar.records,filter,hiddenImportedSet,query),
+    [calendar,filter,hiddenImportedSet,query])
   const days=useMemo(()=>{
     const start=mode==='month'?monthGridStart(selected):mode==='week'?monday(selected):selected
     return dateSeries(start,addDays(start,mode==='month'?41:mode==='week'?6:mode==='agenda'?agendaSpan-1:0))
@@ -237,17 +241,24 @@ export default function App(){
   const planningDays=useMemo(()=>mode==='week'||mode==='agenda'?sevenDayWorkload(visible,selected):[],[visible,selected,mode])
   const searchMatches=useMemo(()=>{
     if(!query.trim())return []
-    const q=query.toLocaleLowerCase().trim()
-    const matches=calendar.records.filter(x=>(filter==='all'||x.source===filter)&&
-      [x.title,x.description,x.location,x.sourceCalendar??''].some(v=>v.toLocaleLowerCase().includes(q)))
+    const matches=visibleCalendarRecords(calendar.records,filter,hiddenImportedSet,query)
     const from=searchDirection==='backward'?addDays(selected,-364):selected
     const to=searchDirection==='backward'?selected:addDays(selected,364)
     const occurrences=occurrencesBetween(matches,from,to)
     return searchDirection==='backward'?occurrences.slice(-30).reverse():occurrences.slice(0,30)
-  },[calendar,selected,query,filter,searchDirection])
-  const sources=calendar.records.filter(x=>x.source==='ics').reduce<Record<string,number>>((a,x)=>{
-    const key=x.sourceCalendar??'Imported';a[key]=(a[key]??0)+1;return a
-  },{})
+  },[calendar,selected,query,filter,hiddenImportedSet,searchDirection])
+  // A Map avoids treating source-controlled names such as "__proto__" as object keys.
+  const sourceCounts=new Map<string,number>()
+  for(const record of calendar.records){
+    if(record.source!=='ics')continue
+    const name=record.sourceCalendar??'Imported'
+    sourceCounts.set(name,(sourceCounts.get(name)??0)+1)
+  }
+  const sources=Array.from(sourceCounts.entries()).sort((a,b)=>a[0].localeCompare(b[0]))
+  function toggleImported(name:string){
+    try{setHiddenImportedCalendars(current=>toggleImportedCalendarVisibility(current,name))}
+    catch(error){setNotice('Imported calendar visibility unchanged: '+String(error))}
+  }
   const personalCount=calendar.records.filter(x=>x.source==='personal').length
   const activeRecord=active?calendar.records.find(x=>x.id===active.recordId):undefined
   const adjustmentReview=useMemo(()=>{
@@ -528,6 +539,17 @@ export default function App(){
         <button className={'source-entry '+(filter==='all'?'active':'')} onClick={()=>setFilter('all')}><span className="source-swatch all"/>All calendars <b>{counts.all}</b></button>
         <button className={'source-entry '+(filter==='personal'?'active':'')} onClick={()=>setFilter('personal')}><span className="source-swatch personal"/>Personal <b>{counts.personal}</b></button>
         <button className={'source-entry '+(filter==='ics'?'active':'')} onClick={()=>setFilter('ics')}><span className="source-swatch ics"/>Imported snapshots <b>{counts.ics}</b></button>
+        {sources.slice(0,5).map(([name])=><button key={name} type="button"
+          className={'source-entry imported-subsource '+(hiddenImportedSet.has(name)?'is-hidden':'')}
+          aria-pressed={!hiddenImportedSet.has(name)}
+          aria-label={'Toggle imported calendar '+name}
+          title={hiddenImportedSet.has(name)?'Show imported '+name:'Hide imported '+name}
+          onClick={()=>toggleImported(name)}>
+          <span className="source-swatch ics" aria-hidden="true"/><span className="source-name">{name}</span>
+          <small>{hiddenImportedSet.has(name)?'Hidden':'Shown'}</small>
+        </button>)}
+        {hiddenImportedCalendars.some(name=>sourceCounts.has(name))&&
+          <p className="source-filter-note">Hidden snapshots remain saved and still block Find Time suggestions.</p>}
         <button className="text-action" onClick={()=>{setSourcePanel(true);setMobileNav(false)}}>Manage sources <ChevronRight size={14}/></button>
       </div>
       <div className="sidebar-bottom"><div className="privacy-label"><Database size={15}/><span>Device-local workspace<small>No account or remote sync</small></span></div>
@@ -584,7 +606,7 @@ export default function App(){
         {planningDays.length>0&&<section className="planning-overview" aria-label="Seven-day planning overview">
           <div className="planning-overview-heading">
             <strong>Seven-day workload</strong>
-            <small>Original saved commitments · {filter==='all'?'all visible sources':filter==='personal'?'personal only':'imported only'}{query.trim()?' · search filtered':''}</small>
+            <small>Visible commitments · {filter==='all'?'shown sources':filter==='personal'?'personal only':'shown imports only'}{query.trim()?' · search filtered':''}</small>
           </div>
           <div className="planning-overview-days">
             {planningDays.map(item=><button key={item.date} type="button" aria-label={'Open daily plan '+item.date}
@@ -773,8 +795,17 @@ export default function App(){
       <section className="sources-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Calendar data management">
         <header className="editor-head"><h2>Sources & data</h2><button className="icon-button" aria-label="Close sources" onClick={()=>setSourcePanel(false)}><X size={19}/></button></header>
         <div className="source-card"><strong>Personal <span>{personalCount} records</span></strong><p>Editable device-local events. This is not Folio's schedule.</p></div>
-        {Object.entries(sources).map(([name,count])=><div key={name} className="source-card"><strong>{name}<span>{count} entries</span></strong><p>ICS snapshot · no ongoing provider connection</p><button className="danger small" onClick={()=>removeSource(name)}>Remove local copy</button></div>)}
-        {!Object.keys(sources).length&&<p className="empty-note">No imported ICS snapshots.</p>}
+        <p className="fine-print">Show or hide each imported snapshot without deleting its source records. Hidden snapshots are excluded from calendar views, search, workload and visible agenda exports; Find Time and overlap checks still include every saved commitment.</p>
+        {sources.map(([name,count])=><div key={name} className="source-card source-visibility-card">
+          <strong><span className="source-card-name">{name}</span><span>{count} entries</span></strong>
+          <p>ICS snapshot · read-only · no ongoing provider connection</p>
+          <div className="source-visibility-actions">
+            <label><input type="checkbox" aria-label={'Show '+name+' on calendar'} checked={!hiddenImportedSet.has(name)}
+              onChange={()=>toggleImported(name)}/> Show on calendar</label>
+            <button className="danger small" onClick={()=>removeSource(name)}>Remove local copy</button>
+          </div>
+        </div>)}
+        {!sources.length&&<p className="empty-note">No imported ICS snapshots.</p>}
         <hr/><h3>Backups & interop</h3><div className="button-stack">
           <button className="secondary" onClick={()=>importInput.current?.click()}><Upload size={16}/> Import ICS snapshot</button>
           <button className="secondary" onClick={()=>download('thiepn-calendar-backup.json',exportBackup(calendar),'application/json')}><Download size={16}/> Save full JSON backup</button>
@@ -797,7 +828,7 @@ export default function App(){
         </div>
         <section className="display-preferences" aria-label="Calendar display preferences">
           <h3>Saved display</h3>
-          <p className="fine-print">Current view ({mode}), source filter ({filter}) and agenda options are saved on this device and reused when Calendar reopens. The selected date resets to today.</p>
+          <p className="fine-print">Current view ({mode}), source filter ({filter}), hidden imported snapshot choices ({hiddenImportedCalendars.filter(name=>sourceCounts.has(name)).length}) and agenda options are saved on this device. Display-only choices are not included in event JSON backups. The selected date resets to today.</p>
           <button type="button" className="secondary small" onClick={resetDisplayPreferences}><RotateCcw size={14}/> Reset display preferences</button>
         </section>
         <OfflineReadiness/>
