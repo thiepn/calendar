@@ -2,6 +2,7 @@ import {describe,it,expect} from 'vitest'
 import type {CalendarRecord,CalendarState} from '../types'
 import {addDays,daysBetween,fromLocalDateTime,fromUnambiguousLocalDateTime,localInstantOptions,resolveLocalInstant} from './dates'
 import {proposeTimedChange,applyTimedChange,nudgeTimed} from './reschedule'
+import {findAdjustmentAlternatives} from './adjustment-alternatives'
 import {draftTimedRange,reviewDraft} from './draft'
 import {proposeAllDayChange,applyAllDayChange} from './all-day'
 import {occurrencesBetween,excludeOccurrence,conflictsOnDay} from './occurrences'
@@ -1717,5 +1718,117 @@ describe('C19 source-verified custom snooze and original-date-window continuity'
       fromLocalDateTime('2026-03-28T10:00'))).toThrow('does not exist')
     expect(()=>proposedSnoozeUntil(item,'2026-10-25T02:30',
       fromLocalDateTime('2026-10-24T10:00'))).toThrow('occurs twice')
+  })
+})
+
+
+describe('C20 conflict-free one-occurrence rescheduling alternatives',()=>{
+  const at=(date:string,hour:string)=>fromLocalDateTime(date+'T'+hour)
+  const timed=(id:string,date:string,hour:string,end:string,source:'personal'|'ics'='personal')=>
+    record({id,title:id,start:at(date,hour),end:at(date,end),source,
+      ...(source==='ics'?{sourceCalendar:'Hidden University',sourceKey:'Hidden University|'+id}:{})})
+  const future='2090-11-07'
+  const options={days:3 as const,bufferMinutes:0 as const,now:new Date(at(future,'06:00'))}
+  it('finds real alternatives for a personal event blocked by an imported hidden source, without changing originals',()=>{
+    const own=timed('my-original',future,'09:00','10:00')
+    const imported=timed('imported-unavailable',future,'10:00','11:00','ics')
+    const other=timed('other-personal',future,'11:00','12:00')
+    const state:CalendarState={schemaVersion:1,records:[own,imported,other]}
+    const baseline=JSON.stringify(state)
+    const instance=occurrencesBetween([own],future,future)[0]
+    const proposed=proposeTimedChange(state,instance,'move',future,600,60)
+    expect(proposed.conflicts.map(x=>x.recordId)).toEqual(['imported-unavailable'])
+    const alternatives=findAdjustmentAlternatives(state,proposed,options)
+    expect(alternatives.length).toBeGreaterThan(0)
+    expect(alternatives.every(slot=>slot.date>=future)).toBe(true)
+    expect(alternatives.every(slot=>{
+      const reviewed=proposeTimedChange(state,instance,'move',slot.date,slot.minute,slot.lengthMinutes)
+      return reviewed.start===slot.start&&reviewed.end===slot.end&&reviewed.conflicts.length===0
+    })).toBe(true)
+    expect(alternatives.some(slot=>slot.start===imported.start||slot.start===other.start)).toBe(false)
+    expect(JSON.stringify(state)).toBe(baseline)
+    const first=alternatives[0]
+    const revised=applyTimedChange(state,proposeTimedChange(state,instance,'move',
+      first.date,first.minute,first.lengthMinutes),()=> 'unused')
+    expect(revised.records.filter(r=>r.source==='ics')).toEqual([imported])
+    expect(revised.records.find(r=>r.id===other.id)).toEqual(other)
+    expect(revised.records.find(r=>r.id===own.id)?.start).toBe(first.start)
+  })
+  it('skips ONLY selected recurring source instance, leaving later repetitions and imports busy',()=>{
+    const first='2090-11-06'
+    const second=addDays(first,7)
+    const recurring=timed('repeat',first,'10:00','11:00')
+    recurring.repeat={frequency:'weekly',interval:1,weekdays:[new Date(first+'T12:00:00').getDay()]}
+    const imported=timed('provider',second,'11:00','12:00','ics')
+    const state:CalendarState={schemaVersion:1,records:[recurring,imported]}
+    const instance=occurrencesBetween([recurring],first,first)[0]
+    const original=JSON.stringify(state)
+    const proposal=proposeTimedChange(state,instance,'move',second,660,60)
+    expect(proposal.conflicts.map(x=>x.recordId)).toEqual(['provider'])
+    const slots=findAdjustmentAlternatives(state,proposal,{days:1,bufferMinutes:0,now:new Date(at(second,'06:00'))})
+    expect(slots.length).toBeGreaterThan(0)
+    expect(slots.some(x=>x.start===at(second,'10:00'))).toBe(false)
+    expect(slots.some(x=>x.start===at(second,'11:00'))).toBe(false)
+    expect(JSON.stringify(state)).toEqual(original)
+    const adjusted=applyTimedChange(state,proposeTimedChange(state,instance,'move',
+      slots[0].date,slots[0].minute,slots[0].lengthMinutes),()=> 'detached-review')
+    expect(adjusted.records.find(r=>r.id==='repeat')?.excludedDates).toEqual([first])
+    expect(occurrencesBetween(adjusted.records,second,second).some(x=>x.recordId==='repeat')).toBe(true)
+    expect(adjusted.records.find(r=>r.id==='provider')).toEqual(imported)
+  })
+  it('treats all-day source records and both sides of busy buffers as unavailable',()=>{
+    const selected=timed('moving',future,'09:00','10:00')
+    const allDay=record({id:'imported-day',title:'Protected imported day',source:'ics',
+      sourceCalendar:'Closed Office',sourceKey:'Closed Office|day',allDay:true,
+      startDate:future,endDateExclusive:addDays(future,1),
+      start:at(future,'00:00'),end:at(addDays(future,1),'00:00')})
+    const next=addDays(future,1)
+    const busy=timed('clinic',next,'10:00','11:00','ics')
+    const state:CalendarState={schemaVersion:1,records:[selected,allDay,busy]}
+    const item=occurrencesBetween([selected],future,future)[0]
+    const p=proposeTimedChange(state,item,'move',future,660,60)
+    const slots=findAdjustmentAlternatives(state,p,{days:3,bufferMinutes:30,now:new Date(at(future,'06:00'))})
+    expect(slots.some(x=>x.date===future)).toBe(false)
+    expect(slots.every(slot=>slot.start!==busy.start)).toBe(true)
+    expect(slots.length).toBeGreaterThan(0)
+    expect(slots.some(slot=>slot.date===next&&slot.minute>=690)).toBe(true)
+  })
+  it('refuses edited source instances instead of suggesting a fake available relocation',()=>{
+    const saved=timed('original',future,'09:00','10:00')
+    const state:CalendarState={schemaVersion:1,records:[saved]}
+    const original=occurrencesBetween([saved],future,future)[0]
+    const proposal=proposeTimedChange(state,original,'move',future,660,60)
+    expect(findAdjustmentAlternatives(state,proposal,options).length).toBeGreaterThan(0)
+    const changed={schemaVersion:1 as const,records:[{...saved,title:'Updated in another tab'}]}
+    expect(()=>findAdjustmentAlternatives(changed,proposal,options)).toThrow('changed')
+    const removed:CalendarState={schemaVersion:1,records:[]}
+    expect(()=>findAdjustmentAlternatives(removed,proposal,options)).toThrow('no longer exists')
+  })
+  it('does not speculate about long or non-grid durations and bounds the query safely',()=>{
+    const selected=timed('selected',future,'09:00','10:00')
+    const state:CalendarState={schemaVersion:1,records:[selected]}
+    const item=occurrencesBetween([selected],future,future)[0]
+    const p=proposeTimedChange(state,item,'move',future,660,60)
+    expect(()=>findAdjustmentAlternatives(state,p,{...options,days:9 as 7})).toThrow('Invalid')
+    expect(()=>findAdjustmentAlternatives(state,p,{...options,bufferMinutes:10 as 15})).toThrow('Invalid')
+    expect(()=>findAdjustmentAlternatives(state,p,{...options,limit:20})).toThrow('Invalid')
+    const long=proposeTimedChange(state,item,'move',future,660,300)
+    expect(()=>findAdjustmentAlternatives(state,long,options)).toThrow('up to 4 hours')
+    const short=proposeTimedChange(state,item,'move',future,660,31)
+    expect(()=>findAdjustmentAlternatives(state,short,options)).toThrow('15-minute-grid')
+  })
+  it('recomputes actual conflicts against newly saved imported commitments',()=>{
+    const selected=timed('original',future,'09:00','10:00')
+    const state:CalendarState={schemaVersion:1,records:[selected]}
+    const item=occurrencesBetween([selected],future,future)[0]
+    const p=proposeTimedChange(state,item,'move',future,660,60)
+    const slot=findAdjustmentAlternatives(state,p,options)[0]
+    expect(slot).toBeDefined()
+    const added=record({id:'new-provider',source:'ics',sourceCalendar:'Recent Source',
+      sourceKey:'Recent Source|id',start:slot.start,end:slot.end})
+    const changed:CalendarState={schemaVersion:1,records:[selected,added]}
+    const recalculated=findAdjustmentAlternatives(changed,p,options)
+    expect(recalculated.some(x=>x.start===slot.start&&x.end===slot.end)).toBe(false)
+    expect(changed.records[0]).toBe(selected)
   })
 })
