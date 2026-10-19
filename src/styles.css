@@ -834,3 +834,5 @@
  .handoff-continuity-row button{width:100%}
  .handoff-continuity-events{max-height:250px}
 }
+
+@media(max-width:740px){.last-handoff-shortcut{display:none}}

@@ -910,8 +910,8 @@ export default function App(){
             <Bell size={15}/><span className="desktop-text">Reminders</span>{dueReminderCount>0&&<span className="reminder-count">{dueReminderCount}</span>}</button>
           <button className="secondary compact" aria-label="Find time" onClick={()=>showFindTime()}><Clock3 size={15}/><span className="desktop-text">Find time</span></button>
           <button className="secondary compact" onClick={()=>importInput.current?.click()}><Upload size={15}/><span className="desktop-text">Import ICS</span></button>
-          {lastHandoff&&<button className="secondary compact" aria-label="Last calendar handoff"
-            onClick={()=>setSourcePanel(true)}>Last handoff</button>}
+          {lastHandoff&&<button className="secondary compact last-handoff-shortcut" aria-label="Last calendar handoff"
+            onClick={()=>setSourcePanel(true)}><RotateCcw size={15}/><span className="desktop-text">Last handoff</span></button>}
           <button className="icon-button" title="Review a privacy-first personal ICS snapshot" aria-label="Export personal events"
             onClick={()=>setPersonalExportOpen(true)}><Download size={17}/></button>
           <button className="primary top-create" onClick={()=>create(selected)}><Plus size={16}/> <span>New event</span></button>
