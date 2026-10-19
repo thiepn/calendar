@@ -1,6 +1,6 @@
 import {validTimeZone,zoneOffsetLabel} from './time-zone'
 
-export interface EmbeddedZone {id:string;offsets:number[];observances:number;hasRecurrence:boolean}
+export interface EmbeddedZone {id:string;offsets:number[];observances:number;hasRecurrence:boolean;invalid?:string}
 type Section={kind:'STANDARD'|'DAYLIGHT';fields:Map<string,string[]>}
 function prop(line:string):{name:string;value:string}|null{
   const colon=line.indexOf(':')
@@ -50,7 +50,8 @@ export function embeddedTimeZones(lines:string[]):Map<string,EmbeddedZone>{
       validTimeZone(id)
       if(declared.has(id))throw new Error('Duplicate VTIMEZONE declaration: '+id)
       const offsets=new Set<number>(),sections=active.sections
-      for(const section of sections){
+      let invalid=''
+      try{for(const section of sections){
         const dt=single(section,'DTSTART')
         if(!/^\d{8}T\d{6}$/.test(dt))throw new Error('Unsupported VTIMEZONE transition DTSTART')
         offsets.add(offset(single(section,'TZOFFSETFROM')))
@@ -65,8 +66,9 @@ export function embeddedTimeZones(lines:string[]):Map<string,EmbeddedZone>{
             throw new Error('VTIMEZONE observance RDATE/EXDATE requires independent rule evaluation')
         }
       }
+      }catch(error){invalid=error instanceof Error?error.message:String(error)}
       declared.set(id,{id,offsets:[...offsets],observances:sections.length,
-        hasRecurrence:sections.some(s=>s.fields.has('RRULE'))})
+        hasRecurrence:sections.some(s=>s.fields.has('RRULE')),...(invalid?{invalid}:{})})
       active=null;depth=0;continue
     }
     if(upper.startsWith('END:'))throw new Error('Unbalanced VTIMEZONE')
@@ -90,6 +92,7 @@ export function verifyEmbeddedOffset(
   validTimeZone(zone)
   const source=declared.get(zone)
   if(!source)return
+  if(source.invalid)throw new Error('Unsupported referenced VTIMEZONE '+zone+': '+source.invalid)
   const label=zoneOffsetLabel(iso,zone)
   const sign=label[3]==='-'?-1:1
   const actual=sign*(Number(label.slice(4,6))*60+Number(label.slice(7,9)))

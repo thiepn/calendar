@@ -3757,7 +3757,8 @@ async function exerciseC36DesktopSourceZoneAndDetachedUidRefresh(){
   await review.getByRole('button',{name:'Apply reviewed changes'}).click()
   const refreshed=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
   assert.equal(refreshed.records.length,2)
-  const original=initial.records.find(r=>r.sourceKey?.includes('2026-11-27T08:00'))!
+  const original=initial.records.find(r=>r.sourceKey?.includes('2026-11-27T08:00'))
+  assert.ok(original,'Original source UID must exist before refresh')
   const current=refreshed.records.find(r=>r.id===original.id)
   assert.ok(current,'Original detached UID must retain its source identity')
   assert.equal(current.title,'C36 Campus moved')
