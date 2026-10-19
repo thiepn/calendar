@@ -8,9 +8,10 @@ type Props={
   onApply:(action:SourcePickerAction,matching:string[])=>void
   onToggle:(name:string)=>void
   onRemove:(name:string)=>void
+  onExplore?:(name:string)=>void
   error:string
 }
-export function SourcePicker({sources,hidden,onApply,onToggle,onRemove,error}:Props){
+export function SourcePicker({sources,hidden,onApply,onToggle,onRemove,onExplore,error}:Props){
   const [query,setQuery]=useState('')
   const [page,setPage]=useState(0)
   const searchRef=useRef<HTMLInputElement>(null)
@@ -49,6 +50,8 @@ export function SourcePicker({sources,hidden,onApply,onToggle,onRemove,error}:Pr
         <div className="source-visibility-actions">
           <label><input type="checkbox" aria-label={'Show '+name+' on calendar'}
             checked={!hidden.includes(name)} onChange={()=>onToggle(name)}/> Show on calendar</label>
+          {onExplore&&<button type="button" className="secondary" onClick={()=>onExplore(name)}
+            aria-label={'Explore original source '+name}>Browse events</button>}
           <button type="button" className="danger small" onClick={()=>onRemove(name)}>Remove local copy</button>
         </div>
       </div>)}

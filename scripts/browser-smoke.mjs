@@ -4221,6 +4221,108 @@ async function exerciseC39MobilePrivateBusyReceiptClearedOnReload(){
   await context.close()
 }
 
+
+async function exerciseC40DesktopOriginalRecurringTrailDetachesAndSkips(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',
+    locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const master={id:'c40-authored-series',title:'C40 recurring author',description:'',
+    location:'',source:'personal',allDay:false,timeZone:'Europe/Berlin',
+    start:'2026-11-01T09:00:00.000Z',end:'2026-11-01T10:00:00.000Z',
+    repeat:{frequency:'daily',interval:1,until:'2026-11-30'},
+    excludedDates:['2026-11-05','2026-11-07'],updatedAt:'2026-10-19T12:00:00.000Z'}
+  const detached={...master,id:'c40-original-detached',title:'C40 edited original',
+    start:'2026-11-08T13:00:00.000Z',end:'2026-11-08T14:00:00.000Z',
+    repeat:undefined,excludedDates:undefined,
+    recurrenceParentId:'c40-authored-series',recurrenceDate:'2026-11-05'}
+  await page.evaluate(rows=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records:rows})),[master,detached])
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-03')
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.locator('.timeline-block').filter({hasText:'C40 recurring author'}).first().click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.getByRole('button',{name:'Browse source trail'}).click()
+  const trail=page.getByRole('dialog',{name:'Series and source trail'})
+  await trail.waitFor()
+  assert.match(await trail.innerText(),/Recurring series trail/)
+  assert.match(await trail.innerText(),/skipped original series date/i)
+  assert.match(await trail.innerText(),/Edited original series date: 2026-11-05/)
+  assert.equal(await trail.getByRole('button',{name:'Open trail event C40 recurring author 2026-11-07'}).count(),0)
+  await trail.getByRole('button',{name:'Open trail event C40 edited original 2026-11-08'}).click()
+  await page.getByRole('dialog',{name:'Event details'}).waitFor()
+  assert.match(await page.getByRole('dialog',{name:'Event details'}).innerText(),/C40 edited original/)
+  const raw=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(raw.records.length,2)
+  assert.equal(raw.records[1].id,'c40-original-detached')
+  await page.getByRole('dialog',{name:'Event details'}).getByRole('button',{name:'Browse source trail'}).click()
+  const later=page.getByRole('dialog',{name:'Series and source trail'})
+  await later.getByLabel('Trail range').selectOption('90')
+  await later.getByRole('button',{name:'Next 90 days'}).click()
+  assert.match(await later.innerText(),/0 original occurrences/)
+  await later.getByRole('button',{name:'Return to Calendar'}).click()
+  await page.getByRole('dialog',{name:'Event details'}).waitFor()
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C40_DESKTOP_ORIGINAL_RECURRING_DETACHED_SKIP_TRAIL_RETURN_NO_WRITES_PASS')
+  await context.close()
+}
+async function exerciseC40MobileHiddenImportedSourcePagedTrail(){
+  const context=await browser.newContext({viewport:{width:390,height:844},
+    isMobile:true,hasTouch:true,timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const records=Array.from({length:40},(_,i)=>{
+    const date=new Date(Date.UTC(2026,10,1+i)).toISOString().slice(0,10)
+    return {id:'ics-c40-'+i,source:'ics',sourceCalendar:'C40 campus imported',
+      sourceKey:'C40 campus imported|UID-'+i,title:'C40 tutorial '+i,
+      description:'Original upstream description',location:'Campus',allDay:false,
+      sourceTimeZone:'Europe/Berlin',start:date+'T09:00:00.000Z',
+      end:date+'T10:00:00.000Z',updatedAt:'2026-10-19T12:00:00.000Z'}
+  })
+  await page.evaluate(rows=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records:rows})),records)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-01')
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  let manage=page.getByRole('dialog',{name:'Calendar data management'})
+  await manage.getByLabel('Show C40 campus imported on calendar').uncheck()
+  await manage.getByRole('button',{name:'Explore original source C40 campus imported'}).click()
+  let trail=page.getByRole('dialog',{name:'Series and source trail'})
+  await trail.waitFor()
+  assert.match(await trail.innerText(),/hidden in Calendar views/)
+  await trail.getByLabel('Trail range').selectOption('90')
+  assert.match(await trail.innerText(),/40 original occurrences/)
+  await trail.getByRole('button',{name:'Next entries'}).click()
+  assert.match(await trail.innerText(),/Page 2\/3/)
+  const available=trail.getByRole('button',{name:/Open trail event C40 tutorial/}).first()
+  const text=await available.getAttribute('aria-label')
+  assert.match(text,/C40 tutorial/)
+  await available.click()
+  const detail=page.getByRole('dialog',{name:'Event details'})
+  await detail.waitFor()
+  assert.match(await detail.innerText(),/IMPORTED SNAPSHOT/)
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+  await detail.getByRole('button',{name:'Close event'}).click()
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  manage=page.getByRole('dialog',{name:'Calendar data management'})
+  assert.equal(await manage.getByLabel('Show C40 campus imported on calendar').isChecked(),false)
+  await manage.getByRole('button',{name:'Explore original source C40 campus imported'}).click()
+  trail=page.getByRole('dialog',{name:'Series and source trail'})
+  await trail.getByRole('button',{name:'Return to Calendar'}).click()
+  await page.getByRole('dialog',{name:'Calendar data management'}).waitFor()
+  const sizes=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(sizes.scroll<=sizes.width+2,'C40 mobile source trail overflow')
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C40_MOBILE_HIDDEN_IMPORTED_SOURCE_40_ROWS_PAGED_RETURN_NO_WRITES_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -4304,6 +4406,8 @@ try{
   await exerciseC38MobileHandoffRangeAndPrivacyBoundary()
   await exerciseC39DesktopSourceContinuityAndStaleFeed()
   await exerciseC39MobilePrivateBusyReceiptClearedOnReload()
+  await exerciseC40DesktopOriginalRecurringTrailDetachesAndSkips()
+  await exerciseC40MobileHiddenImportedSourcePagedTrail()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true

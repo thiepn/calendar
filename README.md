@@ -787,3 +787,41 @@ C40 proposal: source-backed intra-Calendar review of large recurring
 source calendars and genuine Hub handoff edge cases without duplicating any
 calendar store or engine; prioritize actual UX improvements over an audit-
 only phase.
+
+
+## C40 — original Series & Source Trail (implementation-first)
+
+Open **Browse source trail** from an original recurring personal event, an
+edited detached occurrence or an imported ICS event, or open **Browse events**
+for a named imported calendar in Sources & data. The new bounded, paged trail
+shows original events for 30 or 90 days, offers next/previous date-window
+navigation, and opens any shown occurrence in the original Calendar event
+details with no copying. Every selection re-reads canonical local state and
+rechecks original record ID, UTC start/end, source calendar, original imported
+UID/sourceKey and occurrence title before opening; a stale or renamed import
+fails closed instead of navigating by coincidental title. The source picker
+remains the only owner of display visibility; intentionally opening a hidden
+source for explicit inspection does not unhide it or remove its busy time.
+
+Personal series trails reuse original C1–C39 occurrence expansion, preserving
+IANA-zone and DST day ownership. The series includes detached edited instances
+linked by recurrenceParentId, reveals their original recurrenceDate, and
+represents genuinely excluded dates without treating them as scheduled events.
+Excluded dates with a replacement are not misreported as deletions; no new
+recurrence engine or new detached record is created. Imported source trails
+preserve exact sourceCalendar/UID identity, imported sourceTimeZone and
+TRANSP:TRANSPARENT context. Up to 1,000 timeline entries are displayed using
+pagination of at most 30 original entries per page, with safe clamping when
+the current range changes. Dates and intervals are bounded and verified by
+the original calendar and storage validators.
+
+This is deliberately different from the global agenda, existing C30
+pagination, C32 ±30-day nearest-event browsing and C33 visibility-only
+source picker. It is a dedicated owner-specific, navigable recurrence and
+import-provenance trail, not a calendar clone, external deep link, provider
+write, new database, scheduler, index or grading engine. The standalone
+localStorage calendar remains canonical, with unchanged JSON backup/CAS,
+C34 recovered drafts, C35/C36 IANA/TZID behavior, C37 subscriptions,
+C38/C39 Hub handoff and Folio/StudyOS/Hub authority. Imported records remain
+read-only, even when inspected from a hidden source. The new trail keeps
+desktop/mobile readable text and no ornamental helper microcopy.

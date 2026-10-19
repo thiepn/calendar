@@ -38,6 +38,8 @@ import {CalendarViews,type Mode} from './components/CalendarViews'
 import {MonthDayPeek} from './components/MonthDayPeek'
 import {NowNext} from './components/NowNext'
 import {SourcePicker} from './components/SourcePicker'
+import {AgendaTrail} from './components/AgendaTrail'
+import {resolveTrailSelection,type TrailTarget,type TrailRow} from './core/agenda-trail'
 import {SubscriptionManager} from './components/SubscriptionManager'
 import {ICS_SUBSCRIPTIONS_KEY,readSubscriptions,reviseSubscriptions,addSubscription,changeSubscription,dropSubscription,assertFeedSource,fetchSubscribedIcs,historyEntry,type SubscriptionStore,type IcsSubscription} from './core/ics-subscriptions'
 import {applySourcePicker,type SourcePickerAction} from './core/source-picker'
@@ -116,6 +118,9 @@ export default function App(){
   const [monthPeekDate,setMonthPeekDate]=useState<LocalDate|null>(null)
   const [pending,setPending]=useState<IcsPreview|null>(null)
   const [sourcePanel,setSourcePanel]=useState(false)
+  const [agendaTrail,setAgendaTrail]=useState<{
+    target:TrailTarget;initialDate:LocalDate;origin?:CalendarOccurrence
+  }|null>(null)
   const [sourcePickerError,setSourcePickerError]=useState('')
   const [subscriptions,setSubscriptions]=useState<SubscriptionStore>(initialSubscriptions.store)
   const [subscriptionError,setSubscriptionError]=useState(initialSubscriptions.error)
@@ -440,6 +445,33 @@ export default function App(){
     }catch(error){setNotice('All-day adjustment rejected: '+String(error))}
   }
   function open(item:CalendarOccurrence){setActive(item);setSelected(item.allDay?item.date:localDate(new Date(item.start)));setMoveDate(item.startDate)}
+  function openAgendaTrailFromEvent(item:CalendarOccurrence){
+    const original=calendar.records.find(record=>record.id===item.recordId)
+    if(!original)return
+    const target:TrailTarget=original.source==='ics'&&original.sourceCalendar?
+      {kind:'source',name:original.sourceCalendar}:{kind:'series',recordId:original.id}
+    if(original.source==='personal'&&!original.repeat&&!original.recurrenceParentId)return
+    setAgendaTrail({target,initialDate:item.date,origin:item})
+    setActive(null)
+  }
+  function closeAgendaTrail(){
+    if(!agendaTrail)return
+    const original=agendaTrail.origin
+    setAgendaTrail(null)
+    if(original){
+      if(calendar.records.some(r=>r.id===original.recordId))setActive(original)
+    }else setSourcePanel(true)
+  }
+  function openAgendaTrailRow(row:TrailRow,from:LocalDate,days:30|90){
+    if(!agendaTrail)return
+    try{
+      const latest=loadState()
+      if(latest.error||JSON.stringify(latest.state)!==JSON.stringify(calendar))
+        throw new Error('Calendar changed in another tab; reload before opening original events.')
+      const current=resolveTrailSelection(latest.state,agendaTrail.target,row,from,days)
+      setAgendaTrail(null);setSourcePanel(false);setMode('day');open(current)
+    }catch(error){setNotice('Original not opened: '+String(error))}
+  }
   function requestAdjustment(item:CalendarOccurrence,action:TimedAction,date:LocalDate,minute:number,length:number,fold?:'earlier'|'later'){
     if(item.source!=='personal'||item.allDay)return
     setActive(null);setAdjustAck(false);setAdjustAlternativesOpen(false)
@@ -1213,6 +1245,10 @@ export default function App(){
           <p className="fine-print">Moving one repeating occurrence keeps the remaining series unchanged. All changes remain on this device.</p>
         </div>}
         <footer className="editor-actions">
+          {(active.source==='ics'&&Boolean(activeRecord?.sourceCalendar)||
+            active.source==='personal'&&Boolean(activeRecord?.repeat||activeRecord?.recurrenceParentId))&&
+            <button className="secondary" onClick={()=>openAgendaTrailFromEvent(active)}>
+              <CalendarDays size={15}/> Browse source trail</button>}
           {active.source==='ics'&&<button className="secondary" onClick={()=>copyImportedToPersonal(active)}><Plus size={15}/> Make personal copy</button>}
           {activeRecord?.repeat&&<button className="secondary" onClick={()=>nextRecurring(active)}><ChevronRight size={15}/> Next occurrence</button>}
           {activeRecord?.repeat&&<button className="secondary" onClick={()=>skip(active)}><RotateCcw size={15}/> Skip this date</button>}
@@ -1293,6 +1329,9 @@ export default function App(){
       <p className="fine-print">Read-only local snapshot; not live sync. Unsupported RRULE masters are skipped with warnings. Neither method modifies Google, Folio, KLIPS or personal events.</p>
       <footer className="editor-actions"><button className="secondary" onClick={closeIcsReview}>Cancel</button><button className="primary" onClick={applyImport} disabled={!importReview?.result}>Apply reviewed changes</button></footer>
     </section></div>}
+    {agendaTrail&&<AgendaTrail state={calendar} target={agendaTrail.target}
+      initialDate={agendaTrail.initialDate} hiddenSources={hiddenImportedCalendars}
+      onOpen={openAgendaTrailRow} onClose={closeAgendaTrail}/>}
     {ecosystemHandoff!==null&&<EcosystemHandoff
       state={calendar} selectedDate={selected}
       occurrence={ecosystemHandoff===true?null:ecosystemHandoff}
@@ -1314,7 +1353,10 @@ export default function App(){
         <div className="source-card"><strong>Personal <span>{personalCount} records</span></strong><p>Editable device-local events. This is not Folio's schedule.</p></div>
         <p className="fine-print">Show or hide each imported snapshot without deleting its source records. Hidden snapshots are excluded from calendar views, search, workload and visible agenda exports; Find Time and overlap checks still include every saved commitment.</p>
         <SourcePicker sources={sources} hidden={hiddenImportedCalendars} onApply={applyImportedVisibility}
-          onToggle={toggleImported} onRemove={removeSource} error={sourcePickerError}/>
+          onToggle={toggleImported} onRemove={removeSource} onExplore={name=>{
+            setSourcePanel(false)
+            setAgendaTrail({target:{kind:'source',name},initialDate:selected})
+          }} error={sourcePickerError}/>
         {!sources.length&&<p className="empty-note">No imported ICS snapshots.</p>}
         {lastHandoff&&<HandoffContinuity receipt={lastHandoff} calendar={calendar}
           onLocate={locateHandoffOrigin} onClear={()=>setLastHandoff(null)}/>}
