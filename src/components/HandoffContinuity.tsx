@@ -32,7 +32,7 @@ export function HandoffContinuity({receipt,calendar,onLocate,onClear}:Props){
             </span>}
           </div>
           <button type="button" className="secondary" disabled={!result.current}
-            aria-label={'Locate original '+source.title}
+            aria-label={result.status==='changed'?'Inspect changed original '+source.title:'Locate original '+source.title}
             onClick={()=>onLocate(source.key)}>
             {result.status==='changed'?'Inspect changed original':'Locate original'}
           </button>

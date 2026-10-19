@@ -4156,7 +4156,7 @@ async function exerciseC39DesktopSourceContinuityAndStaleFeed(){
   })
   const current=management.getByRole('region',{name:'Last shared Calendar snapshot'})
   await current.getByText('Original changed since download').waitFor()
-  await current.getByRole('button',{name:'Inspect changed original'}).click()
+  await current.getByRole('button',{name:'Inspect changed original C39 personal original'}).click()
   const changed=page.getByRole('dialog',{name:'Event details'})
   await changed.waitFor()
   assert.match(await changed.innerText(),/C39 edited since export/)
