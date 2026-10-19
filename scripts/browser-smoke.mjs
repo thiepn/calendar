@@ -3474,7 +3474,7 @@ async function exerciseC33DesktopSourceExactNamesFilteringAndPreferenceContinuit
   const fixture={schemaVersion:1,records:names.map((name,i)=>({
     id:'c33-exact-'+i,source:'ics',sourceCalendar:name,
     sourceKey:'Original source UID '+i,title:'C33 exact source '+name,description:'',
-    location:'',allDay:false,transparent:i===0,
+    location:'',allDay:false,...(i===0?{transparent:true}:{}),
     start:'2026-11-26T08:00:00.000Z',end:'2026-11-26T09:00:00.000Z',
     updatedAt:'2026-10-18T09:00:00.000Z'
   }))}
