@@ -4088,6 +4088,139 @@ async function exerciseC38MobileHandoffRangeAndPrivacyBoundary(){
   await context.close()
 }
 
+
+async function exerciseC39DesktopSourceContinuityAndStaleFeed(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB',acceptDownloads:true})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const date='2026-10-20'
+  const records=[
+    {id:'c39-personal',title:'C39 personal original',description:'Private original note',
+      location:'Local room',source:'personal',allDay:false,
+      start:'2026-10-20T07:00:00.000Z',end:'2026-10-20T08:00:00.000Z',
+      timeZone:'Europe/Berlin',updatedAt:'2026-10-19T10:00:00.000Z'},
+    {id:'ics-c39-imported',title:'C39 source university',description:'',
+      location:'',source:'ics',sourceCalendar:'Campus timetable',
+      sourceKey:'Campus timetable|uid-c39',allDay:false,sourceTimeZone:'Europe/Berlin',
+      start:'2026-10-20T09:00:00.000Z',end:'2026-10-20T10:00:00.000Z',
+      updatedAt:'2026-10-19T10:00:00.000Z'}
+  ]
+  const subscriptions={schemaVersion:1,items:[{
+    id:'c39-source',revision:'rev-001',url:'https://calendar.example.org/c39-campus.ics',
+    createdAt:'2026-10-01T08:00:00.000Z',sourceName:'Campus timetable',
+    status:'error',lastError:'Feed unavailable: offline, blocked by CORS',
+    lastAppliedAt:'2026-10-01T10:00:00.000Z',
+    lastCheckedAt:'2026-10-19T10:00:00.000Z'
+  }]}
+  await page.evaluate(input=>{
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify({schemaVersion:1,records:input.records}))
+    localStorage.setItem('thiepn.calendar.ics-subscriptions.v1',JSON.stringify(input.subscriptions))
+  },{records,subscriptions})
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill(date)
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  await page.getByRole('dialog',{name:'Calendar data management'})
+    .getByRole('button',{name:'Share selected events to Hub'}).click()
+  const handoff=page.getByRole('dialog',{name:'Calendar ecosystem handoff'})
+  await handoff.waitFor()
+  await handoff.getByLabel('Include imported read-only sources').check()
+  assert.match(await handoff.innerText(),/Latest manual feed check failed/)
+  assert.match(await handoff.innerText(),/Hub's current seven-day view may show 2/)
+  await handoff.getByLabel('Confirm read-only handoff').check()
+  const promise=page.waitForEvent('download')
+  await handoff.getByRole('button',{name:'Download reviewed snapshot'}).click()
+  const file=await promise
+  const contents=await readFile(await file.path(),'utf8')
+  assert.match(contents,/UID:c39-personal@2026-10-20@calendar\.thiepn\.local/)
+  assert.match(contents,/X-THIEPN-ORIGINAL-RECORD:ics-c39-imported/)
+  assert.match(contents,/DTSTART:20261020T090000Z/)
+  await handoff.getByRole('region',{name:'Last shared Calendar snapshot'}).waitFor()
+  const entries=handoff.getByRole('region',{name:'Last shared Calendar snapshot'})
+  assert.match(await entries.innerText(),/Not uploaded to Hub/)
+  await entries.getByRole('button',{name:'Locate original C39 source university'}).click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.innerText(),/C39 source university/)
+  await details.getByRole('button',{name:'Close event'}).click()
+  await page.getByRole('button',{name:'Last calendar handoff'}).click()
+  const management=page.getByRole('dialog',{name:'Calendar data management'})
+  await management.getByRole('region',{name:'Last shared Calendar snapshot'}).waitFor()
+  await page.evaluate(()=>{
+    const key='thiepn.calendar.local.v1',data=JSON.parse(localStorage.getItem(key))
+    data.records.find(r=>r.id==='c39-personal').title='C39 edited since export'
+    localStorage.setItem(key,JSON.stringify(data))
+    window.dispatchEvent(new StorageEvent('storage',{key}))
+  })
+  const current=management.getByRole('region',{name:'Last shared Calendar snapshot'})
+  await current.getByText('Original changed since download').waitFor()
+  await current.getByRole('button',{name:'Inspect changed original'}).click()
+  const changed=page.getByRole('dialog',{name:'Event details'})
+  await changed.waitFor()
+  assert.match(await changed.innerText(),/C39 edited since export/)
+  assert.match(await page.locator('body').innerText(),/changed since the snapshot download/)
+  await changed.getByRole('button',{name:'Close event'}).click()
+  await page.getByRole('button',{name:'Last calendar handoff'}).click()
+  await page.getByRole('dialog',{name:'Calendar data management'})
+    .getByRole('region',{name:'Last shared Calendar snapshot'})
+    .getByRole('button',{name:'Clear history'}).click()
+  assert.equal(await page.getByRole('button',{name:'Last calendar handoff'}).count(),0)
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(saved.records.length,2)
+  assert.equal(saved.records.find(r=>r.id==='c39-personal').title,'C39 edited since export')
+  assert.equal(saved.records.find(r=>r.id==='ics-c39-imported').title,'C39 source university')
+  assert.notEqual(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C39_DESKTOP_HUB_VISIBILITY_STALE_SOURCE_RECEIPT_RETURN_CHANGED_ID_NO_WRITES_PASS')
+  await context.close()
+}
+async function exerciseC39MobilePrivateBusyReceiptClearedOnReload(){
+  const context=await browser.newContext({viewport:{width:390,height:844},
+    isMobile:true,hasTouch:true,timezoneId:'Europe/Berlin',locale:'en-GB',acceptDownloads:true})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.evaluate(()=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records:[{
+      id:'c39-mobile-private',title:'C39 hidden original details',description:'Protected diary text',
+      location:'Private address',allDay:true,source:'personal',startDate:'2026-10-22',
+      endDateExclusive:'2026-10-24',start:'2026-10-22T00:00:00.000Z',
+      end:'2026-10-24T00:00:00.000Z',updatedAt:'2026-10-19T08:00:00.000Z'}]})))
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-10-22')
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  const manager=page.getByRole('dialog',{name:'Calendar data management'})
+  await manager.getByRole('button',{name:'Share selected events to Hub'}).click()
+  const handoff=page.getByRole('dialog',{name:'Calendar ecosystem handoff'})
+  await handoff.getByLabel('Handoff through date').fill('2026-10-24')
+  await handoff.getByLabel('Handoff privacy').selectOption('busy')
+  await handoff.getByLabel('Confirm read-only handoff').check()
+  const promise=page.waitForEvent('download')
+  await handoff.getByRole('button',{name:'Download reviewed snapshot'}).click()
+  const downloaded=await promise
+  const payload=await readFile(await downloaded.path(),'utf8')
+  for(const forbidden of ['C39 hidden original details','Protected diary text','Private address',
+    'c39-mobile-private','X-THIEPN-ORIGINAL']){
+    assert.equal(payload.includes(forbidden),false,'Busy-only privacy regression: '+forbidden)
+  }
+  assert.match(payload,/DTSTART;VALUE=DATE:20261022/)
+  assert.match(payload,/DTEND;VALUE=DATE:20261024/)
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.handoff-receipt.v1')),null)
+  await page.getByRole('dialog',{name:'Calendar ecosystem handoff'})
+    .getByRole('region',{name:'Last shared Calendar snapshot'}).waitFor()
+  const width=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:innerWidth}))
+  assert.ok(width.scroll<=width.width+2,'C39 mobile overflow')
+  await page.reload({waitUntil:'networkidle'})
+  assert.equal(await page.getByRole('button',{name:'Last calendar handoff'}).count(),0)
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')).records.length),1)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C39_MOBILE_BUSY_ONLY_ALLDAY_SESSION_RECEIPT_EXPIRES_NO_PERSISTENCE_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -4169,6 +4302,8 @@ try{
   await exerciseC37MobileOfflineAbortReloadAndManualRetry()
   await exerciseC38DesktopReviewedHubOriginalOccurrenceAndSources()
   await exerciseC38MobileHandoffRangeAndPrivacyBoundary()
+  await exerciseC39DesktopSourceContinuityAndStaleFeed()
+  await exerciseC39MobilePrivateBusyReceiptClearedOnReload()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true

@@ -5,6 +5,7 @@ import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {finiteTimedDates,timedWallTemplate,wallValueOn} from './ics-timed'
 import {endFromIcsDuration} from './ics-duration'
 import {validateState} from './storage'
+import {verifyHubFileCompatibility} from './handoff-continuity'
 import {embeddedTimeZones,verifyEmbeddedOffset} from './ics-vtimezone'
 
 export interface IcsPreview {records:CalendarRecord[];warnings:string[];name:string;skippedEvents:number}
@@ -576,6 +577,7 @@ export function reviewHubHandoff(state:CalendarState,options:HubHandoffOptions):
  * canonical calendar or a target-app write. The target must separately import. */
 export function exportHubHandoffIcs(state:CalendarState,options:HubHandoffOptions):string{
   const review=reviewHubHandoff(state,options)
+  verifyHubFileCompatibility(review,options)
   const byId=new Map(state.records.map(r=>[r.id,r]))
   const lines=['BEGIN:VCALENDAR','VERSION:2.0',
     'PRODID:-//THIEPN//Calendar read-only human handoff//EN','CALSCALE:GREGORIAN',

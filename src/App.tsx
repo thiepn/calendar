@@ -17,7 +17,9 @@ import {personalDraftFromImported} from './core/personal-copy'
 import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
 import {findAdjustmentAlternatives,type AdjustmentAlternative} from './core/adjustment-alternatives'
 import {exportBackup,importBackup,loadState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCalendar,restoreUnreadableCalendar,STORAGE_KEY,type RecoverySnapshot} from './core/storage'
-import {mergeIcs,previewIcs,exportHubHandoffIcs,type HubHandoffOptions,type IcsPreview} from './core/ics'
+import {mergeIcs,previewIcs,exportHubHandoffIcs,reviewHubHandoff,type HubHandoffOptions,type IcsPreview} from './core/ics'
+import {makeHandoffReceipt,resolveHandoffOrigin,type HandoffReceipt} from './core/handoff-continuity'
+import {HandoffContinuity} from './components/HandoffContinuity'
 import {downloadPersonalExport,type ReviewedPersonalExportOptions} from './core/personal-export'
 import {reviewImportedChanges,exportImportedChangeCsv} from './core/ics-change-review'
 import {EventEditor} from './components/EventEditor'
@@ -124,6 +126,7 @@ export default function App(){
   }|null>(null)
   const [personalExportOpen,setPersonalExportOpen]=useState(false)
   const [ecosystemHandoff,setEcosystemHandoff]=useState<CalendarOccurrence|null|true>(null)
+  const [lastHandoff,setLastHandoff]=useState<HandoffReceipt|null>(null)
   const [mobileNav,setMobileNav]=useState(false)
   const importInput=useRef<HTMLInputElement>(null)
   const restoreInput=useRef<HTMLInputElement>(null)
@@ -805,15 +808,39 @@ export default function App(){
       const latest=loadState()
       if(latest.error||JSON.stringify(latest.state)!==JSON.stringify(calendar))
         throw new Error('Original calendar changed. Reopen the snapshot review before sharing.')
+      const review=reviewHubHandoff(latest.state,options)
+      const filename='thiepn-calendar-readonly-'+options.from+'-to-'+options.through+'.ics'
+      const nextReceipt=makeHandoffReceipt(latest.state,review,options,filename,
+        new Date().toISOString(),deviceTimeZone())
       const text=exportHubHandoffIcs(latest.state,options)
-      download('thiepn-calendar-readonly-'+options.from+'-to-'+options.through+'.ics',
-        text,'text/calendar;charset=utf-8')
-      setNotice('Downloaded the reviewed read-only ICS snapshot. Import it separately in Hub.')
+      download(filename,text,'text/calendar;charset=utf-8')
+      setLastHandoff(nextReceipt)
+      setNotice('Snapshot download requested. The handoff is available in Sources & data during this tab session.')
       return true
     }catch(error){
       setNotice('Snapshot not downloaded: '+String(error))
       return false
     }
+  }
+  function locateHandoffOrigin(key:string){
+    if(!lastHandoff)return
+    const item=lastHandoff.owners.find(entry=>entry.key===key)
+    if(!item)return
+    try{
+      const latest=loadState()
+      if(latest.error||JSON.stringify(latest.state)!==JSON.stringify(calendar))
+        throw new Error('Calendar changed in another tab. Reload to inspect the current original.')
+      const resolved=resolveHandoffOrigin(latest.state,item)
+      if(!resolved.current)throw new Error('The original event is no longer available at its downloaded occurrence.')
+      setSelected(resolved.current.allDay?resolved.current.startDate:
+        localDate(new Date(resolved.current.start)))
+      setMode('day')
+      setActive(resolved.current)
+      setSourcePanel(false)
+      setEcosystemHandoff(null)
+      setNotice(resolved.status==='changed'?'This original event changed since the snapshot download. Inspect current details.':
+        'Located the original Calendar occurrence.')
+    }catch(error){setNotice('Original not opened: '+String(error))}
   }
   function exportReviewedPersonalIcs(options:ReviewedPersonalExportOptions){
     try{
@@ -883,6 +910,8 @@ export default function App(){
             <Bell size={15}/><span className="desktop-text">Reminders</span>{dueReminderCount>0&&<span className="reminder-count">{dueReminderCount}</span>}</button>
           <button className="secondary compact" aria-label="Find time" onClick={()=>showFindTime()}><Clock3 size={15}/><span className="desktop-text">Find time</span></button>
           <button className="secondary compact" onClick={()=>importInput.current?.click()}><Upload size={15}/><span className="desktop-text">Import ICS</span></button>
+          {lastHandoff&&<button className="secondary compact" aria-label="Last calendar handoff"
+            onClick={()=>setSourcePanel(true)}>Last handoff</button>}
           <button className="icon-button" title="Review a privacy-first personal ICS snapshot" aria-label="Export personal events"
             onClick={()=>setPersonalExportOpen(true)}><Download size={17}/></button>
           <button className="primary top-create" onClick={()=>create(selected)}><Plus size={16}/> <span>New event</span></button>
@@ -1267,7 +1296,9 @@ export default function App(){
     {ecosystemHandoff!==null&&<EcosystemHandoff
       state={calendar} selectedDate={selected}
       occurrence={ecosystemHandoff===true?null:ecosystemHandoff}
-      onExport={downloadHubProjection} onClose={()=>{
+      onExport={downloadHubProjection} subscriptions={subscriptions.items}
+      receipt={lastHandoff} onLocate={locateHandoffOrigin}
+      onClearReceipt={()=>setLastHandoff(null)} onClose={()=>{
         const origin=ecosystemHandoff===true?null:ecosystemHandoff
         setEcosystemHandoff(null)
         if(origin){
@@ -1285,6 +1316,8 @@ export default function App(){
         <SourcePicker sources={sources} hidden={hiddenImportedCalendars} onApply={applyImportedVisibility}
           onToggle={toggleImported} onRemove={removeSource} error={sourcePickerError}/>
         {!sources.length&&<p className="empty-note">No imported ICS snapshots.</p>}
+        {lastHandoff&&<HandoffContinuity receipt={lastHandoff} calendar={calendar}
+          onLocate={locateHandoffOrigin} onClear={()=>setLastHandoff(null)}/>}
         <button type="button" className="secondary" onClick={()=>{
           setSourcePanel(false);setEcosystemHandoff(true)
         }}><Download size={16}/> Share selected events to Hub</button>

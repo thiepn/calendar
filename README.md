@@ -729,3 +729,61 @@ No extra event database, schema migration, OAuth, provider writes, telemetry,
 new writer, scheduler or background transport is introduced. All C1–C37,
 C34 recovery, C35/C36 zones, C37 subscriptions, original CAS and backups
 and owner-app rights remain unchanged.
+
+
+## C39 — original-source return continuity and actual Hub snapshot limits
+
+C39 extends the existing C38 handoff, not the calendar schema or a second
+writer. After an explicit reviewed file download, Calendar retains a bounded
+in-memory receipt in the current tab only. It contains the selected original
+occurrence keys, source record IDs, original instant/date, chosen privacy tier,
+filename and download action time, but does not persist an additional calendar,
+ICS content, tokens, URLs or exported private bodies to localStorage,
+IndexedDB, backups, service workers or a cross-origin app. The receipt is
+cleared on page reload/closing the tab, or through **Clear history**.
+
+The original Sources & data panel can reopen the last handoff and locate an
+actual original occurrence. Each source is validated against the current
+canonical Calendar v1 record and occurrence engine before navigation; moved
+or edited originals are explicitly marked as changed, and removed or
+reassigned imported UIDs cannot silently resolve to unrelated content.
+Navigating uses Calendar's existing day view and event-details modal, not
+an invented remote Hub/StudyOS/Folio per-event deep link. Date/time context
+comes from the current viewer's date; source-local instance identity remains
+the original reference. Hidden imported calendars do not have their source
+rights or source filter preferences silently changed.
+
+C39 inspects Hub H10's real existing session-only parser. It parses up to
+120 source events after processing, and its current agenda renders at most
+60 events in a seven-day window using Hub's selected timezone. The handoff
+review now estimates this device's seven-day visibility explicitly, warns
+that Hub's selected timezone and filters may differ, and prevents files
+above Hub's 120 parsed-event ceiling or source UIDs exceeding Hub's
+240-codepoint normalization limit instead of silently claiming all events
+will survive. Busy-only privacy remains intentionally unlinkable in the
+downloaded file, with random UIDs and no titles/provenance in the bytes;
+Calendar's local ephemeral receipt can still locate the original event.
+UTC instants, imported named IANA zones, daylight-saving detached instances
+and all-day exclusive ends remain handled by the existing canonical
+occurrence and ICS writer.
+
+Imported source status now differentiates a manual ICS snapshot with unknown
+upstream freshness from a locally applied C37 subscription. Only actual
+lastAppliedAt can be presented as a local provenance timestamp, with clear
+stale (>7 days) or failed-check warnings. A successful HTTP 304 does not
+prove that upstream event data is current. C39 adds no background scheduler,
+owner credential transfer, direct provider access, extra authenticated
+source, telemetry or API.
+
+Hub's H10 imported read-only file viewer requires the user to select their
+downloaded file in Hub, is stale after six hours and expires after 24 hours
+in that tab; a Calendar download does not confirm import to Hub. There is
+still no verified cross-origin per-event return URL or StudyOS/Folio direct
+read-only receiver. Physical devices, Firefox/WebKit/Safari, a deployed Hub
+end-to-end file upload, and real provider account journeys remain separately
+unqualified.
+
+C40 proposal: source-backed intra-Calendar review of large recurring
+source calendars and genuine Hub handoff edge cases without duplicating any
+calendar store or engine; prioritize actual UX improvements over an audit-
+only phase.

@@ -1,6 +1,10 @@
 import {useMemo,useState} from 'react'
 import type {CalendarOccurrence,CalendarState} from '../types'
 import {addDays} from '../core/dates'
+import {deviceTimeZone} from '../core/time-zone'
+import {hubCurrentWindowEstimate,handoffSourceFreshness,verifyHubFileCompatibility,type HandoffReceipt} from '../core/handoff-continuity'
+import {HandoffContinuity} from './HandoffContinuity'
+import type {IcsSubscription} from '../core/ics-subscriptions'
 import {reviewHubHandoff,type HubHandoffOptions} from '../core/ics'
 import type {PersonalIcsPrivacy} from '../core/ics'
 
@@ -18,8 +22,12 @@ interface Props{
   occurrence:CalendarOccurrence|null
   onClose:()=>void
   onExport:(options:HubHandoffOptions)=>boolean
+  subscriptions:IcsSubscription[]
+  receipt:HandoffReceipt|null
+  onLocate:(key:string)=>void
+  onClearReceipt:()=>void
 }
-export function EcosystemHandoff({state,selectedDate,occurrence,onClose,onExport}:Props){
+export function EcosystemHandoff({state,selectedDate,occurrence,onClose,onExport,subscriptions,receipt,onLocate,onClearReceipt}:Props){
   const [scope,setScope]=useState<'instance'|'window'>(occurrence?'instance':'window')
   const [from,setFrom]=useState(occurrence?.date??selectedDate)
   const [through,setThrough]=useState(occurrence?.date??addDays(selectedDate,6))
@@ -31,7 +39,7 @@ export function EcosystemHandoff({state,selectedDate,occurrence,onClose,onExport
     through:scope==='instance'&&occurrence?occurrence.date:through,privacy,includeImported,
     ...(scope==='instance'&&occurrence?{occurrenceKey:occurrence.key}:{})}
   const prepared=useMemo(()=>{
-    try{return {review:reviewHubHandoff(state,options),error:''}}
+    try{const review=reviewHubHandoff(state,options);verifyHubFileCompatibility(review,options);return {review,error:''}}
     catch(error){return {review:null,error:error instanceof Error?error.message:String(error)}}
   },[state,options.from,options.through,options.privacy,options.includeImported,options.occurrenceKey])
   function exportReviewed(){
@@ -42,6 +50,13 @@ export function EcosystemHandoff({state,selectedDate,occurrence,onClose,onExport
     }catch(error){setError(String(error))}
   }
   const review=prepared.review
+  const viewerZone=deviceTimeZone()
+  const visibleInHub=review?hubCurrentWindowEstimate(review,viewerZone,new Date()):0
+  const records=new Map(state.records.map(record=>[record.id,record]))
+  const sourceFreshness=review?[...new Set(review.items.filter(item=>item.source==='ics')
+    .map(item=>records.get(item.recordId)?.sourceCalendar??'Imported ICS'))].map(name=>({
+      name,status:handoffSourceFreshness('ics',name,subscriptions)
+    })):[] as {name:string;status:ReturnType<typeof handoffSourceFreshness>}[]
   return <div className="modal-backdrop ecosystem-handoff-backdrop">
     <section className="ecosystem-handoff dialog-surface" role="dialog" aria-modal="true"
       aria-label="Calendar ecosystem handoff">
@@ -84,12 +99,23 @@ export function EcosystemHandoff({state,selectedDate,occurrence,onClose,onExport
             {item.source==='ics'?' · imported read-only':''}</small>
         </li>)}</ol>
         {review.count>8&&<p>{review.count-8} more events included</p>}
+        <p role="status">Hub's current seven-day view may show {visibleInHub} of these
+          events using this device's {viewerZone} timezone. Hub's timezone and filters may differ.
+          Its file view shows at most 60 events.</p>
+        {sourceFreshness.map(source=><p key={source.name} className="handoff-source-status">
+          <strong>{source.name}</strong> — {source.status.kind==='manual'?'Manual file: upstream freshness unknown':
+            'Last applied locally '+new Date(source.status.lastAppliedAt!).toLocaleString()}
+          {source.status.warning&&<span role="status"> · {source.status.warning}</span>}
+        </p>)}
       </section>:<p role="alert" className="error">{prepared.error}</p>}
       <label className="handoff-check"><input type="checkbox" aria-label="Confirm read-only handoff"
         checked={ack} onChange={event=>setAck(event.target.checked)}/>
-        Download this local .ics file for Hub's read-only external-calendar panel. Its preview expires
-        after 24 hours. This does not connect accounts or change any app's calendar.</label>
+        Download a local .ics file. Hub only displays events in its current seven-day window,
+        treats imported data as stale after six hours, and clears the snapshot after 24 hours,
+        navigation or reload. This does not synchronize calendars.</label>
       {error&&<p role="alert" className="error">{error}</p>}
+      {receipt&&<HandoffContinuity receipt={receipt} calendar={state}
+        onLocate={onLocate} onClear={onClearReceipt}/>}
       <div className="handoff-actions">
         <button className="primary" type="button" disabled={!ack||!review}
           onClick={exportReviewed}>Download reviewed snapshot</button>

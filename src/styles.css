@@ -816,3 +816,21 @@
  .handoff-actions button{width:100%}
  .handoff-review ol{max-height:150px}
 }
+
+.handoff-continuity{border-top:1px solid #c8d4cb;margin:13px 0;padding:12px 0;min-width:0}
+.handoff-continuity-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.handoff-continuity-heading h3{margin:0;font-size:17px}
+.handoff-continuity p{font-size:14px;line-height:1.5;margin:7px 0;overflow-wrap:anywhere}
+.handoff-continuity-heading button,.handoff-continuity-row button{font-size:14px;min-height:44px}
+.handoff-continuity-events{display:grid;gap:8px;max-height:290px;overflow:auto;margin-top:11px}
+.handoff-continuity-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;
+ border-top:1px solid #d6ded8;padding-top:9px}
+.handoff-continuity-row div{min-width:0;display:grid;gap:4px}
+.handoff-continuity-row strong{font-size:15px;overflow-wrap:anywhere}
+.handoff-continuity-row span{font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.handoff-source-status{font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+@media(max-width:740px){
+ .handoff-continuity-row{grid-template-columns:1fr}
+ .handoff-continuity-row button{width:100%}
+ .handoff-continuity-events{max-height:250px}
+}
