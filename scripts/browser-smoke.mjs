@@ -3388,6 +3388,128 @@ async function exerciseC32DesktopDetachedRecurrenceAndSearchScopedNowNext(){
   await context.close()
 }
 
+
+async function exerciseC33MobileAllImportedSourcesSearchBulkOnlyAndHiddenBusy(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const imported=Array.from({length:13},(_,i)=>({
+    id:'c33-import-'+String(i).padStart(2,'0'),source:'ics',
+    sourceCalendar:'C33 Campus '+String(i).padStart(2,'0'),
+    sourceKey:'C33 Campus UID '+i,title:'C33 Imported lecture '+String(i).padStart(2,'0'),
+    description:'Original read-only entry',location:'',allDay:false,
+    start:new Date(Date.UTC(2026,10,26,8+i,0)).toISOString(),
+    end:new Date(Date.UTC(2026,10,26,8+i,30)).toISOString(),
+    updatedAt:'2026-10-18T09:00:00.000Z'
+  }))
+  const fixture={schemaVersion:1,records:[...imported,
+    {id:'c33-clinic-hidden-busy',source:'ics',sourceCalendar:'C33 Clinic',
+      sourceKey:'C33 Clinic|opaque-source-uid',title:'C33 Hidden busy clinic',
+      description:'Opaque original',location:'',allDay:false,
+      start:'2026-11-26T09:00:00.000Z',end:'2026-11-26T10:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c33-personal-original',source:'personal',title:'C33 Personal original',
+      description:'Private source remains',location:'',allDay:false,
+      start:'2026-11-26T06:00:00.000Z',end:'2026-11-26T07:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(x=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(x)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  assert.match(await page.locator('.sidebar').innerText(),/9 additional imported calendars/)
+  await page.getByRole('button',{name:/Manage sources/}).click()
+  const dialog=page.getByRole('dialog',{name:'Calendar data management'})
+  await dialog.waitFor()
+  const picker=dialog.getByRole('region',{name:'Imported source picker'})
+  assert.match(await picker.innerText(),/14 shown · 0 hidden · 14 imported calendars/)
+  assert.equal(await picker.locator('.source-picker-list .source-card').count(),8)
+  await picker.getByRole('button',{name:'Next sources'}).click()
+  assert.match(await picker.getByRole('navigation',{name:'Imported source pages'}).innerText(),/Sources 9–14 of 14/)
+  assert.match(await picker.innerText(),/C33 Campus 12/)
+  await picker.getByRole('button',{name:'Previous sources'}).click()
+  const search=picker.getByLabel('Find imported source')
+  await search.fill('C33 Campus 1')
+  assert.equal(await picker.locator('.source-picker-list .source-card').count(),3)
+  assert.match(await picker.innerText(),/3 matching sources/)
+  await picker.getByRole('button',{name:'Only matching imports'}).click()
+  assert.match(await picker.innerText(),/3 shown · 11 hidden · 14 imported calendars/)
+  const names=await picker.locator('.source-picker-list .source-card .source-card-name').allTextContents()
+  assert.deepEqual(names,['C33 Campus 10','C33 Campus 11','C33 Campus 12'])
+  await dialog.getByRole('button',{name:'Close sources'}).click()
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.getByRole('button',{name:'List',exact:true}).click()
+  const agenda=page.getByRole('region',{name:'Upcoming agenda'})
+  await agenda.getByRole('article',{name:'Agenda for 2026-11-26'}).waitFor()
+  const row=agenda.getByRole('article',{name:'Agenda for 2026-11-26'})
+  assert.match(await row.innerText(),/4 events/)
+  assert.match(await row.innerText(),/C33 Personal original/)
+  assert.match(await row.innerText(),/C33 Imported lecture 10/)
+  assert.equal(await row.getByText('C33 Hidden busy clinic').count(),0)
+  // Original all-source review still sees hidden ICS opaque blocks.
+  await page.locator('.top-create').click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.getByLabel('Event name').fill('C33 proposed conflicting appointment')
+  await editor.getByLabel('Starts').fill('2026-11-26T10:00')
+  await editor.getByLabel('Ends').fill('2026-11-26T11:00')
+  assert.match(await editor.getByLabel('Calendar conflict review').innerText(),/C33 Hidden busy clinic/)
+  await editor.getByRole('button',{name:'Cancel'}).click()
+  await page.getByRole('alertdialog',{name:'Discard unsaved changes?'}).getByRole('button',{name:'Discard changes'}).click()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  const prefs=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.view-preferences.v1')))
+  assert.equal(prefs.hiddenImportedCalendars.length,11)
+  const sizes=await page.evaluate(()=>({w:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(sizes.scroll<=sizes.w+2,'C33 mobile source manager overflow: '+JSON.stringify(sizes))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C33_MOBILE_SOURCE_SEARCH_PAGED_BULK_ONLY_HIDDEN_BUSY_CONFLICT_NO_WRITES_PASS')
+  await context.close()
+}
+async function exerciseC33DesktopSourceExactNamesFilteringAndPreferenceContinuity(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const names=['__proto__','constructor',...Array.from({length:16},(_,i)=>'C33 Team '+String(i).padStart(2,'0'))]
+  const fixture={schemaVersion:1,records:names.map((name,i)=>({
+    id:'c33-exact-'+i,source:'ics',sourceCalendar:name,
+    sourceKey:'Original source UID '+i,title:'C33 exact source '+name,description:'',
+    location:'',allDay:false,transparent:i===0,
+    start:'2026-11-26T08:00:00.000Z',end:'2026-11-26T09:00:00.000Z',
+    updatedAt:'2026-10-18T09:00:00.000Z'
+  }))}
+  await page.evaluate(x=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(x)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:/Manage sources/}).click()
+  const dialog=page.getByRole('dialog',{name:'Calendar data management'})
+  const picker=dialog.getByRole('region',{name:'Imported source picker'})
+  assert.match(await picker.innerText(),/18 shown · 0 hidden · 18 imported calendars/)
+  await picker.getByLabel('Find imported source').fill('__proto__')
+  assert.equal(await picker.locator('.source-picker-list .source-card').count(),1)
+  await picker.getByRole('button',{name:'Hide matching'}).click()
+  assert.equal(await picker.getByLabel('Show __proto__ on calendar').isChecked(),false)
+  await picker.getByLabel('Find imported source').fill('C33 Team 1')
+  assert.match(await picker.innerText(),/6 matching sources/)
+  await picker.getByRole('button',{name:'Only matching imports'}).click()
+  assert.match(await picker.innerText(),/6 shown · 12 hidden · 18 imported calendars/)
+  await picker.getByLabel('Find imported source').fill('no calendar could match')
+  assert.match(await picker.innerText(),/No imported calendars match this name/)
+  assert.equal(await picker.getByRole('button',{name:'Hide matching'}).isDisabled(),true)
+  await picker.getByLabel('Find imported source').fill('C33 Team')
+  await picker.getByRole('button',{name:'Show matching'}).click()
+  assert.match(await picker.innerText(),/16 shown · 2 hidden · 18 imported calendars/)
+  await dialog.getByRole('button',{name:'Close sources'}).click()
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('button',{name:/Manage sources/}).click()
+  const again=page.getByRole('dialog',{name:'Calendar data management'})
+  assert.match(await again.getByRole('region',{name:'Imported source picker'}).innerText(),/16 shown · 2 hidden · 18 imported calendars/)
+  await again.getByRole('button',{name:'Close sources'}).click()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C33_DESKTOP_LITERAL_SOURCE_NAMES_SEARCH_SHOW_HIDE_PREFERENCE_RELOAD_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -3457,6 +3579,8 @@ try{
   await exerciseC31DesktopDetachedOriginalEditAndImportedSourceIntact()
   await exerciseC32MobileLiveOriginalEventsAndHiddenBusySource()
   await exerciseC32DesktopDetachedRecurrenceAndSearchScopedNowNext()
+  await exerciseC33MobileAllImportedSourcesSearchBulkOnlyAndHiddenBusy()
+  await exerciseC33DesktopSourceExactNamesFilteringAndPreferenceContinuity()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
