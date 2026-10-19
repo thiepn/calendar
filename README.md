@@ -640,3 +640,51 @@ and incomplete refresh safety.
 Next C37 (proposed): explicitly consented ICS subscription and refresh
 provenance, stale-feed safety and user-reviewed updates. C36 adds no remote
 polling, providers, accounts, credentials, migrations or background writes.
+
+
+## C37 — consented read-only ICS subscriptions and deliberate source refresh
+
+Sources & data now supports original read-only HTTPS ICS subscriptions with
+explicit consent. The subscription sidecar is a bounded set of up to 12 URL,
+source-name, ETag/Last-Modified, last-checked/applied timestamps and up to 8
+status-history entries per feed. It is not a second calendar writer or database,
+and never contains ICS event bodies. The URL may contain a private access token:
+it is saved as local plaintext and is **not included in the event JSON backup**.
+A device owner must guard tokenized subscription URLs, especially on shared
+devices. Unsubscribe deletes only the device-local subscription metadata;
+previously imported read-only snapshots remain unchanged.
+
+Network requests occur only after a separate user-triggered **Check feed**.
+They use public HTTPS, no URL credentials, no browser cookie credentials, no
+referrer, no HTTP redirects, and browser-enforced CORS. Private IP, loopback,
+intranet-style domains and non-HTTPS URLs are refused. Servers must explicitly
+allow cross-origin browser GET requests, and exposed ETag/Last-Modified headers
+are needed for conditional refresh. No proxy, scheduling or automatic polling
+is represented. A request may be cancelled; offline/network/CORS errors do not
+edit the original calendar.
+
+A successful 200 reply is read with a 2 MB response limit, parsed using the
+original ICS engine (including C36 timezone authority), and staged in the
+existing event-level review. Original calendar records change only after
+**Apply reviewed changes** through the same existing guarded commit,
+checkpoint and imported source merge. A supported 304 from an already applied
+feed updates only subscription metadata. Missing local records force a full
+new snapshot rather than trusting a stale conditional 304. Source-name changes,
+source ownership collisions, unsupported events in destructive replacement,
+and stale cross-tab subscription revisions are rejected. Manual update is
+non-destructive by default; a complete source replacement still requires
+original explicit review/confirmation.
+
+After reload, a subscription remains available for a new manual check without
+contacting the URL automatically. A previously downloaded but unapplied
+response is not silently restored as a trusted event snapshot; the user must
+check again. The canonical event JSON export deliberately excludes tokenized
+feed URLs; metadata is separately device-local, so backups remain original
+schema v1. Browser CORS restrictions, conditional response headers and
+provider compatibility vary; no external provider authenticated sync or
+background reliability is implied.
+
+Next C38 (proposed): native read-only integration handoff between original
+Calendar, Hub and StudyOS/Folio owners, preserving single-source authority,
+reviewable return links, date continuity and opt-in privacy, rather than
+duplicating schedulers or grading engines.

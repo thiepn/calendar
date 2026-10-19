@@ -3808,6 +3808,165 @@ async function exerciseC36MobileBadZoneBlocksReplaceAndKeepsOriginal(){
   await context.close()
 }
 
+
+async function exerciseC37DesktopManualFeedReviewConditionalAndSourceLock(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  const feed='https://calendar.example.org/secure-source.ics'
+  const source=(title,name='C37 Campus')=>['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:'+name,
+    'BEGIN:VEVENT','UID:immutable-c37-uid','SUMMARY:'+title,
+    'DTSTART;TZID=Europe/Berlin:20261126T090000',
+    'DTEND;TZID=Europe/Berlin:20261126T100000',
+    'END:VEVENT','END:VCALENDAR'].join('\r\n')
+  let version=1,requestCount=0,conditionalCount=0
+  const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET, OPTIONS',
+    'Access-Control-Allow-Headers':'accept,if-none-match,if-modified-since',
+    'Access-Control-Expose-Headers':'ETag,Last-Modified'}
+  await page.route(feed,async route=>{
+    const req=route.request()
+    if(req.method()==='OPTIONS'){await route.fulfill({status:204,headers:cors});return}
+    requestCount++
+    assert.equal(req.method(),'GET')
+    const header=req.headers()['if-none-match']
+    if(header){conditionalCount++;assert.equal(header,'"c37-v'+(version===1?1:version-1)+'"')}
+    if(header&&version===1){await route.fulfill({status:304,headers:cors});return}
+    await route.fulfill({status:200,contentType:'text/calendar',headers:{...cors,ETag:'"c37-v'+version+'"'},
+      body:source(version===1?'C37 Original seminar':'C37 Revised seminar',version===3?'Renamed feed':'C37 Campus')})
+  })
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  let manager=page.getByRole('dialog',{name:'Calendar data management'})
+  await manager.getByLabel('HTTPS calendar feed URL').fill(feed)
+  await manager.getByLabel('Allow a manual feed connection').check()
+  await manager.getByRole('button',{name:'Add subscription'}).click()
+  assert.equal(requestCount,0,'Consent to store is not consent to auto-fetch')
+  const savedBefore=await page.evaluate(()=>({
+    subscriptions:JSON.parse(localStorage.getItem('thiepn.calendar.ics-subscriptions.v1')),
+    calendar:localStorage.getItem('thiepn.calendar.local.v1')}))
+  assert.equal(savedBefore.subscriptions.items.length,1)
+  assert.equal(savedBefore.subscriptions.items[0].sourceName,undefined)
+  await manager.getByRole('button',{name:'Check feed'}).click()
+  let preview=page.getByRole('dialog',{name:'ICS import review'})
+  await preview.waitFor()
+  assert.match(await preview.getByLabel('Import change preview').innerText(),/1 new/)
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),savedBefore.calendar)
+  await preview.getByRole('button',{name:'Cancel'}).click()
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),savedBefore.calendar)
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  manager=page.getByRole('dialog',{name:'Calendar data management'})
+  await manager.getByRole('button',{name:'Check feed'}).click()
+  preview=page.getByRole('dialog',{name:'ICS import review'})
+  await preview.waitFor()
+  await preview.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const original=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(original.records.length,1)
+  assert.equal(original.records[0].source,'ics')
+  assert.equal(original.records[0].sourceTimeZone,'Europe/Berlin')
+  const identity=original.records[0].id
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  manager=page.getByRole('dialog',{name:'Calendar data management'})
+  await manager.getByRole('button',{name:'Check feed'}).click()
+  await manager.getByText('State: Not modified').waitFor()
+  assert.ok(conditionalCount>0,'Conditional refresh must reuse an exposed ETag')
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),original)
+  version=2
+  await manager.getByRole('button',{name:'Check feed'}).click()
+  preview=page.getByRole('dialog',{name:'ICS import review'})
+  await preview.waitFor()
+  assert.match(await preview.getByLabel('Import change preview').innerText(),/1 updated/)
+  await preview.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const refreshed=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(refreshed.records.length,1)
+  assert.equal(refreshed.records[0].id,identity)
+  assert.equal(refreshed.records[0].title,'C37 Revised seminar')
+  const meta=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.ics-subscriptions.v1')))
+  assert.equal(meta.items[0].sourceName,'C37 Campus')
+  assert.equal(meta.items[0].etag,'"c37-v2"')
+  assert.ok(meta.items[0].history.length>=3)
+  version=3
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  manager=page.getByRole('dialog',{name:'Calendar data management'})
+  await manager.getByRole('button',{name:'Check feed'}).click()
+  await manager.getByRole('alert').filter({hasText:/name changed/}).waitFor()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),refreshed)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C37_DESKTOP_EXPLICIT_FEED_REVIEW_ETAG_304_SOURCE_LOCK_ORIGINAL_UID_PASS')
+  await context.close()
+}
+async function exerciseC37MobileOfflineAbortReloadAndManualRetry(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,
+    hasTouch:true,timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  const feed='https://calendar.example.org/c37-mobile.ics'
+  const response=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C37 Mobile Feed',
+    'BEGIN:VEVENT','UID:c37-mobile-original','SUMMARY:C37 Mobile original',
+    'DTSTART:20261126T090000Z','DTEND:20261126T100000Z',
+    'END:VEVENT','END:VCALENDAR'].join('\r\n')
+  await page.goto(url,{waitUntil:'networkidle'})
+  const open=async()=>{
+    await page.getByRole('button',{name:'Open navigation'}).click()
+    await page.getByRole('button',{name:'Manage sources'}).click()
+    return page.getByRole('dialog',{name:'Calendar data management'})
+  }
+  let dialog=await open()
+  await dialog.getByLabel('HTTPS calendar feed URL').fill(feed)
+  await dialog.getByLabel('Allow a manual feed connection').check()
+  await dialog.getByRole('button',{name:'Add subscription'}).click()
+  const saved=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.ics-subscriptions.v1'))
+  assert.ok(saved)
+  await context.setOffline(true)
+  await dialog.getByRole('button',{name:'Check feed'}).click()
+  await dialog.getByRole('alert').filter({hasText:/offline|CORS|unreachable/}).first().waitFor()
+  await context.setOffline(false)
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),null)
+  await page.reload({waitUntil:'networkidle'})
+  dialog=await open()
+  const restored=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.ics-subscriptions.v1')))
+  assert.equal(restored.items.length,1)
+  assert.equal(restored.items[0].status,'error')
+  await page.route(feed,async route=>{
+    if(route.request().method()==='OPTIONS'){
+      await route.fulfill({status:204,headers:{'Access-Control-Allow-Origin':'*',
+        'Access-Control-Allow-Methods':'GET, OPTIONS','Access-Control-Allow-Headers':'accept'}});return}
+    await sleep(650)
+    try{await route.fulfill({status:200,contentType:'text/calendar',
+      headers:{'Access-Control-Allow-Origin':'*'},body:response})}catch{}
+  })
+  await dialog.getByRole('button',{name:'Check feed'}).click()
+  await dialog.getByRole('button',{name:'Cancel request'}).click()
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),null)
+  await page.unroute(feed)
+  let attempts=0
+  await page.route(feed,async route=>{
+    if(route.request().method()==='OPTIONS'){
+      await route.fulfill({status:204,headers:{'Access-Control-Allow-Origin':'*',
+        'Access-Control-Allow-Methods':'GET, OPTIONS','Access-Control-Allow-Headers':'accept'}});return}
+    attempts++
+    await route.fulfill({status:200,contentType:'text/calendar',
+      headers:{'Access-Control-Allow-Origin':'*'},body:response})
+  })
+  await dialog.getByRole('button',{name:'Check feed'}).click()
+  const preview=page.getByRole('dialog',{name:'ICS import review'})
+  await preview.waitFor()
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),null)
+  await preview.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const record=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(record.records[0].title,'C37 Mobile original')
+  await page.reload({waitUntil:'networkidle'})
+  assert.equal(attempts,1,'Reload must not automatically access remote feed')
+  dialog=await open()
+  page.once('dialog',modal=>modal.accept())
+  await dialog.getByRole('button',{name:'Unsubscribe'}).click()
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.ics-subscriptions.v1')).items.length),0)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),record)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C37_MOBILE_OFFLINE_RELOAD_MANUAL_RETRY_PRESERVES_SNAPSHOT_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -3885,6 +4044,8 @@ try{
   await exerciseC35DesktopRecurrenceOriginalZoneAndKeepInstant()
   await exerciseC36DesktopSourceZoneAndDetachedUidRefresh()
   await exerciseC36MobileBadZoneBlocksReplaceAndKeepsOriginal()
+  await exerciseC37DesktopManualFeedReviewConditionalAndSourceLock()
+  await exerciseC37MobileOfflineAbortReloadAndManualRetry()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true

@@ -758,3 +758,29 @@
   .editor-zone-controls{grid-template-columns:minmax(0,1fr)}
   .editor-zone-controls select{font-size:16px;min-height:46px}
 }
+
+
+.subscription-manager{border-top:1px solid #d8e2da;margin-top:18px;padding-top:14px;min-width:0}
+.subscription-manager h3{font-size:18px;margin:0 0 12px}
+.subscription-form{display:grid;gap:12px;margin:0 0 18px}
+.subscription-form label:not(.checkline){display:grid;gap:7px;font-weight:600;font-size:15px;min-width:0}
+.subscription-form input[type=url]{width:100%;min-width:0;min-height:46px;box-sizing:border-box;font-size:15px}
+.subscription-form p,.subscription-manager>p{margin:0;line-height:1.5;font-size:14px}
+.subscription-form .checkline{align-items:start;display:flex;gap:9px;line-height:1.45;font-size:14px}
+.subscription-form .checkline input{flex-shrink:0;width:19px;height:19px}
+.subscription-form>button{justify-self:start;min-height:44px;font-size:14px}
+.subscription-list{display:grid;gap:9px}
+.subscription-entry{border:1px solid #ccd9ce;padding:12px;min-width:0}
+.subscription-entry-info{display:grid;gap:4px;min-width:0;font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.subscription-entry-info strong{font-size:16px}
+.subscription-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:10px}
+.subscription-actions button{min-height:44px;font-size:14px}
+.subscription-history{margin-top:7px}
+.subscription-history summary{font-size:14px;cursor:pointer}
+.subscription-history ol{padding-left:20px;margin:5px 0;line-height:1.6;font-size:14px}
+@media(max-width:740px){
+ .subscription-entry{padding:10px}
+ .subscription-form input[type=url]{font-size:16px}
+ .subscription-actions{display:grid;grid-template-columns:1fr 1fr}
+ .subscription-actions button{min-width:0}
+}

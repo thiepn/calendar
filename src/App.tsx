@@ -35,6 +35,8 @@ import {CalendarViews,type Mode} from './components/CalendarViews'
 import {MonthDayPeek} from './components/MonthDayPeek'
 import {NowNext} from './components/NowNext'
 import {SourcePicker} from './components/SourcePicker'
+import {SubscriptionManager} from './components/SubscriptionManager'
+import {ICS_SUBSCRIPTIONS_KEY,readSubscriptions,reviseSubscriptions,addSubscription,changeSubscription,dropSubscription,assertFeedSource,fetchSubscribedIcs,historyEntry,type SubscriptionStore,type IcsSubscription} from './core/ics-subscriptions'
 import {applySourcePicker,type SourcePickerAction} from './core/source-picker'
 import {deviceTimeZone,zoneWall} from './core/time-zone'
 
@@ -51,6 +53,11 @@ const initialDraft=(()=>{
   let raw:string|null=null
   try{raw=localStorage.getItem(EVENT_DRAFT_KEY);return {draft:readEventDraft(),error:'',raw}}
   catch(error){return {draft:null,error:'Unfinished event draft cannot be read: '+String(error),raw}}
+})()
+const initialSubscriptions=(()=>{
+  try{return {store:readSubscriptions(),error:''}}
+  catch(error){return {store:{schemaVersion:1,items:[]} as SubscriptionStore,
+    error:'Subscription metadata is unreadable. It was not overwritten: '+String(error)}}
 })()
 export default function App(){
   const [calendar,setCalendar]=useState<CalendarState>(initial.state)
@@ -107,6 +114,13 @@ export default function App(){
   const [pending,setPending]=useState<IcsPreview|null>(null)
   const [sourcePanel,setSourcePanel]=useState(false)
   const [sourcePickerError,setSourcePickerError]=useState('')
+  const [subscriptions,setSubscriptions]=useState<SubscriptionStore>(initialSubscriptions.store)
+  const [subscriptionError,setSubscriptionError]=useState(initialSubscriptions.error)
+  const [checkingFeedId,setCheckingFeedId]=useState<string|null>(null)
+  const checkController=useRef<AbortController|null>(null)
+  const [pendingFeed,setPendingFeed]=useState<{
+    id:string;revision:string;etag?:string;lastModified?:string
+  }|null>(null)
   const [personalExportOpen,setPersonalExportOpen]=useState(false)
   const [mobileNav,setMobileNav]=useState(false)
   const importInput=useRef<HTMLInputElement>(null)
@@ -224,6 +238,10 @@ export default function App(){
   }
   useEffect(()=>{
     const sync=(e:StorageEvent)=>{
+      if(e.key===ICS_SUBSCRIPTIONS_KEY){
+        try{setSubscriptions(readSubscriptions());setSubscriptionError('')}
+        catch(error){setSubscriptionError('Subscription metadata changed but cannot be read: '+String(error))}
+      }
       if(e.key===REMINDER_ACTIONS_KEY){try{setReminderActions(readReminderActions())}catch{}}
       if(e.key===REMINDER_SETTINGS_KEY){try{setReminderSettings(loadReminderSettings())}catch{}}
       if(e.key===VIEW_PREFERENCES_KEY){
@@ -245,7 +263,7 @@ export default function App(){
       const target=e.target as HTMLElement
       if(['INPUT','TEXTAREA','SELECT'].includes(target.tagName)||target.isContentEditable)return
       if(e.ctrlKey||e.metaKey||e.altKey)return
-      if(e.key==='Escape'&&editorDate===null){setActive(null);setPending(null);setSourcePanel(false);setPersonalExportOpen(false);setFinderOpen(false);setRemindersOpen(false);setAdjustment(null);setAllDayAdjustment(null);setMonthPeekDate(null)}
+      if(e.key==='Escape'&&editorDate===null){setActive(null);setPending(null);setPendingFeed(null);setSourcePanel(false);setPersonalExportOpen(false);setFinderOpen(false);setRemindersOpen(false);setAdjustment(null);setAllDayAdjustment(null);setMonthPeekDate(null)}
       if(e.key==='n'){e.preventDefault();create(selected)}
       if(e.key==='t'){e.preventDefault();setSelected(localDate())}
       if(e.key==='/'){e.preventDefault();searchInput.current?.focus()}
@@ -589,9 +607,106 @@ export default function App(){
   }
   async function readIcs(e:ChangeEvent<HTMLInputElement>){
     const f=e.target.files?.[0];e.target.value='';if(!f)return
-    try{setPending(previewIcs(await f.text()));setImportMode('update');setNotice('Review the import before applying')}
+    try{setPendingFeed(null);setPending(previewIcs(await f.text()));setImportMode('update');setNotice('Review the import before applying')}
     catch(error){setNotice('ICS import failed: '+String(error))}
   }
+  function persistSubscriptionChange(transform:(current:SubscriptionStore)=>SubscriptionStore):SubscriptionStore{
+    const latest=readSubscriptions()
+    if(JSON.stringify(latest)!==JSON.stringify(subscriptions))
+      throw new Error('Subscription changed in another tab. Reload before continuing.')
+    const next=transform(latest)
+    reviseSubscriptions(latest,next)
+    setSubscriptions(next)
+    return next
+  }
+  function addFeed(url:string){
+    try{
+      persistSubscriptionChange(current=>addSubscription(current,url))
+      setSubscriptionError('')
+      setNotice('Feed address saved on this device. Select Check feed to request a snapshot.')
+    }catch(error){setSubscriptionError('Subscription not saved: '+String(error))}
+  }
+  function removeFeed(id:string){
+    if(!window.confirm('Unsubscribe this feed? Previously imported local events remain untouched.'))return
+    try{
+      persistSubscriptionChange(current=>dropSubscription(current,id))
+      setSubscriptionError('')
+      setNotice('Feed unsubscribed. Its imported event snapshot was preserved.')
+    }catch(error){setSubscriptionError('Unsubscribe rejected: '+String(error))}
+  }
+  function cancelFeed(){
+    checkController.current?.abort()
+    checkController.current=null
+    setCheckingFeedId(null)
+    setNotice('Feed request cancelled. Saved calendar events were not changed.')
+  }
+  async function checkFeed(id:string){
+    if(checkController.current||pending)return
+    let original:IcsSubscription|undefined
+    let originalStore:SubscriptionStore|undefined
+    const controller=new AbortController()
+    try{
+      originalStore=readSubscriptions()
+      if(JSON.stringify(originalStore)!==JSON.stringify(subscriptions))
+        throw new Error('Subscription was changed in another tab. Reload before checking.')
+      original=originalStore.items.find(item=>item.id===id)
+      if(!original)throw new Error('Subscription no longer exists')
+      checkController.current=controller
+      setCheckingFeedId(id);setSubscriptionError('')
+      // Do not accept 304 if an independently restored calendar lacks the
+      // previously applied source; a complete fresh response is then required.
+      const hasSource=Boolean(original.sourceName&&calendar.records.some(r=>
+        r.source==='ics'&&r.sourceCalendar===original!.sourceName))
+      const result=await fetchSubscribedIcs(original,controller.signal,fetch,hasSource)
+      if(controller.signal.aborted)return
+      const current=readSubscriptions()
+      if(current.items.find(x=>x.id===id)?.revision!==original.revision)
+        throw new Error('Subscription changed while the request was in progress. Nothing was applied.')
+      if(result.kind==='not-modified'){
+        if(!hasSource)throw new Error('A full snapshot is required because local imported records are absent.')
+        const next=changeSubscription(current,id,{status:'unchanged',lastError:undefined,
+          lastCheckedAt:new Date().toISOString(),
+          history:historyEntry(original,'unchanged')})
+        reviseSubscriptions(current,next);setSubscriptions(next)
+        setNotice('Feed not modified (304). Original imported events were preserved.')
+        return
+      }
+      const preview=previewIcs(result.text)
+      if(!preview.records.length)throw new Error('Feed has no supported events; no local update was staged')
+      assertFeedSource(current,id,preview.name,calendar.records.filter(x=>
+        x.source==='ics').map(x=>x.sourceCalendar??'Imported'))
+      if(controller.signal.aborted)return
+      const staged=changeSubscription(current,id,{
+        status:'review',lastCheckedAt:new Date().toISOString(),lastError:undefined,
+        history:historyEntry(original,'review',preview.records.length)})
+      reviseSubscriptions(current,staged);setSubscriptions(staged)
+      setPending(preview);setPendingFeed({id,revision:staged.items.find(item=>item.id===id)!.revision,
+        etag:result.etag,lastModified:result.lastModified})
+      setImportMode('update')
+      setSourcePanel(false)
+      setNotice('Feed downloaded. Review source changes before applying them.')
+    }catch(error){
+      if(controller.signal.aborted)return
+      // Never display or log a complete URL that may contain a bearer token.
+      const detail=error instanceof Error?error.message:'Unknown feed error'
+      const redacted=original?detail.split(original.url).join('(feed URL)'):detail
+      const message=redacted.slice(0,290)
+      setSubscriptionError(message)
+      if(original){
+        try{
+          const latest=readSubscriptions()
+          if(latest.items.find(x=>x.id===id)?.revision===original.revision){
+            const next=changeSubscription(latest,id,{status:'error',lastError:message,
+              lastCheckedAt:new Date().toISOString(),history:historyEntry(original,'error')})
+            reviseSubscriptions(latest,next);setSubscriptions(next)
+          }
+        }catch{setSubscriptionError(message+'; metadata changed in another tab')}
+      }
+    }finally{
+      if(checkController.current===controller){checkController.current=null;setCheckingFeedId(null)}
+    }
+  }
+  function closeIcsReview(){setPending(null);setPendingFeed(null)}
   async function readBackup(e:ChangeEvent<HTMLInputElement>){
     const f=e.target.files?.[0];e.target.value='';if(!f)return
     try{
@@ -635,7 +750,7 @@ export default function App(){
     }else saved=commit(restoreCandidate.state,'Calendar restored from '+restoreCandidate.origin)
     if(saved){
       try{setRecovery(readRecovery())}catch{setRecovery(null)}
-      setRestoreCandidate(null);setActive(null);setEditorDate(null);setPending(null)
+      setRestoreCandidate(null);setActive(null);setEditorDate(null);setPending(null);setPendingFeed(null)
       setQuery('');setFilter('all');setSelected(localDate())
     }
   }
@@ -648,6 +763,18 @@ export default function App(){
   },[calendar,pending,importMode])
   function applyImport(){
     if(!pending)return
+    let feedStore:SubscriptionStore|undefined
+    let verifiedFeed:IcsSubscription|undefined
+    if(pendingFeed){
+      try{
+        feedStore=readSubscriptions()
+        verifiedFeed=feedStore.items.find(x=>x.id===pendingFeed.id)
+        if(!verifiedFeed||verifiedFeed.revision!==pendingFeed.revision)
+          throw new Error('Feed metadata changed in another tab. Refresh the preview before applying.')
+        assertFeedSource(feedStore,pendingFeed.id,pending.name,calendar.records
+          .filter(x=>x.source==='ics').map(x=>x.sourceCalendar??'Imported'))
+      }catch(error){setNotice('Feed preview rejected: '+String(error));return}
+    }
     // Confirm only demonstrable removals, never the whole prior imported source.
     const changed=reviewImportedChanges(calendar,pending,importMode)
     const removed=changed.counts.removed
@@ -655,7 +782,21 @@ export default function App(){
       ' local imported event(s) missing from '+pending.name+
       '. Your personal events and external source are untouched. Continue?'))return
     const result=mergeIcs(calendar,pending,importMode)
-    if(commit(result.state,`Imported ${result.added}; updated ${result.updated}; unchanged ${result.duplicates}; removed from prior snapshot ${result.removed}`))setPending(null)
+    if(commit(result.state,`Imported ${result.added}; updated ${result.updated}; unchanged ${result.duplicates}; removed from prior snapshot ${result.removed}`)){
+      if(pendingFeed&&feedStore&&verifiedFeed){
+        try{
+          const now=new Date().toISOString()
+          const next=changeSubscription(feedStore,pendingFeed.id,{
+            sourceName:pending.name,etag:pendingFeed.etag,lastModified:pendingFeed.lastModified,
+            lastCheckedAt:now,lastAppliedAt:now,status:'applied',lastError:undefined,
+            history:historyEntry(verifiedFeed,'applied',pending.records.length)})
+          reviseSubscriptions(feedStore,next);setSubscriptions(next);setSubscriptionError('')
+        }catch(error){
+          setSubscriptionError('Calendar saved; subscription metadata was not updated: '+String(error))
+        }
+      }
+      closeIcsReview()
+    }
   }
   function exportReviewedPersonalIcs(options:ReviewedPersonalExportOptions){
     try{
@@ -1051,8 +1192,9 @@ export default function App(){
       </section>
     </div>}
     {pending&&<div className="modal-backdrop"><section className="import-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="ICS import review">
-      <header className="editor-head"><h2>Review ICS snapshot</h2><button className="icon-button" aria-label="Close import" onClick={()=>setPending(null)}><X size={19}/></button></header>
+      <header className="editor-head"><h2>Review ICS snapshot</h2><button className="icon-button" aria-label="Close import" onClick={closeIcsReview}><X size={19}/></button></header>
       <p><strong>{pending.name}</strong> · {pending.records.length} supported events</p>
+      {pendingFeed&&<p role="status">Checked subscribed feed. No imported event has changed yet. Only Apply reviewed changes writes local records.</p>}
       {pending.skippedEvents>0&&<p className="incomplete-ics-notice" role="status">
         {pending.skippedEvents} source event{pending.skippedEvents===1?'':'s'} could not be read. Update matching UIDs retains earlier read-only copies; full replacement is blocked to prevent deletion of omitted records.
       </p>}
@@ -1101,7 +1243,7 @@ export default function App(){
         }}><Download size={14}/> Download complete change report ({importReview.changes.changes.length} entries)</button>
       </section>}
       <p className="fine-print">Read-only local snapshot; not live sync. Unsupported RRULE masters are skipped with warnings. Neither method modifies Google, Folio, KLIPS or personal events.</p>
-      <footer className="editor-actions"><button className="secondary" onClick={()=>setPending(null)}>Cancel</button><button className="primary" onClick={applyImport} disabled={!importReview?.result}>Apply reviewed changes</button></footer>
+      <footer className="editor-actions"><button className="secondary" onClick={closeIcsReview}>Cancel</button><button className="primary" onClick={applyImport} disabled={!importReview?.result}>Apply reviewed changes</button></footer>
     </section></div>}
     {personalExportOpen&&<PersonalExportDialog state={calendar} selected={selected}
       onClose={()=>setPersonalExportOpen(false)} onExport={exportReviewedPersonalIcs}/>}
@@ -1113,6 +1255,9 @@ export default function App(){
         <SourcePicker sources={sources} hidden={hiddenImportedCalendars} onApply={applyImportedVisibility}
           onToggle={toggleImported} onRemove={removeSource} error={sourcePickerError}/>
         {!sources.length&&<p className="empty-note">No imported ICS snapshots.</p>}
+        <SubscriptionManager subscriptions={subscriptions.items} error={subscriptionError}
+          activeId={checkingFeedId} onAdd={addFeed} onCheck={checkFeed}
+          onCancel={cancelFeed} onRemove={removeFeed}/>
         <hr/><h3>Backups & interop</h3><div className="button-stack">
           <button className="secondary" onClick={()=>importInput.current?.click()}><Upload size={16}/> Import ICS snapshot</button>
           <button className="secondary" onClick={()=>{setSourcePanel(false);setPersonalExportOpen(true)}}><Download size={16}/> Review personal ICS export</button>
