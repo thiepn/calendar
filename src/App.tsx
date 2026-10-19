@@ -416,7 +416,7 @@ export default function App(){
       }
     }catch(error){setNotice('All-day adjustment rejected: '+String(error))}
   }
-  function open(item:CalendarOccurrence){setActive(item);setSelected(item.date);setMoveDate(item.startDate)}
+  function open(item:CalendarOccurrence){setActive(item);setSelected(item.allDay?item.date:localDate(new Date(item.start)));setMoveDate(item.startDate)}
   function requestAdjustment(item:CalendarOccurrence,action:TimedAction,date:LocalDate,minute:number,length:number,fold?:'earlier'|'later'){
     if(item.source!=='personal'||item.allDay)return
     setActive(null);setAdjustAck(false);setAdjustAlternativesOpen(false)
@@ -498,7 +498,7 @@ export default function App(){
     const candidates=occurrencesBetween([record],addDays(item.date,1),addDays(item.date,365))
     const next=candidates.find(x=>x.date>item.date)
     if(!next){setNotice('No later active occurrence found in the next 365 days');return}
-    setActive(next);setSelected(next.date);setMoveDate(next.startDate)
+    setActive(next);setSelected(next.allDay?next.date:localDate(new Date(next.start)));setMoveDate(next.startDate)
   }
   function save(record:CalendarRecord):boolean{
     try{
@@ -1012,7 +1012,7 @@ export default function App(){
         <h2>{active.title}</h2><p className="details-dates">{active.allDay?'All day · '+friendlyRange(active.startDate,addDays(active.endDateExclusive,-1)):new Date(active.start).toLocaleString()+' – '+new Date(active.end).toLocaleString()}</p>
         {activeRecord?.timeZone&&!active.allDay&&<p className="details-event-zone"><strong>Event time zone:</strong> {activeRecord.timeZone} · {zoneWall(active.start,activeRecord.timeZone)}–{zoneWall(active.end,activeRecord.timeZone).slice(11)} (device: {deviceTimeZone()})</p>}
         <button type="button" className="details-show-day secondary compact"
-          onClick={()=>{setMode('day');setSelected(active.date);setActive(null)}}>
+          onClick={()=>{setMode('day');setSelected(active.allDay?active.date:localDate(new Date(active.start)));setActive(null)}}>
           <CalendarDays size={15}/> Show this day
         </button>
         {active.location&&<p><strong>Location:</strong> {active.location}</p>}{active.description&&<p className="description">{active.description}</p>}

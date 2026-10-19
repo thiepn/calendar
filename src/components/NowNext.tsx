@@ -1,7 +1,7 @@
 import {useMemo} from 'react'
 import {CalendarDays,ChevronRight,Clock3} from 'lucide-react'
 import type {CalendarOccurrence,CalendarRecord,LocalDate} from '../types'
-import {dateLabel,displayTime} from '../core/dates'
+import {dateLabel,displayTime,localDate} from '../core/dates'
 import {nowNextVisible,type NowNextEntry} from '../core/now-next'
 
 type Props={records:CalendarRecord[];nowIso:string;onOpen:(item:CalendarOccurrence)=>void;
@@ -9,7 +9,7 @@ type Props={records:CalendarRecord[];nowIso:string;onOpen:(item:CalendarOccurren
 const dateOf=(entry:NowNextEntry,nowDate:LocalDate)=>{
   const x=entry.item
   return x.allDay?x.startDate:
-    entry.phase==='happening'?nowDate:x.date
+    entry.phase==='happening'?nowDate:localDate(new Date(x.start))
 }
 function EventLink({entry,today,onOpen,onShowDay}:{
   entry:NowNextEntry;today:LocalDate;onOpen:(x:CalendarOccurrence)=>void;onShowDay:(d:LocalDate)=>void
@@ -19,7 +19,7 @@ function EventLink({entry,today,onOpen,onShowDay}:{
   const time=phase==='happening'?'Until '+displayTime(item.end):
     phase==='all-day-today'?'All day today':
     item.allDay?'All day · '+dateLabel(item.startDate,{weekday:'short',month:'short',day:'numeric'}):
-    dateLabel(item.date,{weekday:'short',month:'short',day:'numeric'})+' · '+displayTime(item.start)
+    dateLabel(date,{weekday:'short',month:'short',day:'numeric'})+' · '+displayTime(item.start)
   return <div className={'now-next-event '+(item.source==='ics'?'imported':'')}>
     <div className="now-next-event-main">
       <span className="now-next-time">{time}</span>

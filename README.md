@@ -600,3 +600,9 @@ device-local until deliberately edited/converted; all-day records remain
 floating dates; personal/ICS synchronized TZID round-trip, full RFC5545
 VTIMEZONE handling, multi-device clock normalization and physical-device
 Safari/WebKit/Firefox testing require separate work.
+
+
+C35 travel-view navigation: Now & next and event-details "Show this day"
+use the viewer's actual device-local calendar date for a timed event;
+canonical source-local recurrence dates are deliberately unchanged for
+splitting, detached overrides, recovery and original ICS identities.

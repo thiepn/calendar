@@ -3657,6 +3657,9 @@ async function exerciseC35MobileIanaClockReloadAndTravel(){
   const details=traveled.getByRole('dialog',{name:'Event details'})
   assert.match(await details.innerText(),/Asia\/Seoul/)
   assert.match(await details.innerText(),/2026-11-26T09:00/)
+  await details.getByRole('button',{name:'Show this day'}).click()
+  assert.equal(await traveled.getByLabel('Jump to date').inputValue(),'2026-11-25',
+    'Travel navigation must open the real device-local day while preserving original source identity')
   assert.equal(errors.length,0,errors.join('; '))
   console.log('BROWSER_C35_MOBILE_IANA_DRAFT_RECOVERY_CROSS_ZONE_STABLE_UTC_PASS')
   await traveler.close();await context.close()
