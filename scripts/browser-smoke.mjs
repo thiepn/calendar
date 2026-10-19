@@ -301,6 +301,7 @@ async function exerciseC6Desktop(){
   await dst.getByText(/occurs twice/).waitFor()
   assert.equal(await dst.getByRole('button',{name:'Create event'}).isDisabled(),true)
   await dst.getByRole('button',{name:'Cancel'}).click()
+  await page.getByRole('alertdialog',{name:'Discard unsaved changes?'}).getByRole('button',{name:'Discard changes'}).click()
   assert.equal(errors.length,0,errors.join(';'))
   console.log('BROWSER_C6_EDITOR_DST_GUARD_PASS')
   await context.close()
@@ -376,6 +377,7 @@ async function exerciseC7DstAndRange(){
   await recurring.getByLabel('Conflict planning horizon').selectOption('365')
   assert.match(await recurring.getByLabel('Calendar conflict review').innerText(),/first 365 days only/)
   await recurring.getByRole('button',{name:'Cancel'}).click()
+  await page.getByRole('alertdialog',{name:'Discard unsaved changes?'}).getByRole('button',{name:'Discard changes'}).click()
   assert.equal(errors.length,0,errors.join(';'))
   console.log('BROWSER_C7_365_DAY_PLANNING_PASS')
   await context.close()
@@ -2290,6 +2292,7 @@ async function exerciseC23MobileDstAndAllDayGuard(){
   assert.equal(await editor.getByRole('button',{name:'30 min later'}).count(),0)
   assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),baseline)
   await editor.getByRole('button',{name:'Cancel'}).click()
+  await page.getByRole('alertdialog',{name:'Discard unsaved changes?'}).getByRole('button',{name:'Discard changes'}).click()
   const viewport=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
   assert.ok(viewport.scroll<=viewport.width+2,'Mobile outer overflow: '+JSON.stringify(viewport))
   assert.equal(errors.length,0,errors.join('; '))
@@ -3160,6 +3163,117 @@ async function exerciseC30DesktopAgendaDetachedAndSourceFilteredPageClamping(){
   await context.close()
 }
 
+
+async function exerciseC31MobileUnsavedEditorDismissalResetAndNewDraft(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const original={schemaVersion:1,records:[]}
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(value)),original)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.locator('.top-create').click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.waitFor()
+  assert.equal(await editor.getByRole('button',{name:'Reset edits'}).count(),0)
+  await editor.getByLabel('Event name').fill('C31 original mobile draft')
+  await editor.getByLabel('Notes').fill('C31 confidential unsaved notes retained in memory')
+  await editor.getByRole('button',{name:'Next day'}).click()
+  assert.match(await editor.locator('.editor-unsaved-meta').innerText(),/Name/)
+  assert.match(await editor.locator('.editor-unsaved-meta').innerText(),/Date or time/)
+  assert.match(await editor.locator('.editor-unsaved-meta').innerText(),/Notes/)
+  await editor.getByRole('button',{name:'Close editor'}).click()
+  const warning=page.getByRole('alertdialog',{name:'Discard unsaved changes?'})
+  await warning.waitFor()
+  assert.match(await warning.innerText(),/Name, Date or time, Notes/)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),original)
+  await warning.getByRole('button',{name:'Keep editing'}).click()
+  await warning.waitFor({state:'hidden'})
+  assert.equal(await editor.getByLabel('Event name').inputValue(),'C31 original mobile draft')
+  assert.equal(await editor.getByLabel('Notes').inputValue(),'C31 confidential unsaved notes retained in memory')
+  await editor.getByLabel('Notes').press('Escape')
+  await warning.waitFor()
+  await warning.getByRole('button',{name:'Keep editing'}).press('Escape')
+  await warning.waitFor({state:'hidden'})
+  assert.equal(await editor.getByLabel('Event name').inputValue(),'C31 original mobile draft')
+  await page.locator('.modal-backdrop').first().click({position:{x:3,y:3}})
+  await warning.waitFor()
+  await warning.getByRole('button',{name:'Keep editing'}).click()
+  await editor.getByRole('button',{name:'Reset edits'}).click()
+  assert.equal(await editor.getByRole('button',{name:'Reset edits'}).count(),0)
+  assert.equal(await editor.getByLabel('Event name').inputValue(),'')
+  assert.equal(await editor.getByLabel('Notes').inputValue(),'')
+  assert.equal(await editor.locator('input[type="datetime-local"]').first().inputValue(),'2026-11-26T09:00')
+  await editor.getByRole('button',{name:'Cancel'}).click()
+  await editor.waitFor({state:'hidden'})
+  assert.equal(await warning.count(),0)
+  await page.locator('.top-create').click()
+  const second=page.getByRole('dialog',{name:'New event'})
+  await second.getByLabel('Event name').fill('C31 explicitly discarded')
+  await second.getByRole('button',{name:'Cancel'}).click()
+  await warning.waitFor()
+  await warning.getByRole('button',{name:'Discard changes'}).click()
+  await second.waitFor({state:'hidden'})
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),original)
+  const dimensions=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(dimensions.scroll<=dimensions.width+2,'C31 mobile viewport overflow '+JSON.stringify(dimensions))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C31_MOBILE_DIRTY_EDITOR_CANCEL_ESCAPE_BACKDROP_RESET_NO_WRITES_PASS')
+  await context.close()
+}
+async function exerciseC31DesktopDetachedOriginalEditAndImportedSourceIntact(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const fixture={schemaVersion:1,records:[
+    {id:'c31-parent',source:'personal',title:'C31 original parent',description:'unchanged',
+      location:'',allDay:false,start:'2026-11-19T09:00:00.000Z',
+      end:'2026-11-19T10:00:00.000Z',repeat:{frequency:'weekly',interval:1},
+      excludedDates:['2026-11-26'],updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c31-detached',source:'personal',title:'C31 original detached',description:'original notes',
+      location:'Original room',allDay:false,start:'2026-11-26T13:00:00.000Z',
+      end:'2026-11-26T14:00:00.000Z',recurrenceParentId:'c31-parent',
+      recurrenceDate:'2026-11-26',updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c31-readonly',source:'ics',sourceCalendar:'C31 Campus',sourceKey:'C31 Campus|unchanged',
+      title:'C31 transparent readonly',description:'Original imported',
+      location:'',allDay:false,transparent:true,start:'2026-11-26T10:00:00.000Z',
+      end:'2026-11-26T10:30:00.000Z',updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(x=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(x)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.locator('.timeline-block').filter({hasText:'C31 original detached'}).click()
+  await page.getByRole('dialog',{name:'Event details'}).getByRole('button',{name:'Edit event'}).click()
+  const editor=page.getByRole('dialog',{name:'Edit event'})
+  await editor.waitFor()
+  await editor.getByLabel('Location').fill('Changed but not committed room')
+  await editor.getByLabel('Notes').fill('Changed but not committed notes')
+  assert.match(await editor.locator('.editor-unsaved-meta').innerText(),/Location/)
+  assert.match(await editor.locator('.editor-unsaved-meta').innerText(),/Notes/)
+  await editor.getByRole('button',{name:'Cancel'}).click()
+  const warning=page.getByRole('alertdialog',{name:'Discard unsaved changes?'})
+  await warning.waitFor()
+  await warning.getByRole('button',{name:'Keep editing'}).click()
+  assert.equal(await editor.getByLabel('Notes').inputValue(),'Changed but not committed notes')
+  await editor.getByRole('button',{name:'Close editor'}).click()
+  await warning.waitFor()
+  await warning.getByRole('button',{name:'Discard changes'}).click()
+  await editor.waitFor({state:'hidden'})
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  await page.locator('.timeline-block.imported').filter({hasText:'C31 transparent readonly'}).click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  assert.match(await details.innerText(),/TRANSP:TRANSPARENT/)
+  assert.equal(await details.getByRole('button',{name:'Edit event'}).count(),0)
+  await details.getByRole('button',{name:'Close event'}).click()
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C31_DESKTOP_DETACHED_ORIGINAL_UNSAVED_REVIEW_READONLY_SOURCE_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -3225,6 +3339,8 @@ try{
   await exerciseC29DesktopRepeatedDstTimeNavigationAndReadOnlyOriginal()
   await exerciseC30MobileAgendaDenseOriginalEventsAndDayDrilldown()
   await exerciseC30DesktopAgendaDetachedAndSourceFilteredPageClamping()
+  await exerciseC31MobileUnsavedEditorDismissalResetAndNewDraft()
+  await exerciseC31DesktopDetachedOriginalEditAndImportedSourceIntact()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
