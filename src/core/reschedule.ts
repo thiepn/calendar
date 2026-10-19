@@ -1,6 +1,7 @@
 import type {CalendarOccurrence,CalendarRecord,CalendarState,LocalDate} from '../types'
 import {day,resolveLocalInstant,localInstantOptions,localDateTime,localDate} from './dates'
-import {occurrencesBetween} from './occurrences'
+import {occurrencesBetween,seriesOccurrenceOn} from './occurrences'
+import {addDays} from './dates'
 import {replaceOccurrence,saveWholeEvent} from './series'
 import {validateState} from './storage'
 
@@ -27,8 +28,8 @@ export function proposeTimedChange(
     throw new Error('Invalid adjusted time')
   const record=state.records.find(x=>x.id===item.recordId)
   if(!record||record.source!=='personal')throw new Error('Personal source event no longer exists')
-  if(!occurrencesBetween([record],item.date,item.date).some(x=>x.key===item.key))
-    throw new Error('Occurrence changed since selection')
+  const selected=record.repeat?seriesOccurrenceOn(record,item.date):occurrencesBetween([record],addDays(item.date,-2),addDays(item.date,2)).find(x=>x.key===item.key)
+  if(!selected||selected.key!==item.key)throw new Error('Occurrence changed since selection')
   const start=resolveLocalInstant(targetDate+'T'+time(startMinute),fold)
   const end=new Date(Date.parse(start)+lengthMinutes*60000).toISOString()
   // All saved calendars, regardless of UI visibility filters, contribute to collision warnings.
@@ -46,7 +47,7 @@ export function applyTimedChange(state:CalendarState,proposal:TimedProposal,idFa
   const record=state.records.find(x=>x.id===item.recordId)
   if(!record||record.source!=='personal')throw new Error('Event not found')
   // Ensure the source instance has not changed in content or recurrence even inside a single tab.
-  const fresh=occurrencesBetween([record],item.date,item.date).find(x=>x.key===item.key)
+  const fresh=record.repeat?seriesOccurrenceOn(record,item.date):occurrencesBetween([record],addDays(item.date,-2),addDays(item.date,2)).find(x=>x.key===item.key)
   if(!fresh||fresh.start!==item.start||fresh.end!==item.end||fresh.title!==item.title)
     throw new Error('Source instance changed; open it again')
   const targetMinute=new Date(start).getHours()*60+new Date(start).getMinutes()

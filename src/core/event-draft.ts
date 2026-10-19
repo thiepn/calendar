@@ -4,7 +4,8 @@ import {changedEditorFields} from './editor-changes'
 import {day} from './dates'
 import {validateRecord,validateState} from './storage'
 import {splitSeriesAt} from './series'
-import {occurrencesBetween} from './occurrences'
+import {seriesOccurrenceOn} from './occurrences'
+import {deviceTimeZone,validTimeZone} from './time-zone'
 
 export const EVENT_DRAFT_KEY='thiepn.calendar.event-draft.v1'
 
@@ -18,6 +19,7 @@ export interface EventDraftOrigin {
   instance?:{parentId:string;date:LocalDate}
   future?:{parentId:string;date:LocalDate;newId:string}
   defaultReminderMinutes:number
+  deviceTimeZone?:string
 }
 export interface SavedEventDraft {
   schemaVersion:1
@@ -39,6 +41,7 @@ function fields(v:unknown):EventEditorFields {
   }
   if(typeof f.allDay!=='boolean'||!Number.isInteger(f.reminder)||![-1,0,5,10,15,30,60,120,1440,10080].includes(f.reminder as number))
     throw new Error('Invalid draft reminder')
+  if(f.timeZone!==undefined)validTimeZone(f.timeZone as string)
   if(!['','earlier','later'].includes(f.startFold as string)||!['','earlier','later'].includes(f.endFold as string)||
      !['none','daily','weekly','monthly'].includes(f.frequency as string))
     throw new Error('Invalid draft recurrence or DST fold')
@@ -57,6 +60,7 @@ function origin(v:unknown):EventDraftOrigin{
   day(o.date as string)
   if(typeof o.copy!=='boolean'||!Number.isInteger(o.defaultReminderMinutes)||![-1,0,5,10,15,30,60,120,1440,10080].includes(o.defaultReminderMinutes as number))
     throw new Error('Invalid draft origin')
+  if(o.deviceTimeZone!==undefined)validTimeZone(o.deviceTimeZone as string)
   if(o.event!==undefined){validateRecord(o.event);if((o.event as CalendarRecord).source!=='personal')throw new Error('Imported event cannot be edited')}
   if(o.baseRecord!==undefined){validateRecord(o.baseRecord);if((o.baseRecord as CalendarRecord).source!=='personal')throw new Error('Invalid draft owner')}
   if(o.initialRange!==undefined){const r=object(o.initialRange);if(typeof r.start!=='string'||typeof r.end!=='string'||!Number.isFinite(Date.parse(r.start))||!Number.isFinite(Date.parse(r.end)))throw new Error('Invalid initial range')}
@@ -111,6 +115,8 @@ export function clearEventDraft(id:string,expectedRevision:string|null):void{
 export function assertDraftCanResume(draft:SavedEventDraft,state:CalendarState):void{
   validateState(state)
   const o=validateEventDraft(draft).origin
+  if(!draft.fields.timeZone&&o.deviceTimeZone&&deviceTimeZone()!==o.deviceTimeZone)
+    throw new Error('This draft used another device time zone. Export it before changing times.')
   if(o.baseRecord){
     const current=state.records.find(r=>r.id===o.baseRecord!.id)
     if(!current||JSON.stringify(current)!==JSON.stringify(o.baseRecord))
@@ -119,7 +125,7 @@ export function assertDraftCanResume(draft:SavedEventDraft,state:CalendarState):
       if(!current.repeat)throw new Error('Original series is no longer repeating')
       const link=o.instance??o.future!
       if(link.parentId!==current.id)throw new Error('Recurring parent no longer matches')
-      if(o.instance&&!occurrencesBetween([current],link.date,link.date).some(item=>item.date===link.date))
+      if(o.instance&&!seriesOccurrenceOn(current,link.date))
         throw new Error('Original recurring occurrence no longer exists')
       if(o.future)splitSeriesAt(state,link.parentId,link.date,o.future.newId)
     }

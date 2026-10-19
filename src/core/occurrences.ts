@@ -1,7 +1,8 @@
 import type { CalendarRecord,CalendarOccurrence,LocalDate,RepeatRule } from '../types'
 import {addDays,day,daysBetween,dateSeries,localDate} from './dates'
+import {zoneDate,zoneWall,zoneInstantOptions} from './time-zone'
 function anchorOf(record:CalendarRecord):LocalDate {
-  return record.allDay ? record.startDate! : localDate(new Date(record.start))
+  return record.allDay ? record.startDate! : record.timeZone?zoneDate(record.start,record.timeZone):localDate(new Date(record.start))
 }
 function matches(date:LocalDate,anchor:LocalDate,rule:RepeatRule):boolean {
   if (date<anchor || (rule.until && date>rule.until)) return false
@@ -25,7 +26,9 @@ function instantiate(record:CalendarRecord,date:LocalDate):CalendarOccurrence|nu
   const length=record.allDay ? daysBetween(record.startDate!,record.endDateExclusive!) :
     Math.ceil((Date.parse(record.end)-Date.parse(record.start))/86400000)
   const endDateExclusive=addDays(date,Math.max(1,length))
-  const start=record.allDay ? new Date(date+'T00:00:00').toISOString() : date===anchorOf(record)?record.start:dateTimeOn(date,record.start)
+  const start=record.allDay ? new Date(date+'T00:00:00').toISOString() : date===anchorOf(record)?record.start:
+    record.timeZone?zoneInstantOptions(date+'T'+zoneWall(record.start,record.timeZone).slice(11),record.timeZone)[0]??null:
+    dateTimeOn(date,record.start)
   if(!start) return null
   const end=record.allDay ? new Date(endDateExclusive+'T00:00:00').toISOString() :
     new Date(Date.parse(start)+(Date.parse(record.end)-Date.parse(record.start))).toISOString()
@@ -39,8 +42,9 @@ export function occurrencesBetween(records:CalendarRecord[],from:LocalDate,to:Lo
     const anchor=anchorOf(record)
     const durationDays=record.allDay ? Math.max(1,daysBetween(record.startDate!,record.endDateExclusive!)) :
       Math.max(1,Math.ceil((Date.parse(record.end)-Date.parse(record.start))/86400000))
-    const scanFrom=addDays(from,-Math.min(durationDays-1,31))
-    const occurrenceDates=record.repeat ? dateSeries(scanFrom,to,440).filter(d=>matches(d,anchor,record.repeat!)) : [anchor]
+    const scanFrom=addDays(from,-Math.min(durationDays-1,31)-(record.timeZone?2:0))
+    const scanTo=record.timeZone?addDays(to,2):to
+    const occurrenceDates=record.repeat ? dateSeries(scanFrom,scanTo,450).filter(d=>matches(d,anchor,record.repeat!)) : [anchor]
     for(const date of occurrenceDates) {
       if(record.excludedDates?.includes(date)) continue
       const occurrence=instantiate(record,date)
@@ -52,6 +56,13 @@ export function occurrencesBetween(records:CalendarRecord[],from:LocalDate,to:Lo
     }
   }
   return found.sort((a,b)=>Number(b.allDay)-Number(a.allDay)||a.start.localeCompare(b.start)||a.title.localeCompare(b.title))
+}
+/** Original source-local recurrence date, regardless of the viewer's device. */
+export function seriesOccurrenceOn(record:CalendarRecord,date:LocalDate):CalendarOccurrence|null{
+  day(date)
+  if(record.excludedDates?.includes(date))return null
+  if(!record.repeat||!matches(date,anchorOf(record),record.repeat))return null
+  return instantiate(record,date)
 }
 export function dayOccurrences(records:CalendarRecord[],date:LocalDate):CalendarOccurrence[] {
   return occurrencesBetween(records,date,date)

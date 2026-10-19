@@ -748,3 +748,13 @@
   .draft-recovery-actions{display:grid;grid-template-columns:1fr}
   .draft-recovery-actions button{min-height:46px}
 }
+
+
+.editor-zone-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:8px 0 13px}
+.editor-zone-controls label{min-width:0;font-weight:600;display:grid;gap:5px}
+.editor-zone-controls select{width:100%;min-width:0;min-height:44px;font-size:14px}
+.details-event-zone{font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+@media(max-width:740px){
+  .editor-zone-controls{grid-template-columns:minmax(0,1fr)}
+  .editor-zone-controls select{font-size:16px;min-height:46px}
+}

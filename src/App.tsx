@@ -36,6 +36,7 @@ import {MonthDayPeek} from './components/MonthDayPeek'
 import {NowNext} from './components/NowNext'
 import {SourcePicker} from './components/SourcePicker'
 import {applySourcePicker,type SourcePickerAction} from './core/source-picker'
+import {deviceTimeZone,zoneWall} from './core/time-zone'
 
 type Filter='all'|'personal'|'ics'
 function download(name:string,contents:string,type:string){
@@ -855,7 +856,8 @@ export default function App(){
           editFuture?calendar.records.find(r=>r.id===editFuture.parentId):editing?calendar.records.find(r=>r.id===editing.id):undefined,
         initialRange:newEventRange??undefined,initialAllDay:newAllDay??undefined,
         instance:editInstance??undefined,future:editFuture??undefined,
-        defaultReminderMinutes:restoredDraft?.origin.defaultReminderMinutes??reminderSettings.defaultLead}}
+        defaultReminderMinutes:restoredDraft?.origin.defaultReminderMinutes??reminderSettings.defaultLead,
+        deviceTimeZone:restoredDraft?.origin.deviceTimeZone??deviceTimeZone()}}
       ignoreOccurrence={editInstance?{id:editInstance.parentId,date:editInstance.date}:undefined}
       ignoreParentFrom={editFuture?{id:editFuture.parentId,date:editFuture.date}:undefined}
       scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setRestoredDraft(null)}}/>}
@@ -1008,6 +1010,7 @@ export default function App(){
           </button>
         </nav>
         <h2>{active.title}</h2><p className="details-dates">{active.allDay?'All day · '+friendlyRange(active.startDate,addDays(active.endDateExclusive,-1)):new Date(active.start).toLocaleString()+' – '+new Date(active.end).toLocaleString()}</p>
+        {activeRecord?.timeZone&&!active.allDay&&<p className="details-event-zone"><strong>Event time zone:</strong> {activeRecord.timeZone} · {zoneWall(active.start,activeRecord.timeZone)}–{zoneWall(active.end,activeRecord.timeZone).slice(11)} (device: {deviceTimeZone()})</p>}
         <button type="button" className="details-show-day secondary compact"
           onClick={()=>{setMode('day');setSelected(active.date);setActive(null)}}>
           <CalendarDays size={15}/> Show this day

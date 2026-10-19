@@ -1,13 +1,14 @@
 import type { CalendarOccurrence, CalendarRecord, CalendarState, LocalDate } from '../types'
 import { addDays, day, daysBetween, fromLocalDateTime, localDateTime } from './dates'
-import { occurrencesBetween } from './occurrences'
+import { seriesOccurrenceOn } from './occurrences'
+import {zoneWall,resolveZoneInstant} from './time-zone'
 
 /** A replacement is a normal personal event with a durable pointer to its skipped series date. */
 export function replaceOccurrence(state:CalendarState,parentId:string,date:LocalDate,replacement:CalendarRecord):CalendarState {
   day(date)
   const parent=state.records.find(r=>r.id===parentId)
   if(!parent||parent.source!=='personal'||!parent.repeat)throw new Error('Recurring series no longer exists')
-  if(!occurrencesBetween([parent],date,date).some(o=>o.date===date))throw new Error('This series has no editable occurrence on that date')
+  if(!seriesOccurrenceOn(parent,date))throw new Error('This series has no editable occurrence on that date')
   if(replacement.source!=='personal'||replacement.repeat||replacement.id===parentId||state.records.some(r=>r.id===replacement.id))throw new Error('Invalid occurrence replacement')
   const nextParent:CalendarRecord={...parent,excludedDates:[...new Set([...(parent.excludedDates??[]),date])].sort(),updatedAt:new Date().toISOString()}
   const detached:CalendarRecord={...replacement,recurrenceParentId:parentId,recurrenceDate:date,updatedAt:new Date().toISOString()}
@@ -22,7 +23,7 @@ export function restoreOccurrence(state:CalendarState,replacementId:string):Cale
   if(!parent?.repeat)throw new Error('The original recurring series no longer exists')
   const dates=parent.excludedDates?.filter(d=>d!==override.recurrenceDate)??[]
   const restored:CalendarRecord={...parent,excludedDates:dates,updatedAt:new Date().toISOString()}
-  if(!occurrencesBetween([restored],override.recurrenceDate,override.recurrenceDate).some(o=>o.date===override.recurrenceDate))throw new Error('Original series no longer includes that date')
+  if(!seriesOccurrenceOn(restored,override.recurrenceDate))throw new Error('Original series no longer includes that date')
   return {schemaVersion:1,records:state.records.filter(r=>r.id!==replacementId).map(r=>r.id===parent.id?restored:r)}
 }
 
@@ -32,6 +33,7 @@ export function shiftOccurrence(record:CalendarRecord,instance:CalendarOccurrenc
   const timestamp=new Date().toISOString()
   const days=daysBetween(instance.startDate,instance.endDateExclusive)
   const start=instance.allDay?new Date(target+'T00:00:00').toISOString():
+    record.timeZone?resolveZoneInstant(target+'T'+zoneWall(instance.start,record.timeZone).slice(11),record.timeZone):
     fromLocalDateTime(target+'T'+localDateTime(instance.start).slice(11))
   const end=instance.allDay?new Date(addDays(target,Math.max(1,days))+'T00:00:00').toISOString():
     new Date(Date.parse(start)+Date.parse(instance.end)-Date.parse(instance.start)).toISOString()
@@ -50,8 +52,7 @@ export function saveWholeEvent(state:CalendarState,record:CalendarRecord):Calend
     for(const child of detached){
       const date=child.recurrenceDate!
       if(!record.excludedDates?.includes(date)||
-         !occurrencesBetween([{...record,excludedDates:record.excludedDates.filter(d=>d!==date)}],date,date)
-           .some(instance=>instance.date===date))
+         !seriesOccurrenceOn({...record,excludedDates:record.excludedDates.filter(d=>d!==date)},date))
         throw new Error('This recurrence change excludes a previously edited occurrence on '+date+
           '. Restore its original or remove the edited occurrence first.')
     }
@@ -74,7 +75,7 @@ export function splitSeriesAt(state:CalendarState,parentId:string,date:LocalDate
   if(!newId||state.records.some(r=>r.id===newId))throw new Error('The future series must have a new ID')
   if(state.records.some(r=>r.recurrenceParentId===parentId&&r.recurrenceDate!>=date))
     throw new Error('Restore or remove edited future occurrences before splitting the series')
-  const instance=occurrencesBetween([parent],date,date).find(x=>x.date===date)
+  const instance=seriesOccurrenceOn(parent,date)
   if(!instance)throw new Error('That date is not an active occurrence in the series')
   const before=addDays(date,-1)
   const oldParent:CalendarRecord={...parent,repeat:{...parent.repeat,until:before},
@@ -91,7 +92,7 @@ export function endSeriesAt(state:CalendarState,parentId:string,date:LocalDate):
   day(date)
   const parent=state.records.find(r=>r.id===parentId)
   if(!parent?.repeat||parent.source!=='personal')throw new Error('Only a personal series can be ended')
-  if(!occurrencesBetween([parent],date,date).some(x=>x.date===date))throw new Error('Not an active series occurrence')
+  if(!seriesOccurrenceOn(parent,date))throw new Error('Not an active series occurrence')
   const cutoff:CalendarRecord={...parent,repeat:{...parent.repeat,until:date},
     excludedDates:parent.excludedDates?.filter(d=>d<=date),updatedAt:new Date().toISOString()}
   return {schemaVersion:1,records:state.records.map(r=>{

@@ -3612,6 +3612,100 @@ async function exerciseC34DesktopRecurringResumeAndStaleBlock(){
   await context.close()
 }
 
+
+async function exerciseC35MobileIanaClockReloadAndTravel(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.locator('.top-create').click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.getByLabel('Event name').fill('C35 original Seoul appointment')
+  await editor.getByLabel('Notes').fill('Original source travel calendar')
+  await editor.getByLabel('Time zone change behavior').selectOption('wall')
+  await editor.getByLabel('Event time zone').selectOption('Asia/Seoul')
+  assert.equal(await editor.locator('input[type="datetime-local"]').first().inputValue(),'2026-11-26T09:00')
+  await page.waitForFunction(()=>JSON.parse(localStorage.getItem('thiepn.calendar.event-draft.v1')||'null')?.fields?.timeZone==='Asia/Seoul')
+  await page.reload({waitUntil:'networkidle'})
+  const prompt=page.getByRole('dialog',{name:'Recover unfinished event'})
+  await prompt.getByRole('button',{name:'Review recovered draft'}).click()
+  const recovered=page.getByRole('dialog',{name:'New event'})
+  assert.equal(await recovered.getByLabel('Event time zone').inputValue(),'Asia/Seoul')
+  assert.equal(await recovered.getByLabel('Notes').inputValue(),'Original source travel calendar')
+  await recovered.getByRole('button',{name:'Create event'}).click()
+  await recovered.waitFor({state:'hidden'})
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(saved.records.length,1)
+  assert.equal(saved.records[0].timeZone,'Asia/Seoul')
+  assert.equal(saved.records[0].start,'2026-11-26T00:00:00.000Z')
+  assert.equal(saved.records[0].end,'2026-11-26T01:00:00.000Z')
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.event-draft.v1')),null)
+  const prior=JSON.stringify(saved)
+  const stored=await context.storageState()
+  const traveler=await browser.newContext({storageState:stored,viewport:{width:390,height:844},
+    isMobile:true,hasTouch:true,timezoneId:'America/Los_Angeles',locale:'en-GB'})
+  const traveled=await traveler.newPage()
+  traveled.on('pageerror',error=>errors.push(error.message))
+  await traveled.goto(url,{waitUntil:'networkidle'})
+  assert.equal(await traveled.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),prior,
+    'Device timezone change must not rebase canonical saved UTC instants')
+  await traveled.getByLabel('Jump to date').fill('2026-11-25')
+  await traveled.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await traveled.locator('.timeline-block').filter({hasText:'C35 original Seoul appointment'}).first().click()
+  const details=traveled.getByRole('dialog',{name:'Event details'})
+  assert.match(await details.innerText(),/Asia\/Seoul/)
+  assert.match(await details.innerText(),/2026-11-26T09:00/)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C35_MOBILE_IANA_DRAFT_RECOVERY_CROSS_ZONE_STABLE_UTC_PASS')
+  await traveler.close();await context.close()
+}
+async function exerciseC35DesktopRecurrenceOriginalZoneAndKeepInstant(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const fixture={schemaVersion:1,records:[
+    {id:'c35-original-series',source:'personal',title:'C35 Berlin morning series',
+      description:'Authored in Berlin',location:'',allDay:false,timeZone:'Europe/Berlin',
+      start:'2026-03-28T08:00:00.000Z',end:'2026-03-28T09:00:00.000Z',
+      repeat:{frequency:'daily',interval:1},updatedAt:'2026-10-18T09:00:00.000Z'},
+    {id:'c35-ics',source:'ics',sourceCalendar:'University',sourceKey:'unchanged-original-UID',
+      title:'C35 read-only ICS',description:'',location:'',allDay:false,
+      start:'2026-03-30T09:00:00.000Z',end:'2026-03-30T10:00:00.000Z',
+      updatedAt:'2026-10-18T09:00:00.000Z'}
+  ]}
+  await page.evaluate(data=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(data)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-03-30')
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.locator('.timeline-block').filter({hasText:'C35 Berlin morning series'}).first().click()
+  await page.getByRole('dialog',{name:'Event details'}).getByRole('button',{name:'Edit this occurrence'}).click()
+  const editor=page.getByRole('dialog',{name:'Edit one occurrence'})
+  assert.equal(await editor.getByLabel('Event time zone').inputValue(),'Europe/Berlin')
+  assert.equal(await editor.locator('input[type="datetime-local"]').first().inputValue(),'2026-03-30T09:00')
+  await editor.getByLabel('Time zone change behavior').selectOption('instant')
+  await editor.getByLabel('Event time zone').selectOption('Asia/Seoul')
+  assert.equal(await editor.locator('input[type="datetime-local"]').first().inputValue(),'2026-03-30T16:00')
+  assert.equal(await editor.locator('input[type="datetime-local"]').nth(1).inputValue(),'2026-03-30T17:00')
+  await editor.getByRole('button',{name:'Save this occurrence'}).click()
+  await editor.waitFor({state:'hidden'})
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  const master=saved.records.find(x=>x.id==='c35-original-series')
+  const detached=saved.records.find(x=>x.recurrenceParentId==='c35-original-series')
+  assert.equal(master.timeZone,'Europe/Berlin')
+  assert.deepEqual(master.excludedDates,['2026-03-30'])
+  assert.equal(detached.recurrenceDate,'2026-03-30')
+  assert.equal(detached.timeZone,'Asia/Seoul')
+  assert.equal(detached.start,'2026-03-30T07:00:00.000Z')
+  assert.deepEqual(saved.records.find(x=>x.id==='c35-ics'),fixture.records[1])
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C35_DESKTOP_IANA_RECURRENCE_KEEP_INSTANT_ORIGINAL_IDS_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -3685,6 +3779,8 @@ try{
   await exerciseC33DesktopSourceExactNamesFilteringAndPreferenceContinuity()
   await exerciseC34MobilePersistedDraftReviewAndCommit()
   await exerciseC34DesktopRecurringResumeAndStaleBlock()
+  await exerciseC35MobileIanaClockReloadAndTravel()
+  await exerciseC35DesktopRecurrenceOriginalZoneAndKeepInstant()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true

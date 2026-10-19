@@ -15,6 +15,7 @@ export interface EventEditorFields {
   interval:number
   until:string
   weekdays:number[]
+  timeZone?:string
 }
 /** Review horizon and acknowledgement choices are not saved event fields. */
 export function changedEditorFields(initial:EventEditorFields,current:EventEditorFields):string[]{
@@ -26,6 +27,7 @@ export function changedEditorFields(initial:EventEditorFields,current:EventEdito
      initial.until!==current.until||
      [...initial.weekdays].sort((a,b)=>a-b).join(',')!==[...current.weekdays].sort((a,b)=>a-b).join(','))
     changed.push('Repeat settings')
+  if(initial.timeZone!==current.timeZone)changed.push('Time zone')
   if(initial.reminder!==current.reminder)changed.push('Reminder')
   if(initial.location!==current.location)changed.push('Location')
   if(initial.description!==current.description)changed.push('Notes')

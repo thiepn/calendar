@@ -1,6 +1,7 @@
 import type {CalendarOccurrence,CalendarRecord,LocalDate} from '../types'
 import {addDays,resolveLocalInstant,fromUnambiguousLocalDateTime,localDate,localDateTime} from './dates'
 import {occurrencesBetween} from './occurrences'
+import {zoneDate,zoneWall,zoneInstantOptions,resolveZoneInstant} from './time-zone'
 
 export interface DraftHit { candidate:CalendarOccurrence; existing:CalendarOccurrence }
 export interface DraftReview {
@@ -12,9 +13,9 @@ export interface DraftReview {
   repeating:boolean
 }
 /** Both ends of edited wall-clock ranges must resolve to exactly one instant. */
-export function draftTimedRange(start:string,end:string,startFold?:'earlier'|'later',endFold?:'earlier'|'later'):{start:string;end:string}{
-  const first=resolveLocalInstant(start,startFold)
-  const last=resolveLocalInstant(end,endFold)
+export function draftTimedRange(start:string,end:string,startFold?:'earlier'|'later',endFold?:'earlier'|'later',timeZone?:string):{start:string;end:string}{
+  const first=timeZone?resolveZoneInstant(start,timeZone,startFold):resolveLocalInstant(start,startFold)
+  const last=timeZone?resolveZoneInstant(end,timeZone,endFold):resolveLocalInstant(end,endFold)
   if(Date.parse(last)<=Date.parse(first))throw new Error('End must follow start')
   return {start:first,end:last}
 }
@@ -27,11 +28,14 @@ export function reviewDraft(records:CalendarRecord[],candidate:CalendarRecord,op
 }={}):DraftReview {
   const horizon=options.horizonDays??90
   if(!Number.isInteger(horizon)||horizon<1||horizon>366)throw new Error('Invalid conflict review window')
-  const startDate=candidate.allDay?candidate.startDate!:localDate(new Date(candidate.start))
+  const startDate=candidate.allDay?candidate.startDate!:candidate.timeZone?zoneDate(candidate.start,candidate.timeZone):localDate(new Date(candidate.start))
   const until=addDays(startDate,horizon-1)
   // A year is deliberately capped to avoid unbounded iteration. This is a preview,
   // not evidence that events beyond checkedThrough are conflict-free.
-  const candidates=occurrencesBetween([candidate],startDate,until)
+  // The source timezone's first occurrence may be on the previous viewer day.
+  // Keep review anchored to source-date identities, then compare true UTC instants.
+  const candidates=occurrencesBetween([candidate],addDays(startDate,-2),addDays(until,2))
+    .filter(item=>item.date>=startDate&&item.date<=until)
   const earliest=addDays(startDate,-31)
   const existing=occurrencesBetween(records,earliest,addDays(until,31)).filter(x=>{
     if(x.transparent)return false
@@ -56,13 +60,16 @@ export function reviewDraft(records:CalendarRecord[],candidate:CalendarRecord,op
   if(candidate.repeat&&!candidate.allDay){
     // Generate the recurrence anchors from an all-day equivalent; timed expansion
     // silently drops nonexistent spring occurrences, which this check must detect.
-    const wall=localDateTime(candidate.start).slice(11)
-    const probe:CalendarRecord={...candidate,allDay:true,
+    const wall=(candidate.timeZone?zoneWall(candidate.start,candidate.timeZone):localDateTime(candidate.start)).slice(11)
+    const probe:CalendarRecord={...candidate,timeZone:undefined,allDay:true,
       start:new Date(startDate+'T00:00:00').toISOString(),
       end:new Date(addDays(startDate,1)+'T00:00:00').toISOString(),
       startDate,endDateExclusive:addDays(startDate,1)}
     for(const instance of occurrencesBetween([probe],startDate,addDays(startDate,365))){
-      try{fromUnambiguousLocalDateTime(instance.date+'T'+wall)}
+      try{
+        if(candidate.timeZone){if(zoneInstantOptions(instance.date+'T'+wall,candidate.timeZone).length!==1)throw new Error('Ambiguous or missing source clock')}
+        else fromUnambiguousLocalDateTime(instance.date+'T'+wall)
+      }
       catch {
         affectedClockCount++
         if(missingOrAmbiguousDates.length<10)missingOrAmbiguousDates.push(instance.date)

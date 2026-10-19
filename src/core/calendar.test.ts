@@ -26,6 +26,8 @@ import {searchOccurrencePage} from './search-pages'
 import {detailNeighbors} from './detail-navigation'
 import {mobileTimedChange,mobileAllDayShift} from './mobile-editor'
 import {changedEditorFields,type EventEditorFields} from './editor-changes'
+import {deviceTimeZone,validTimeZone,zoneWall,zoneDate,zoneInstantOptions,resolveZoneInstant,zoneOffsetLabel} from './time-zone'
+import {seriesOccurrenceOn} from './occurrences'
 import {EVENT_DRAFT_KEY,validateEventDraft,readEventDraft,writeEventDraft,clearEventDraft,assertDraftCanResume,type EventDraftOrigin} from './event-draft'
 import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './source-visibility'
 import {applySourcePicker,sourcePickerPage,type NamedSource} from './source-picker'
@@ -2844,5 +2846,109 @@ describe('C34 original editor draft recovery',()=>{
       expect(()=>assertDraftCanResume({...saved,origin:{...o,instance:{...o.instance!,parentId:'different'}}},originalCalendar)).toThrow('parent')
       expect(()=>assertDraftCanResume(saved,{schemaVersion:1,records:[{...parent,repeat:undefined}]})).toThrow()
     })
+  })
+})
+
+
+describe('C35 IANA source-clock scheduling without calendar authority drift',()=>{
+  it('resolves Berlin DST missing and doubled hours and preserves distinct UTC folds',()=>{
+    expect(validTimeZone('Europe/Berlin')).toBe('Europe/Berlin')
+    expect(()=>validTimeZone('Unknown/Synthetic')).toThrow('Unsupported')
+    expect(zoneInstantOptions('2026-03-29T02:30','Europe/Berlin')).toEqual([])
+    const folds=zoneInstantOptions('2026-10-25T02:30','Europe/Berlin')
+    expect(folds).toEqual(['2026-10-25T00:30:00.000Z','2026-10-25T01:30:00.000Z'])
+    expect(()=>resolveZoneInstant('2026-10-25T02:30','Europe/Berlin')).toThrow('twice')
+    expect(resolveZoneInstant('2026-10-25T02:30','Europe/Berlin','later')).toBe(folds[1])
+    expect(zoneOffsetLabel(folds[0],'Europe/Berlin')).toBe('UTC+02:00')
+    expect(zoneOffsetLabel(folds[1],'Europe/Berlin')).toBe('UTC+01:00')
+  })
+  it('saves the same absolute instant under different named clocks and applies deliberate wall-time shifts',()=>{
+    const berlin='2026-10-19T09:00',seoul='2026-10-19T16:00'
+    const original=resolveZoneInstant(berlin,'Europe/Berlin')
+    expect(original).toBe('2026-10-19T07:00:00.000Z')
+    expect(zoneWall(original,'Asia/Seoul')).toBe(seoul)
+    expect(resolveZoneInstant(seoul,'Asia/Seoul')).toBe(original)
+    expect(resolveZoneInstant(berlin,'Asia/Seoul')).toBe('2026-10-19T00:00:00.000Z')
+    expect(deviceTimeZone().length).toBeGreaterThan(0)
+  })
+  it('expands source-zone recurrence through DST at identical Berlin clock time',()=>{
+    const timed=record({id:'c35-daily',timeZone:'Europe/Berlin',
+      start:'2026-03-28T08:00:00.000Z',end:'2026-03-28T09:00:00.000Z',
+      repeat:{frequency:'daily',interval:1}})
+    const dates=occurrencesBetween([timed],'2026-03-28','2026-03-30')
+    expect(dates.map(x=>x.date)).toEqual(['2026-03-28','2026-03-29','2026-03-30'])
+    expect(dates.map(x=>x.start)).toEqual([
+      '2026-03-28T08:00:00.000Z','2026-03-29T07:00:00.000Z','2026-03-30T07:00:00.000Z'])
+    expect(dates.map(x=>zoneWall(x.start,'Europe/Berlin'))).toEqual([
+      '2026-03-28T09:00','2026-03-29T09:00','2026-03-30T09:00'])
+    expect(dates.map(x=>x.key)).toEqual(['c35-daily@2026-03-28','c35-daily@2026-03-29','c35-daily@2026-03-30'])
+  })
+  it('preserves source-zone local recurrence ID across the international date line',()=>{
+    const original=record({id:'c35-date-line',timeZone:'Pacific/Auckland',
+      start:'2026-10-18T11:30:00.000Z',end:'2026-10-18T12:30:00.000Z',
+      repeat:{frequency:'daily',interval:1}})
+    expect(zoneDate(original.start,'Pacific/Auckland')).toBe('2026-10-19')
+    expect(seriesOccurrenceOn(original,'2026-10-19')?.key).toBe('c35-date-line@2026-10-19')
+    const source=occurrencesBetween([original],'2026-10-18','2026-10-18')
+    // Node tests may run in another viewer TZ; source identity remains unchanged.
+    expect(source.filter(x=>x.key==='c35-date-line@2026-10-19').every(x=>x.date==='2026-10-19')).toBe(true)
+  })
+  it('retains original source identity for detached replacement and future series splitting',()=>{
+    const parent=record({id:'c35-parent',timeZone:'Asia/Seoul',start:'2026-10-18T15:30:00.000Z',
+      end:'2026-10-18T16:30:00.000Z',repeat:{frequency:'daily',interval:1}})
+    const instance=seriesOccurrenceOn(parent,'2026-10-20')!
+    expect(instance.start).toBe('2026-10-19T15:30:00.000Z')
+    const orig:CalendarState={schemaVersion:1,records:[parent]}
+    const changed=replaceOccurrence(orig,parent.id,'2026-10-20',
+      record({id:'c35-detached',timeZone:'Asia/Seoul',start:instance.start,end:instance.end}))
+    expect(changed.records.find(x=>x.id===parent.id)?.excludedDates).toEqual(['2026-10-20'])
+    expect(changed.records.find(x=>x.id==='c35-detached')?.recurrenceDate).toBe('2026-10-20')
+    const split=splitSeriesAt(orig,parent.id,'2026-10-20','c35-future')
+    expect(split.records.find(x=>x.id==='c35-future')?.start).toBe(instance.start)
+    expect(split.records.find(x=>x.id==='c35-future')?.timeZone).toBe('Asia/Seoul')
+    expect(validateState(changed).records).toHaveLength(2)
+  })
+  it('detects complete-source collisions even when candidate is on the previous viewer day',()=>{
+    const first=resolveZoneInstant('2026-10-20T00:30','Asia/Seoul')
+    const busy=record({id:'c35-hidden-import',source:'ics',sourceCalendar:'University',
+      sourceKey:'immutable-original',start:first,end:new Date(Date.parse(first)+3600000).toISOString()})
+    const candidate=record({id:'c35-proposed',timeZone:'Asia/Seoul',start:first,
+      end:new Date(Date.parse(first)+1800000).toISOString()})
+    const result=reviewDraft([busy],candidate)
+    expect(result.collisionCount).toBeGreaterThan(0)
+    expect(result.collisions[0].existing.recordId).toBe('c35-hidden-import')
+  })
+  it('keeps legacy and imported records valid and rejects imported or all-day zone ownership',()=>{
+    const legacy=record({id:'c35-legacy'})
+    const zoned=record({id:'c35-zone',timeZone:'America/New_York'})
+    expect(validateState({schemaVersion:1,records:[legacy,zoned]}).records).toHaveLength(2)
+    expect(()=>validateState({schemaVersion:1,records:[record({source:'ics',timeZone:'Asia/Seoul'})]})).toThrow('Only timed personal')
+    expect(()=>validateState({schemaVersion:1,records:[record({allDay:true,timeZone:'Asia/Seoul'})]})).toThrow('Only timed personal')
+  })
+  it('keeps source zone in native editor shortcut shifts and warns about invalid local days',()=>{
+    const s={start:'2026-03-28T09:00',end:'2026-03-28T10:00',startFold:'' as const,endFold:'' as const}
+    const later=mobileTimedChange(s,{kind:'day',days:1},'Europe/Berlin')
+    expect(later.start).toBe('2026-03-29T09:00')
+    expect(later.end).toBe('2026-03-29T10:00')
+    const moved=mobileTimedChange(later,{kind:'shift',minutes:30},'Europe/Berlin')
+    expect(moved.start).toBe('2026-03-29T09:30')
+    expect(()=>mobileTimedChange({...s,start:'2026-03-28T02:30',end:'2026-03-28T03:30'},
+      {kind:'day',days:1},'Europe/Berlin')).toThrow()
+  })
+  it('persists a zoned C34 recovery draft without changing the original source writer',()=>{
+    const current:EventEditorFields={title:'C35 zoned draft',description:'Korean notes',
+      location:'',reminder:-1,allDay:false,start:'2026-10-25T02:30',
+      end:'2026-10-25T03:30',startFold:'later',endFold:'',
+      frequency:'none',interval:1,until:'',weekdays:[],timeZone:'Europe/Berlin'}
+    const initial={...current,title:''}
+    expect(changedEditorFields(initial,current)).toContain('Name')
+    expect(changedEditorFields({...current,timeZone:'Asia/Seoul'},current)).toContain('Time zone')
+    const recovered=validateEventDraft({schemaVersion:1,id:'c35',revision:'one',savedAt:'2026-10-19T04:00:00Z',
+      origin:{date:'2026-10-25',copy:false,defaultReminderMinutes:-1,deviceTimeZone:'Asia/Seoul'},
+      initial,fields:current})
+    expect(recovered.fields.timeZone).toBe('Europe/Berlin')
+    expect(()=>assertDraftCanResume(recovered,{schemaVersion:1,records:[]})).not.toThrow()
+    expect(draftTimedRange(recovered.fields.start,recovered.fields.end,'later',undefined,recovered.fields.timeZone).start)
+      .toBe('2026-10-25T01:30:00.000Z')
   })
 })

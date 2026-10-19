@@ -559,3 +559,44 @@ Node and desktop/mobile Chromium acceptance cover interrupted mobile creation,
 explicit recovery, real detached occurrence recovery, read-only imported source
 preservation and stale original edit rejection. Physical devices, native process
 death, Safari/Firefox/WebKit and real external provider sync remain unqualified.
+
+
+## C35 — event-specific IANA time zones and travel-safe timed editing
+
+New timed personal events can explicitly preserve an IANA event time zone
+(e.g., Europe/Berlin, Asia/Seoul), while existing v1 records without that
+optional field retain their original device-local behavior. The existing
+event editor offers a native IANA zone selector and a deliberate policy:
+**Keep the same instant** transforms the displayed wall-clock fields while
+preserving their UTC instants, or **Keep local clock hours** retains the
+entered hour while resolving new physical UTC instants in the destination
+zone. Nonexistent hours are rejected, and repeated autumn hours still
+require choosing the first or second occurrence. Resolved UTC instants
+remain authoritative for collision review, reminders, ICS export and CAS
+saving. All-day date-based events do not acquire a false timezone authority.
+
+New explicitly zoned repeating events expand daily/weekly/monthly
+occurrences against the authored IANA wall clock instead of silently
+adopting a travel device's timezone. Recurrence IDs remain the immutable
+original source-local date, even where the event falls on a different
+viewer date across the international date line. Source-linked per-instance
+editing and future series splits use the original source recurrence dates,
+preserving canonical parent, exclusion and detached identity. DST gaps
+remain absent and recurring duplicated hours are warned on bounded review.
+The existing original-event preview still includes hidden busy ICS
+sources and excludes transparent imports from busy/overlap evidence.
+
+Mobile quick scheduling uses the same IANA wall-clock resolver for dated
+steps and preserves true instants for physical-minute shifts. A C34
+recovered draft retains its chosen timezone and is explicitly reviewed in
+the original editor; malformed or stale source revisions cannot be
+restored or auto-written. Earlier C34 drafts lacking source-zone metadata
+remain backward compatible but cannot be certified as travel-safe.
+No additional storage engine, schema version, remote provider authority,
+account, migration, or production writes were introduced.
+
+Release limitations: legacy unzoned recurring personal records remain
+device-local until deliberately edited/converted; all-day records remain
+floating dates; personal/ICS synchronized TZID round-trip, full RFC5545
+VTIMEZONE handling, multi-device clock normalization and physical-device
+Safari/WebKit/Firefox testing require separate work.

@@ -18,6 +18,8 @@ export interface CalendarRecord {
   startDate?: LocalDate
   endDateExclusive?: LocalDate
   source: Source
+  /** IANA timezone for authored timed personal events; omitted legacy records remain device-local. */
+  timeZone?:string
   /** ICS TRANSP:TRANSPARENT; absent means opaque. */
   transparent?: boolean
   sourceCalendar?: string
