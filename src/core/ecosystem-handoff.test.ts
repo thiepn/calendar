@@ -94,7 +94,7 @@ describe('C38 verified source-authentic read-only Hub handoff',()=>{
     expect(parsed.records[0].endDateExclusive).toBe('2026-10-21')
   })
   it('rejects invalid windows, no selected occurrences and excessive disclosure',()=>{
-    expect(()=>reviewHubHandoff(state,{...defaultOptions,from:'2026-11-05',through:'2026-11-08'})).toThrow('No source')
+    expect(()=>reviewHubHandoff({schemaVersion:1,records:[original,imported]},{...defaultOptions,from:'2026-11-05',through:'2026-11-08'})).toThrow('No source')
     expect(()=>reviewHubHandoff(state,{...defaultOptions,through:'2026-11-25'})).toThrow('31 days')
     expect(()=>reviewHubHandoff(state,{...defaultOptions,from:'2026-13-01'})).toThrow('calendar date')
     expect(()=>reviewHubHandoff(state,{...defaultOptions,privacy:'raw' as never})).toThrow('privacy')
