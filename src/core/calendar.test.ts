@@ -24,6 +24,7 @@ import {dayJumpPage} from './day-navigator'
 import {searchOccurrencePage} from './search-pages'
 import {detailNeighbors} from './detail-navigation'
 import {mobileTimedChange,mobileAllDayShift} from './mobile-editor'
+import {changedEditorFields,type EventEditorFields} from './editor-changes'
 import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './source-visibility'
 import {adjacentBusyDay,exportAgendaCsv} from './agenda'
 import {adjacentAgendaRange} from './agenda-navigation'
@@ -2536,5 +2537,48 @@ describe('C30 complete Agenda-day original occurrence paging',()=>{
     expect(items.map(x=>x.key)).toEqual(['c30-detached@2026-11-26','c30-overlap@2026-11-26'])
     expect(conflictsOnDay(items)).toEqual(new Set(['c30-detached@2026-11-26','c30-overlap@2026-11-26']))
     expect(JSON.stringify(originals)).toBe(originalJson)
+  })
+})
+
+describe('C31 original editor unsaved changes review without shadow storage',()=>{
+  const base:EventEditorFields={title:'Study',description:'Notes',location:'Campus',reminder:15,
+    allDay:false,start:'2026-10-25T02:00',end:'2026-10-25T03:00',
+    startFold:'earlier',endFold:'',frequency:'weekly',interval:1,until:'2026-12-31',
+    weekdays:[1,3]}
+  it('keeps unchanged drafts clean, including equivalent weekday order',()=>{
+    expect(changedEditorFields(base,{...base,weekdays:[3,1]})).toEqual([])
+    expect(changedEditorFields(base,{...base})).toEqual([])
+  })
+  it('reports meaningful fields and does not mistake a draft review toggle for a source edit',()=>{
+    const changed={...base,title:'Study twice',start:'2026-10-25T02:30',
+      endFold:'later' as const,reminder:60,description:'More notes',location:'Room',
+      interval:2,weekdays:[0,1,3]}
+    expect(changedEditorFields(base,changed)).toEqual([
+      'Name','Date or time','Repeat settings','Reminder','Location','Notes'])
+    expect(base.title).toBe('Study')
+  })
+  it('preserves physically distinct autumn fold selections in editor comparison',()=>{
+    const later={...base,startFold:'later' as const}
+    expect(changedEditorFields(base,later)).toEqual(['Date or time'])
+    const original=record({id:'c31-dst-original',start:'2026-10-25T00:00:00.000Z',
+      end:'2026-10-25T00:30:00.000Z'})
+    expect(original.start).toBe('2026-10-25T00:00:00.000Z')
+  })
+  it('preserves original recurring detached and imported metadata on review',()=>{
+    const detached=record({id:'c31-detached',recurrenceParentId:'c31-parent',
+      recurrenceDate:'2026-11-26',start:fromLocalDateTime('2026-11-26T10:00'),
+      end:fromLocalDateTime('2026-11-26T11:00')})
+    const imported=record({id:'c31-free',source:'ics',sourceCalendar:'Campus',
+      sourceKey:'unchanged-c31-uid',transparent:true})
+    const records=[detached,imported],original=JSON.stringify(records)
+    expect(changedEditorFields(base,{...base,description:'One more note'})).toEqual(['Notes'])
+    expect(JSON.stringify(records)).toBe(original)
+    expect(imported.transparent).toBe(true)
+    expect(detached.recurrenceDate).toBe('2026-11-26')
+  })
+  it('ignores numeric object identity and detects reset back to opened field values',()=>{
+    const draft={...base,title:'Change and reset',weekdays:[3,5]}
+    expect(changedEditorFields(base,draft)).toEqual(['Name','Repeat settings'])
+    expect(changedEditorFields(base,{...draft,title:'Study',weekdays:[3,1]})).toEqual([])
   })
 })
