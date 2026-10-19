@@ -3274,6 +3274,120 @@ async function exerciseC31DesktopDetachedOriginalEditAndImportedSourceIntact(){
   await context.close()
 }
 
+
+async function exerciseC32MobileLiveOriginalEventsAndHiddenBusySource(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const {fixture,today}=await page.evaluate(()=>{
+    const now=new Date(),ms=now.getTime(),mk=offset=>new Date(ms+offset*60000).toISOString()
+    const day=offset=>{const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()+offset);
+      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+    const midnight=offset=>new Date(now.getFullYear(),now.getMonth(),now.getDate()+offset).toISOString()
+    const updatedAt=new Date(ms-200000).toISOString()
+    return {today:day(0),fixture:{schemaVersion:1,records:[
+      {id:'c32-current-original',source:'personal',title:'C32 Current appointment',description:'Keep canonical',
+        location:'',allDay:false,start:mk(-10),end:mk(180),updatedAt},
+      {id:'c32-next-original',source:'personal',title:'C32 Next upcoming personal',description:'',
+        location:'',allDay:false,start:mk(100),end:mk(160),updatedAt},
+      {id:'c32-visible-free',source:'ics',sourceCalendar:'C32 Campus',sourceKey:'C32 Campus|free-uid',
+        title:'C32 Free imported',description:'Original TRANSP',location:'',allDay:false,transparent:true,
+        start:mk(70),end:mk(90),updatedAt},
+      {id:'c32-hidden-opaque',source:'ics',sourceCalendar:'C32 Hidden Clinic',
+        sourceKey:'C32 Hidden Clinic|busy-uid',title:'C32 Busy hidden original',description:'',
+        location:'',allDay:false,start:mk(40),end:mk(110),updatedAt},
+      {id:'c32-all-day',source:'ics',sourceCalendar:'C32 Campus',sourceKey:'C32 Campus|all-day',
+        title:'C32 Today all-day information',description:'Read-only source',location:'',allDay:true,
+        startDate:day(-1),endDateExclusive:day(2),start:midnight(-1),end:midnight(2),updatedAt}
+    ]}}
+  })
+  await page.evaluate(x=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(x)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  const panel=page.getByRole('region',{name:'Now and next visible calendar events'})
+  await panel.waitFor()
+  assert.match(await panel.innerText(),/Happening now/)
+  assert.match(await panel.innerText(),/C32 Current appointment/)
+  assert.match(await panel.innerText(),/C32 Next upcoming personal/)
+  assert.match(await panel.innerText(),/C32 Today all-day information/)
+  assert.match(await panel.innerText(),/C32 Busy hidden original/)
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  const hide=page.getByRole('button',{name:'Toggle imported calendar C32 Hidden Clinic'})
+  await hide.click()
+  assert.equal(await hide.getAttribute('aria-pressed'),'false')
+  await page.getByRole('button',{name:'Close navigation'}).click({position:{x:350,y:340}})
+  assert.equal(await panel.getByText('C32 Busy hidden original').count(),0)
+  assert.match(await panel.innerText(),/C32 Free imported/)
+  const free=panel.getByRole('button',{name:'Open details c32-visible-free@'+today})
+  await free.click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.innerText(),/TRANSP:TRANSPARENT/)
+  assert.equal(await details.getByRole('button',{name:'Edit event'}).count(),0)
+  await details.getByRole('button',{name:'Close event'}).click()
+  await panel.getByRole('button',{name:'Open day for c32-current-original@'+today}).click()
+  assert.equal(await page.locator('.view-switch button.active').innerText(),'Day')
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),today)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  const dimensions=await page.evaluate(()=>({w:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(dimensions.scroll<=dimensions.w+2,'C32 mobile body overflow '+JSON.stringify(dimensions))
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C32_MOBILE_LIVE_CURRENT_UPCOMING_ALLDAY_TRANSP_HIDDEN_BUSY_NO_WRITES_PASS')
+  await context.close()
+}
+async function exerciseC32DesktopDetachedRecurrenceAndSearchScopedNowNext(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const {fixture,detachedDate}=await page.evaluate(()=>{
+    const now=new Date(),minutes=now.getTime(),tomorrow=new Date(minutes+75*60000)
+    const dateFor=value=>{const d=new Date(value);
+      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+    const startDay=dateFor(tomorrow)
+    const excludedDay=new Date(tomorrow.getFullYear(),tomorrow.getMonth(),tomorrow.getDate()+7)
+    const childDay=new Date(tomorrow.getFullYear(),tomorrow.getMonth(),tomorrow.getDate()+8)
+    const detachedDate=dateFor(childDay)
+    const childStart=new Date(childDay.getFullYear(),childDay.getMonth(),childDay.getDate(),14,0)
+    return {detachedDate,fixture:{schemaVersion:1,records:[
+      {id:'c32-parent-original',source:'personal',title:'C32 Recurring parent',
+        description:'Original weekly parent',location:'',allDay:false,
+        start:tomorrow.toISOString(),end:new Date(minutes+135*60000).toISOString(),
+        repeat:{frequency:'weekly',interval:1},excludedDates:[dateFor(excludedDay)],
+        updatedAt:new Date(minutes-60000).toISOString()},
+      {id:'c32-detached-original',source:'personal',title:'C32 Detached next week',
+        description:'Original detached',location:'',allDay:false,
+        start:childStart.toISOString(),end:new Date(childStart.getTime()+3600000).toISOString(),
+        recurrenceParentId:'c32-parent-original',recurrenceDate:dateFor(excludedDay),
+        updatedAt:new Date(minutes-60000).toISOString()}
+    ]}}
+  })
+  await page.evaluate(x=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(x)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  const panel=page.getByRole('region',{name:'Now and next visible calendar events'})
+  assert.match(await panel.innerText(),/C32 Recurring parent/)
+  assert.match(await panel.innerText(),/C32 Detached next week/)
+  await page.getByLabel('Search calendar events').fill('C32 missing exact')
+  assert.match(await panel.innerText(),/No visible ongoing or upcoming events/)
+  await page.getByLabel('Search calendar events').fill('C32 Detached next week')
+  assert.equal(await panel.getByText('C32 Recurring parent').count(),0)
+  assert.match(await panel.innerText(),/C32 Detached next week/)
+  await panel.getByRole('button',{name:'Open day for c32-detached-original@'+detachedDate}).click()
+  assert.equal(await page.locator('.view-switch button.active').innerText(),'Day')
+  assert.equal(await page.getByLabel('Jump to date').inputValue(),detachedDate)
+  await panel.getByRole('button',{name:'Open details c32-detached-original@'+detachedDate}).click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.innerText(),/Original series date:/)
+  await details.getByRole('button',{name:'Close event'}).click()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C32_DESKTOP_LIVE_SEARCH_SCOPE_DETACHED_RECURRING_ORIGINAL_NO_WRITES_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -3341,6 +3455,8 @@ try{
   await exerciseC30DesktopAgendaDetachedAndSourceFilteredPageClamping()
   await exerciseC31MobileUnsavedEditorDismissalResetAndNewDraft()
   await exerciseC31DesktopDetachedOriginalEditAndImportedSourceIntact()
+  await exerciseC32MobileLiveOriginalEventsAndHiddenBusySource()
+  await exerciseC32DesktopDetachedRecurrenceAndSearchScopedNowNext()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
