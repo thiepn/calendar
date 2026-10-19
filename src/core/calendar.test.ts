@@ -27,6 +27,7 @@ import {detailNeighbors} from './detail-navigation'
 import {mobileTimedChange,mobileAllDayShift} from './mobile-editor'
 import {changedEditorFields,type EventEditorFields} from './editor-changes'
 import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './source-visibility'
+import {applySourcePicker,sourcePickerPage,type NamedSource} from './source-picker'
 import {adjacentBusyDay,exportAgendaCsv} from './agenda'
 import {adjacentAgendaRange} from './agenda-navigation'
 import {previewMissingPersonal} from './recover-missing'
@@ -2686,5 +2687,80 @@ describe('C32 live original Now & next schedule projection',()=>{
     const empty=nowNextVisible([], '2026-10-19T08:00:00.000Z')
     expect(empty).toMatchObject({happening:[],upcoming:[],allDayToday:[],
       happeningCount:0,upcomingCount:0,allDayTodayCount:0})
+  })
+})
+
+describe('C33 original ICS source picker and preferences-only bulk visibility',()=>{
+  const sources:NamedSource[]=Array.from({length:14},(_,i)=>['Campus '+String(i).padStart(2,'0'),i+1] as const)
+  it('paginates every original source beyond first five, preserving exact names',()=>{
+    const pages=[0,1].map(i=>sourcePickerPage(sources,[],'',i))
+    expect(pages[0]).toMatchObject({total:14,shown:14,hidden:0,page:0,pages:2,
+      fromIndex:1,throughIndex:8,hasNext:true})
+    expect(pages[1]).toMatchObject({page:1,fromIndex:9,throughIndex:14,hasPrevious:true,hasNext:false})
+    expect([...pages[0].items,...pages[1].items]).toEqual(sources)
+  })
+  it('searches names across all pages without changing records or saving a shadow index',()=>{
+    const original=JSON.stringify(sources)
+    const result=sourcePickerPage(sources,['Campus 01','Campus 12'],'campus 1',0)
+    expect(result.matching.map(([name])=>name)).toEqual(['Campus 10','Campus 11','Campus 12','Campus 13'])
+    expect(result).toMatchObject({matchingShown:3,matchingHidden:1,shown:12,hidden:2})
+    expect(JSON.stringify(sources)).toBe(original)
+  })
+  it('applies show and hide to all matching originals, not just the active page',()=>{
+    const names=sources.map(([n])=>n)
+    const hidden=applySourcePicker([],names,names,'hide')
+    expect(hidden).toHaveLength(14)
+    const shown=applySourcePicker(hidden,names,names.slice(8),'show')
+    expect(shown).toEqual(names.slice(0,8))
+    expect(sourcePickerPage(sources,shown,'',0)).toMatchObject({shown:6,hidden:8})
+  })
+  it('only-matching preserves hidden choices of unavailable original imported sources',()=>{
+    const names=sources.map(([n])=>n)
+    const selected=['Campus 10','Campus 12']
+    const actual=applySourcePicker(['Removed provider from current import','Campus 12'],names,selected,'only')
+    expect(actual).toContain('Removed provider from current import')
+    expect(actual).not.toContain('Campus 12')
+    expect(actual).not.toContain('Campus 10')
+    expect(new Set(actual).size).toBe(13)
+    expect(actual.filter(x=>x.startsWith('Campus '))).toHaveLength(12)
+  })
+  it('preserves personal events, read-only transparent imports and hidden busy free/busy authority',()=>{
+    const personal=record({id:'c33-personal',start:fromLocalDateTime('2026-11-26T08:00'),
+      end:fromLocalDateTime('2026-11-26T09:00')})
+    const hidden=record({id:'c33-busy',source:'ics',sourceCalendar:'Campus 01',
+      sourceKey:'c33-busy-original-uid',start:fromLocalDateTime('2026-11-26T10:00'),
+      end:fromLocalDateTime('2026-11-26T11:00')})
+    const free=record({id:'c33-free',source:'ics',sourceCalendar:'Campus 10',
+      sourceKey:'c33-free-original-uid',transparent:true,start:fromLocalDateTime('2026-11-26T12:00'),
+      end:fromLocalDateTime('2026-11-26T13:00')})
+    const records=[personal,hidden,free]
+    const before=JSON.stringify(records)
+    const names=sources.map(([n])=>n)
+    const changed=applySourcePicker([],names,['Campus 10'],'only')
+    expect(visibleCalendarRecords(records,'all',new Set(changed)).map(x=>x.id)).toEqual(['c33-personal','c33-free'])
+    expect(reviewDraft(records,record({id:'candidate',start:hidden.start,end:hidden.end})).collisionCount).toBeGreaterThan(0)
+    expect(JSON.stringify(records)).toBe(before)
+    expect(free.transparent).toBe(true)
+    expect(hidden.sourceKey).toBe('c33-busy-original-uid')
+  })
+  it('preserves __proto__ literal source identity instead of indexing an object',()=>{
+    const names=['__proto__','constructor','Campus 10']
+    expect(applySourcePicker([],names,['__proto__'],'hide')).toEqual(['__proto__'])
+    expect(sourcePickerPage([['__proto__',1],['constructor',2],['Campus 10',3]],['__proto__'],'proto',0))
+      .toMatchObject({matchingHidden:1,matchingShown:0})
+  })
+  it('rejects unsafe batches atomically, empty matching and invalid limits',()=>{
+    const large=Array.from({length:81},(_,i)=>'Imported '+i)
+    expect(()=>applySourcePicker([],large,large,'hide')).toThrow('80 maximum')
+    expect(()=>applySourcePicker([],['Campus 00'],['Fictional source'],'hide')).toThrow('Unknown')
+    expect(()=>applySourcePicker([],['Campus 00'],[],'only')).toThrow('No imported')
+    expect(()=>applySourcePicker([],['Campus 00'],['Campus 00'],'unexpected' as 'hide')).toThrow('Invalid')
+    expect(()=>sourcePickerPage(sources,[],'',-1)).toThrow('page')
+    expect(()=>sourcePickerPage(sources,[],'',0,21)).toThrow('page')
+  })
+  it('clamps stale paging after filtering and returns truthful zero matches',()=>{
+    expect(sourcePickerPage(sources,[],'',99)).toMatchObject({page:1,fromIndex:9,throughIndex:14})
+    expect(sourcePickerPage(sources,[],'no source matches',99)).toMatchObject({
+      total:14,page:0,pages:1,fromIndex:0,throughIndex:0,matching:[],items:[]})
   })
 })
