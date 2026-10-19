@@ -466,3 +466,35 @@ record IDs, detached parent exclusions, ICS transparency/source UID,
 backups/recovery, privacy and Folio ownership remain unchanged.
 Protection lasts until explicit save/discard or browser-confirmed unload,
 not across crashes.
+
+## C32 — live Now & next event strip, grounded in original occurrences
+
+Calendar previously offered a selected-date timeline, periodic reminders,
+Next busy **day**, C29's selected-Day event navigation and search; it had
+no direct live answer for **what is happening now or starting next**, especially
+on a phone opening a Month/Week page far from its current hour.
+
+A compact, always-visible **Now & next** strip derives three distinct
+groups from the existing source-filtered `occurrencesBetween` projection
+against the app's already-running, 30-second-refresh device clock:
+
+- **Happening now:** timed original instances whose real UTC start has
+  passed and whose end is strictly in the future, ordered by nearest end.
+- **Coming up:** timed original events starting after now plus future
+  all-day instances, chronologically across the next 14 local dates.
+- **All day today:** active all-day instances, listed separately so they
+  never imply a blocking timed appointment or a real-time alarm.
+
+Each group has truthful counts, a bounded three-event preview, and exact
+original **Details** and **Day** handoffs. Continuing overnight events,
+recurring parent EXDATE/detached identity, imported read-only sources,
+`TRANSP:TRANSPARENT` non-blocking labels and search/source visibility
+are preserved. Hidden busy imports remain authoritative only for the
+independent all-source free/busy and conflict checks. Empty/filtered
+states are explicit. It is neither a notification engine nor an account,
+task or Folio integration.
+
+The pure `src/core/now-next.ts` adds no source copies, secondary store,
+writer, reminder scheduler, navigation persistence, schema or production
+network actions. All original save CAS, recoverability and privacy remain
+unchanged.

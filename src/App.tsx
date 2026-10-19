@@ -32,6 +32,7 @@ import {DEFAULT_REMINDER_SETTINGS,loadReminderSettings,saveReminderSettings,inQu
 import {applyAllDayChange,type AllDayProposal} from './core/all-day'
 import {CalendarViews,type Mode} from './components/CalendarViews'
 import {MonthDayPeek} from './components/MonthDayPeek'
+import {NowNext} from './components/NowNext'
 
 type Filter='all'|'personal'|'ics'
 function download(name:string,contents:string,type:string){
@@ -694,6 +695,8 @@ export default function App(){
           <details className="calendar-shortcuts"><summary>Keyboard</summary><p>n — new event · t — today · g — jump to date · / — search · j/k — next/previous period · 1–4 — change view. When editing timed blocks, Alt+arrows move and Alt+Shift+vertical arrows resize; for all-day blocks use Alt+Left/Right and add Shift to resize.</p></details>
         </div>
         {notice&&<div className={'notice '+(/failed|rejected|not saved|could not/i.test(notice)?'notice-error':'')} role="status">{notice}<button onClick={()=>setNotice('')} aria-label="Dismiss message"><X size={14}/></button></div>}
+        <NowNext records={visible} nowIso={reminderNow} hasQuery={Boolean(query.trim())}
+          onOpen={open} onShowDay={date=>{setSelected(date);setMode('day')}}/>
         {unreadable&&<div className="recovery-danger" role="alert">The saved calendar could not be read. No replacement has been written. <button className="secondary compact" onClick={downloadUnreadable}>Download original raw data</button> before attempting recovery.</div>}
         {query.trim()&&<section className="search-results-panel" aria-label="Calendar search results">
           <header><strong>Search {searchDirection==='backward'?'previous':'next'} 365 days from selected date</strong><span>{searchResults.total} occurrence{searchResults.total===1?'':'s'} found · showing {searchResults.fromIndex}–{searchResults.throughIndex}</span></header>
