@@ -163,7 +163,7 @@ async function exerciseGesturesDesktop(){
     const event=state.records.find(r=>r.title==='Pointer base')
     const start=new Date(event.start);start.setHours(11,30,0,0)
     const end=new Date(start);end.setHours(12,30,0,0)
-    state.records.push({...event,id:'ics-collision-check',title:'Hidden imported lecture',source:'ics',sourceCalendar:'Hidden',
+    state.records.push({...event,id:'ics-collision-check',title:'Hidden imported lecture',source:'ics',timeZone:undefined,sourceCalendar:'Hidden',
       sourceKey:'Hidden|lecture',start:start.toISOString(),end:end.toISOString(),repeat:undefined,excludedDates:undefined,
       recurrenceParentId:undefined,recurrenceDate:undefined})
     localStorage.setItem(key,JSON.stringify(state))
