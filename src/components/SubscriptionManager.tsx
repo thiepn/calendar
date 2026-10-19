@@ -41,11 +41,13 @@ export function SubscriptionManager({subscriptions,error,activeId,onAdd,onCheck,
         <div className="subscription-entry-info">
           <strong>{item.sourceName??'Not fetched yet'}</strong>
           <span>{feedHost(item.url)}</span>
-          <span>State: {item.status==='ready'?'Not checked':item.status==='review'?'Review required':
+          <span>State: {item.status==='ready'?'Not checked':item.status==='review'?'Fetched; check again if not applied':
             item.status==='unchanged'?'Not modified':item.status==='applied'?'Applied manually':'Refresh failed'}</span>
           {item.lastCheckedAt&&<span>Last checked: {new Date(item.lastCheckedAt).toLocaleString()}</span>}
           {item.lastAppliedAt&&<span>Last applied: {new Date(item.lastAppliedAt).toLocaleString()}</span>}
-          {item.lastError&&<span role="alert">{item.lastError}</span>}
+          {item.lastCheckedAt&&Date.now()-Date.parse(item.lastCheckedAt)>7*86400000&&
+            <span role="status">Feed check is over 7 days old. Select Check feed to refresh.</span>}
+          {item.lastError&&item.lastError!==error&&<span role="status">{item.lastError}</span>}
           {item.history?.length? <details className="subscription-history"><summary>Refresh history ({item.history.length})</summary>
             <ol>{[...item.history].reverse().map((entry,index)=><li key={index}>{new Date(entry.at).toLocaleString()} · {entry.kind}{entry.count!==undefined?' · '+entry.count+' supported':''}</li>)}</ol>
           </details>:null}

@@ -3889,7 +3889,7 @@ async function exerciseC37DesktopManualFeedReviewConditionalAndSourceLock(){
   await page.getByRole('button',{name:'Manage sources'}).click()
   manager=page.getByRole('dialog',{name:'Calendar data management'})
   await manager.getByRole('button',{name:'Check feed'}).click()
-  await manager.getByRole('alert').filter({hasText:/name changed/}).waitFor()
+  await manager.getByRole('alert').filter({hasText:/name changed/}).first().waitFor()
   assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),refreshed)
   assert.equal(errors.length,0,errors.join('; '))
   console.log('BROWSER_C37_DESKTOP_EXPLICIT_FEED_REVIEW_ETAG_304_SOURCE_LOCK_ORIGINAL_UID_PASS')
