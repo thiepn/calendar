@@ -19,6 +19,7 @@ import {reminderItems,reminderKey,actionForReminder,deliverableReminders,propose
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {parseIcsDuration} from './ics-duration'
 import {sevenDayWorkload} from './planning'
+import {nowNextVisible} from './now-next'
 import {focusDaySummary,focusScrollMinute} from './mobile-focus'
 import {dayJumpPage} from './day-navigator'
 import {searchOccurrencePage} from './search-pages'
@@ -2580,5 +2581,110 @@ describe('C31 original editor unsaved changes review without shadow storage',()=
     const draft={...base,title:'Change and reset',weekdays:[3,5]}
     expect(changedEditorFields(base,draft)).toEqual(['Name','Repeat settings'])
     expect(changedEditorFields(base,{...draft,title:'Study',weekdays:[3,1]})).toEqual([])
+  })
+})
+
+describe('C32 live original Now & next schedule projection',()=>{
+  it('distinguishes current timed, next future and all-day today without implying timed blocks',()=>{
+    const now='2026-10-19T08:30:00.000Z'
+    const ongoing=record({id:'current',start:'2026-10-19T08:00:00.000Z',
+      end:'2026-10-19T09:00:00.000Z'})
+    const ended=record({id:'ended-at-now',start:'2026-10-19T07:00:00.000Z',
+      end:now})
+    const next=record({id:'future',start:'2026-10-19T09:30:00.000Z',
+      end:'2026-10-19T10:00:00.000Z'})
+    const allDay=record({id:'all-day-today',allDay:true,startDate:'2026-10-18',
+      endDateExclusive:'2026-10-21',start:fromLocalDateTime('2026-10-18T00:00'),
+      end:fromLocalDateTime('2026-10-21T00:00')})
+    const records=[ongoing,ended,next,allDay],before=JSON.stringify(records)
+    const summary=nowNextVisible(records,now)
+    expect(summary).toMatchObject({today:'2026-10-19',happeningCount:1,
+      upcomingCount:1,allDayTodayCount:1,horizonDays:14})
+    expect(summary.happening.map(x=>x.item.recordId)).toEqual(['current'])
+    expect(summary.upcoming.map(x=>x.item.recordId)).toEqual(['future'])
+    expect(summary.allDayToday.map(x=>x.item.recordId)).toEqual(['all-day-today'])
+    expect(summary.allDayToday[0].phase).toBe('all-day-today')
+    expect(JSON.stringify(records)).toBe(before)
+  })
+  it('orders ongoing events by soonest ending and future physical UTC starts',()=>{
+    const now='2026-10-19T08:30:00.000Z'
+    const records=[
+      record({id:'ends-later',start:'2026-10-19T07:00:00.000Z',end:'2026-10-19T10:00:00.000Z'}),
+      record({id:'ends-first',start:'2026-10-19T08:20:00.000Z',end:'2026-10-19T08:45:00.000Z'}),
+      record({id:'future-second',start:'2026-10-19T09:40:00.000Z',end:'2026-10-19T10:20:00.000Z'}),
+      record({id:'future-first',start:'2026-10-19T09:00:00.000Z',end:'2026-10-19T09:20:00.000Z'})]
+    const summary=nowNextVisible(records,now)
+    expect(summary.happening.map(x=>x.item.recordId)).toEqual(['ends-first','ends-later'])
+    expect(summary.upcoming.map(x=>x.item.recordId)).toEqual(['future-first','future-second'])
+    expect(summary.happeningCount).toBe(2)
+  })
+  it('preserves transparent read-only ICS identity but never displays hidden busy imports',()=>{
+    const now='2026-10-19T08:30:00.000Z'
+    const free=record({id:'c32-free',source:'ics',sourceCalendar:'Shown classes',
+      sourceKey:'c32-original-free-uid',transparent:true,start:'2026-10-19T09:00:00.000Z',
+      end:'2026-10-19T10:00:00.000Z'})
+    const hidden=record({id:'c32-hidden',source:'ics',sourceCalendar:'Hidden clinic',
+      sourceKey:'c32-original-hidden-uid',start:'2026-10-19T08:00:00.000Z',
+      end:'2026-10-19T09:00:00.000Z'})
+    const visible=visibleCalendarRecords([free,hidden],'all',new Set(['Hidden clinic']))
+    const result=nowNextVisible(visible,now)
+    expect(result.happeningCount).toBe(0)
+    expect(result.upcoming).toMatchObject([{item:{recordId:'c32-free',source:'ics',
+      sourceCalendar:'Shown classes',transparent:true}}])
+    expect(reviewDraft([free,hidden],record({id:'conflict',start:hidden.start,end:hidden.end})).collisionCount).toBeGreaterThan(0)
+    expect(free.sourceKey).toBe('c32-original-free-uid')
+    expect(hidden.sourceKey).toBe('c32-original-hidden-uid')
+  })
+  it('respects recurring parent exclusions, detached ownership and future visibility',()=>{
+    const parent=record({id:'c32-parent',start:fromLocalDateTime('2026-10-19T11:00'),
+      end:fromLocalDateTime('2026-10-19T12:00'),repeat:{frequency:'weekly',interval:1},
+      excludedDates:['2026-10-26']})
+    const detached=record({id:'c32-detached',recurrenceParentId:'c32-parent',
+      recurrenceDate:'2026-10-26',start:fromLocalDateTime('2026-10-27T14:00'),
+      end:fromLocalDateTime('2026-10-27T15:00')})
+    const result=nowNextVisible([parent,detached],'2026-10-19T08:30:00.000Z',14,8)
+    expect(result.upcoming.map(x=>x.item.key)).toEqual([
+      'c32-parent@2026-10-19','c32-detached@2026-10-27'])
+    expect(detached.recurrenceDate).toBe('2026-10-26')
+    expect(parent.excludedDates).toEqual(['2026-10-26'])
+  })
+  it('distinguishes both physical 02:00 autumn fold starts',()=>{
+    const now='2026-10-25T00:15:00.000Z'
+    const first=record({id:'first-physical',start:'2026-10-25T00:00:00.000Z',
+      end:'2026-10-25T00:30:00.000Z'})
+    const second=record({id:'second-physical',start:'2026-10-25T01:00:00.000Z',
+      end:'2026-10-25T01:30:00.000Z'})
+    const result=nowNextVisible([second,first],now)
+    expect(result.today).toBe('2026-10-25')
+    expect(result.happening.map(x=>x.item.recordId)).toEqual(['first-physical'])
+    expect(result.upcoming.map(x=>x.item.recordId)).toEqual(['second-physical'])
+  })
+  it('does not omit overnight ongoing original events just because they began yesterday',()=>{
+    const today='2026-10-19T01:10:00.000Z'
+    const overnight=record({id:'from-yesterday',start:'2026-10-18T22:30:00.000Z',
+      end:'2026-10-19T02:00:00.000Z'})
+    const now=nowNextVisible([overnight],today)
+    expect(now.today).toBe('2026-10-19')
+    expect(now.happening).toMatchObject([{item:{recordId:'from-yesterday',startDate:'2026-10-18'}}])
+  })
+  it('bounds upcoming horizon by calendar dates, counts overflow and validates arguments',()=>{
+    const now='2026-10-19T08:00:00.000Z'
+    const next=Array.from({length:7},(_,i)=>record({id:'n-'+i,
+      start:new Date(Date.parse(now)+(i+1)*3600000).toISOString(),
+      end:new Date(Date.parse(now)+(i+1)*3600000+1800000).toISOString()}))
+    const beyond=record({id:'too-far',start:fromLocalDateTime('2026-11-02T09:00'),
+      end:fromLocalDateTime('2026-11-02T10:00')})
+    const result=nowNextVisible([...next,beyond],now,14,3)
+    expect(result.upcomingCount).toBe(7)
+    expect(result.upcoming).toHaveLength(3)
+    expect(result.upcoming.every(x=>x.item.recordId!=='too-far')).toBe(true)
+    expect(()=>nowNextVisible([], 'bad')).toThrow('time')
+    expect(()=>nowNextVisible([],now,31)).toThrow('horizon')
+    expect(()=>nowNextVisible([],now,14,0)).toThrow('limit')
+  })
+  it('returns a truthful empty state without manufacturing calendar data',()=>{
+    const empty=nowNextVisible([], '2026-10-19T08:00:00.000Z')
+    expect(empty).toMatchObject({happening:[],upcoming:[],allDayToday:[],
+      happeningCount:0,upcomingCount:0,allDayTodayCount:0})
   })
 })
