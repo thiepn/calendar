@@ -2661,7 +2661,7 @@ describe('C32 live original Now & next schedule projection',()=>{
   })
   it('does not omit overnight ongoing original events just because they began yesterday',()=>{
     const today='2026-10-19T01:10:00.000Z'
-    const overnight=record({id:'from-yesterday',start:'2026-10-18T22:30:00.000Z',
+    const overnight=record({id:'from-yesterday',start:'2026-10-18T21:30:00.000Z',
       end:'2026-10-19T02:00:00.000Z'})
     const now=nowNextVisible([overnight],today)
     expect(now.today).toBe('2026-10-19')
