@@ -441,3 +441,28 @@ recurrence generator, secondary persistence or event modification exists.
 Filters and hidden-source choices affect only this visible projection;
 complete-source availability, guarded CAS, source UIDs, recurring parent
 exclusions, backups/recovery and Folio boundaries are unchanged.
+
+## C31 — explicit unsaved editor review, cancel safety and reset
+
+The original `EventEditor` immediately discarded in-progress inputs on
+**Cancel**, the close X, backdrop taps, and a global Escape shortcut in
+`App`. This was easy to trigger on a phone when entering long notes,
+moving event times or editing recurring occurrences, with no review.
+
+C31 keeps the original editor state **in memory only** and compares the
+editable fields from initial open. Name, date/time (including DST fold),
+reminder, recurrence and weekdays, location and notes display a concise
+**Unsaved changes** summary. **Reset edits** restores the opened form
+without touching any calendar source. Any dirty close via Cancel, X,
+backdrop or Escape opens a confirmation with **Keep editing** and
+**Discard changes**; unchanged forms close directly. Pure review horizon
+and acknowledgement toggles are not considered saved event changes.
+An active dirty form also requests a browser leave warning, where supported.
+
+The global Escape handler no longer bypasses the original editor.
+No autosave, new schema/storage, shadow writer or automatic changes
+were introduced. Save still executes original all-source review and CAS;
+record IDs, detached parent exclusions, ICS transparency/source UID,
+backups/recovery, privacy and Folio ownership remain unchanged.
+Protection lasts until explicit save/discard or browser-confirmed unload,
+not across crashes.

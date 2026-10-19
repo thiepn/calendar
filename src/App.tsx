@@ -231,7 +231,7 @@ export default function App(){
       const target=e.target as HTMLElement
       if(['INPUT','TEXTAREA','SELECT'].includes(target.tagName)||target.isContentEditable)return
       if(e.ctrlKey||e.metaKey||e.altKey)return
-      if(e.key==='Escape'){setEditorDate(null);setActive(null);setPending(null);setSourcePanel(false);setPersonalExportOpen(false);setFinderOpen(false);setRemindersOpen(false);setAdjustment(null);setAllDayAdjustment(null);setMonthPeekDate(null)}
+      if(e.key==='Escape'&&editorDate===null){setActive(null);setPending(null);setSourcePanel(false);setPersonalExportOpen(false);setFinderOpen(false);setRemindersOpen(false);setAdjustment(null);setAllDayAdjustment(null);setMonthPeekDate(null)}
       if(e.key==='n'){e.preventDefault();create(selected)}
       if(e.key==='t'){e.preventDefault();setSelected(localDate())}
       if(e.key==='/'){e.preventDefault();searchInput.current?.focus()}
@@ -245,7 +245,7 @@ export default function App(){
       }
     }
     window.addEventListener('keydown',key);return ()=>window.removeEventListener('keydown',key)
-  },[selected,mode,agendaSpan])
+  },[selected,mode,agendaSpan,editorDate])
   const hiddenImportedSet=useMemo(()=>new Set(hiddenImportedCalendars),[hiddenImportedCalendars])
   const visible=useMemo(()=>visibleCalendarRecords(calendar.records,filter,hiddenImportedSet,query),
     [calendar,filter,hiddenImportedSet,query])

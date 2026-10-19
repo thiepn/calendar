@@ -641,3 +641,28 @@
  .agenda-day-pages button{min-height:44px;justify-content:center}
  .agenda-open-day{min-height:44px}
 }
+
+/* C31 explicit original-editor dirty review, held only in memory. */
+.editor.dialog-surface{position:relative}
+.editor-unsaved-meta{display:flex;align-items:center;flex-wrap:wrap;gap:7px 11px;
+ border:1px solid #dce7de;background:#f6f9f5;padding:10px 12px;
+ color:#55715e;font-size:11px;line-height:1.45}
+.editor-unsaved-meta strong{color:#845a28;font-size:12px}
+.editor-unsaved-meta span{min-width:0;overflow-wrap:anywhere;flex:1}
+.editor-unsaved-meta button{min-height:34px}
+.editor-discard-overlay{position:absolute;inset:0;z-index:20;background:#17251cbb;
+ display:flex;align-items:center;justify-content:center;padding:14px}
+.editor-discard-dialog{width:min(100%,430px);background:#fff;border:1px solid #b6cbb9;
+ box-shadow:0 10px 35px #0003;padding:19px;max-height:90%;overflow:auto}
+.editor-discard-dialog h3{font-family:Georgia,serif;font-weight:500;font-size:21px;margin:0 0 9px}
+.editor-discard-dialog p{font-size:13px;line-height:1.6;color:#54675a;margin:0 0 19px}
+.editor-discard-actions{display:flex;gap:9px;justify-content:flex-end;flex-wrap:wrap}
+.editor-discard-actions button{min-height:44px}
+@media(max-width:740px){
+ .editor-unsaved-meta{gap:8px;padding:9px}
+ .editor-unsaved-meta button{min-height:44px}
+ .editor-discard-overlay{position:fixed;z-index:31;inset:0;padding:12px}
+ .editor-discard-dialog{max-height:min(90dvh,650px);width:100%;padding:17px}
+ .editor-discard-actions{display:grid;grid-template-columns:1fr;gap:9px}
+ .editor-discard-actions button{width:100%;min-height:47px}
+}

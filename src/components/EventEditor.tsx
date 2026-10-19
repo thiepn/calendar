@@ -1,9 +1,10 @@
-import {useMemo,useState,type FormEvent} from 'react'
+import {useEffect,useMemo,useRef,useState,type FormEvent,type KeyboardEvent as ReactKeyboardEvent} from 'react'
 import {X,CalendarPlus,AlertTriangle} from 'lucide-react'
 import type {CalendarRecord,Frequency,LocalDate,RepeatRule} from '../types'
 import {addDays,day,localDateTime,dateLabel,localInstantOptions,offsetLabel} from '../core/dates'
 import {draftTimedRange,reviewDraft} from '../core/draft'
 import {mobileTimedChange,mobileAllDayShift,type MobileTimedAction} from '../core/mobile-editor'
+import {changedEditorFields,type EventEditorFields} from '../core/editor-changes'
 const weekdays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 type Props={date:LocalDate;event?:CalendarRecord;initialRange?:{start:string;end:string};initialAllDay?:{from:LocalDate;through:LocalDate};records:CalendarRecord[];ignoreOccurrence?:{id:string;date:LocalDate};ignoreParentFrom?:{id:string;date:LocalDate};scope?:'instance'|'future';isCopy?:boolean;defaultReminderMinutes?:number;onSave:(record:CalendarRecord)=>void;onClose:()=>void}
 export function EventEditor({date,event,initialRange,initialAllDay,records,ignoreOccurrence,ignoreParentFrom,scope,isCopy=false,defaultReminderMinutes=-1,onSave,onClose}:Props){
@@ -29,6 +30,8 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
   const [startFold,setStartFold]=useState<''|'earlier'|'later'>(()=>inferredFold(event&&!event.allDay?event.start:initialRange?.start))
   const [endFold,setEndFold]=useState<''|'earlier'|'later'>(()=>inferredFold(event&&!event.allDay?event.end:initialRange?.end))
   const [reviewDays,setReviewDays]=useState<90|180|365>(90)
+  const [discardReview,setDiscardReview]=useState(false)
+  const keepEditingButton=useRef<HTMLButtonElement>(null)
   function ambiguousOptions(value:string):string[]{
     try{
       const options=localInstantOptions(value)
@@ -37,6 +40,38 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
   }
   const firstFoldOptions=allDay?[]:ambiguousOptions(start)
   const lastFoldOptions=allDay?[]:ambiguousOptions(end)
+  // Capture once per editor mount; no persistence or shadow event authority.
+  const fields:EventEditorFields={title,description,location,reminder,allDay,start,end,
+    startFold,endFold,frequency,interval,until,weekdays:weekdaysSet}
+  const original=useRef<EventEditorFields>(fields)
+  const changed=changedEditorFields(original.current,fields)
+  const dirty=changed.length>0
+  useEffect(()=>{
+    if(!dirty)return
+    const guard=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue=''}
+    window.addEventListener('beforeunload',guard)
+    return ()=>window.removeEventListener('beforeunload',guard)
+  },[dirty])
+  useEffect(()=>{if(discardReview)keepEditingButton.current?.focus()},[discardReview])
+  function requestClose(){
+    if(dirty)setDiscardReview(true)
+    else onClose()
+  }
+  function resetEdits(){
+    const old=original.current
+    setTitle(old.title);setDescription(old.description);setLocation(old.location)
+    setReminder(old.reminder);setAllDay(old.allDay)
+    setStart(old.start);setEnd(old.end);setStartFold(old.startFold);setEndFold(old.endFold)
+    setFrequency(old.frequency);setInterval(old.interval);setUntil(old.until)
+    setWeekdaysSet([...old.weekdays]);setAcceptedSignature('');setError('')
+    setDiscardReview(false)
+  }
+  function escapeEditor(event:ReactKeyboardEvent<HTMLDivElement>){
+    if(event.key!=='Escape')return
+    event.preventDefault();event.stopPropagation()
+    if(discardReview)setDiscardReview(false)
+    else requestClose()
+  }
   const [acceptedSignature,setAcceptedSignature]=useState('')
   const signature=[title,start,end,startFold,endFold,reviewDays,allDay,frequency,interval,until,reminder,weekdaysSet.join(',')].join('|')
   const accepted=acceptedSignature===signature
@@ -106,10 +141,10 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
       onSave({...construct(event?.id??crypto.randomUUID()),title:title.trim()})
     }catch(err){setError(err instanceof Error?err.message:String(err))}
   }
-  return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
+  return <div className="modal-backdrop" onKeyDown={escapeEditor} onMouseDown={e=>{if(e.target===e.currentTarget)requestClose()}}>
     <section className="editor dialog-surface" role="dialog" aria-modal="true" aria-label={isCopy?'Duplicate event':scope==='instance'?'Edit one occurrence':scope==='future'?'Edit this and future':event?'Edit event':'New event'}>
       <header className="editor-head"><div className="heading-inline"><CalendarPlus size={20}/><h2>{isCopy?'Duplicate event':scope==='instance'?'Edit one occurrence':scope==='future'?'Edit this and future':event?'Edit event':'New event'}</h2></div>
-        <button className="icon-button" onClick={onClose} aria-label="Close editor"><X size={19}/></button></header>
+        <button className="icon-button" onClick={requestClose} aria-label="Close editor"><X size={19}/></button></header>
       <form onSubmit={submit} className="editor-form">
         <label>Event name<input autoFocus={typeof window!=='undefined'&&!window.matchMedia('(max-width:740px)').matches} required maxLength={240} value={title} onChange={e=>setTitle(e.target.value)} placeholder="What are you planning?"/></label>
         <label className="checkline"><input type="checkbox" checked={allDay} onChange={e=>toggleAllDay(e.target.checked)}/> All-day event</label>
@@ -196,8 +231,25 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
         </div>
         <p className="fine-print">Times use this device's local time zone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Start/end local times that do not exist or occur twice are rejected. Recurring collision review uses the selected 90–365-day horizon; conflicts beyond it remain unchecked.</p>
         {error&&<div className="error" role="alert">{error}</div>}
-        <footer className="editor-actions"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button className="primary" type="submit" disabled={Boolean(inspection.error)}>{isCopy?'Create duplicate':scope==='instance'?'Save this occurrence':scope==='future'?'Save future series':event?'Save changes':'Create event'}</button></footer>
+        <div className="editor-unsaved-meta" aria-live="polite">
+          {dirty?<><strong>Unsaved changes</strong><span>{changed.join(' · ')}</span>
+            <button className="secondary compact" type="button" onClick={resetEdits}>Reset edits</button></>:
+            <span>No changes to discard. Editing stays on this device until you save.</span>}
+        </div>
+        <footer className="editor-actions"><button type="button" className="secondary" onClick={requestClose}>Cancel</button><button className="primary" type="submit" disabled={Boolean(inspection.error)}>{isCopy?'Create duplicate':scope==='instance'?'Save this occurrence':scope==='future'?'Save future series':event?'Save changes':'Create event'}</button></footer>
       </form>
+      {discardReview&&<div className="editor-discard-overlay">
+        <section role="alertdialog" aria-modal="true" aria-labelledby="editor-discard-title"
+          aria-describedby="editor-discard-description" className="editor-discard-dialog">
+          <h3 id="editor-discard-title">Discard unsaved changes?</h3>
+          <p id="editor-discard-description">This draft has changes to {changed.join(', ')}.
+            Nothing has been saved. Your original calendar events and imported sources will remain unchanged.</p>
+          <div className="editor-discard-actions">
+            <button ref={keepEditingButton} type="button" className="primary" onClick={()=>setDiscardReview(false)}>Keep editing</button>
+            <button type="button" className="danger" onClick={onClose}>Discard changes</button>
+          </div>
+        </section>
+      </div>}
     </section>
   </div>
 }
