@@ -3510,6 +3510,108 @@ async function exerciseC33DesktopSourceExactNamesFilteringAndPreferenceContinuit
   await context.close()
 }
 
+
+async function exerciseC34MobilePersistedDraftReviewAndCommit(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const original={schemaVersion:1,records:[]}
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(value)),original)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.locator('.top-create').click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.getByLabel('Event name').fill('C34 interrupted mobile draft')
+  await editor.getByLabel('Notes').fill('Offline work · 한국어 and Français')
+  await editor.getByRole('button',{name:'Next day'}).click()
+  await page.waitForFunction(()=>JSON.parse(localStorage.getItem('thiepn.calendar.event-draft.v1')||'null')?.fields?.title==='C34 interrupted mobile draft')
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),original)
+  await page.reload({waitUntil:'networkidle'})
+  const resume=page.getByRole('dialog',{name:'Recover unfinished event'})
+  await resume.waitFor()
+  assert.match(await resume.innerText(),/C34 interrupted mobile draft/)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),original)
+  await resume.getByRole('button',{name:'Review recovered draft'}).click()
+  const recovered=page.getByRole('dialog',{name:'New event'})
+  await recovered.waitFor()
+  assert.equal(await recovered.getByLabel('Event name').inputValue(),'C34 interrupted mobile draft')
+  assert.equal(await recovered.getByLabel('Notes').inputValue(),'Offline work · 한국어 and Français')
+  assert.equal(await recovered.locator('input[type="datetime-local"]').first().inputValue(),'2026-11-27T09:00')
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),original)
+  await recovered.getByRole('button',{name:'Create event'}).click()
+  await recovered.waitFor({state:'hidden'})
+  const actual=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(actual.records.length,1)
+  assert.equal(actual.records[0].title,'C34 interrupted mobile draft')
+  assert.equal(actual.records[0].description,'Offline work · 한국어 and Français')
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.event-draft.v1')),null)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C34_MOBILE_DRAFT_RELOAD_EXPLICIT_REVIEW_COMMIT_PASS')
+  await context.close()
+}
+async function exerciseC34DesktopRecurringResumeAndStaleBlock(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const fixture={schemaVersion:1,records:[
+    {id:'c34-series',title:'C34 series original',description:'parent',location:'',source:'personal',
+      allDay:false,start:'2026-11-23T09:00:00.000Z',end:'2026-11-23T10:00:00.000Z',
+      repeat:{frequency:'weekly',interval:1},updatedAt:'2026-10-19T03:00:00.000Z'},
+    {id:'c34-imported',title:'C34 untouched ICS',description:'',location:'',source:'ics',
+      sourceCalendar:'University',sourceKey:'c34-original-UID',transparent:true,allDay:false,
+      start:'2026-11-23T11:00:00.000Z',end:'2026-11-23T12:00:00.000Z',updatedAt:'2026-10-19T03:00:00.000Z'}
+  ]}
+  await page.evaluate(value=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(value)),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-23')
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.locator('.timeline-block').filter({hasText:'C34 series original'}).click()
+  await page.getByRole('dialog',{name:'Event details'}).getByRole('button',{name:'Edit this occurrence'}).click()
+  const editor=page.getByRole('dialog',{name:'Edit one occurrence'})
+  await editor.getByLabel('Notes').fill('C34 recovered detached notes')
+  await page.waitForFunction(()=>Boolean(JSON.parse(localStorage.getItem('thiepn.calendar.event-draft.v1')||'null')?.origin?.instance))
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByRole('dialog',{name:'Recover unfinished event'}).getByRole('button',{name:'Review recovered draft'}).click()
+  const continued=page.getByRole('dialog',{name:'Edit one occurrence'})
+  assert.equal(await continued.getByLabel('Notes').inputValue(),'C34 recovered detached notes')
+  await continued.getByRole('button',{name:'Save this occurrence'}).click()
+  await continued.waitFor({state:'hidden'})
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(saved.records.length,3)
+  assert.deepEqual(saved.records.find(r=>r.id==='c34-series').excludedDates,['2026-11-23'])
+  assert.equal(saved.records.find(r=>r.recurrenceParentId==='c34-series').recurrenceDate,'2026-11-23')
+  assert.equal(saved.records.find(r=>r.recurrenceParentId==='c34-series').description,'C34 recovered detached notes')
+  assert.deepEqual(saved.records.find(r=>r.id==='c34-imported'),fixture.records[1])
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.event-draft.v1')),null)
+  await page.locator('.timeline-block').filter({hasText:'C34 series original'}).first().click()
+  await page.getByRole('dialog',{name:'Event details'}).getByRole('button',{name:'Edit event'}).click()
+  const detached=page.getByRole('dialog',{name:'Edit event'})
+  await detached.getByLabel('Location').fill('Uncommitted elsewhere')
+  await page.waitForFunction(()=>Boolean(localStorage.getItem('thiepn.calendar.event-draft.v1')))
+  await page.reload({waitUntil:'networkidle'})
+  const changed=await page.evaluate(()=>{
+    const state=JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))
+    const item=state.records.find(r=>r.recurrenceParentId==='c34-series')
+    item.description='Newer tab update';item.updatedAt=new Date().toISOString()
+    localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify(state))
+    return state
+  })
+  const prompt=page.getByRole('dialog',{name:'Recover unfinished event'})
+  await prompt.getByRole('button',{name:'Review recovered draft'}).click()
+  assert.match(await prompt.getByRole('alert').innerText(),/original event changed/)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),changed)
+  await prompt.getByRole('button',{name:'Discard unfinished draft'}).click()
+  await prompt.waitFor({state:'hidden'})
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.event-draft.v1')),null)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C34_DESKTOP_RECURRING_ID_RESUME_STALE_EDIT_BLOCK_NO_ICS_WRITES_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -3581,6 +3683,8 @@ try{
   await exerciseC32DesktopDetachedRecurrenceAndSearchScopedNowNext()
   await exerciseC33MobileAllImportedSourcesSearchBulkOnlyAndHiddenBusy()
   await exerciseC33DesktopSourceExactNamesFilteringAndPreferenceContinuity()
+  await exerciseC34MobilePersistedDraftReviewAndCommit()
+  await exerciseC34DesktopRecurringResumeAndStaleBlock()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true

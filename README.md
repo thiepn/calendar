@@ -526,3 +526,36 @@ The existing `visibleCalendarRecords` controls display/search/planning.
 The complete original ICS/event array still controls availability and
 overlap review, guarded CAS, portable backups/recovery and source identity.
 No new store, schema, source write, provider sync, or Folio delegation.
+
+
+## C34 — durable original event drafts, explicit recovery
+
+The existing C31 unsaved-change review now has a bounded device-only unfinished
+event draft. Changes to an original personal event editor are stored in one
+separate localStorage sidecar (never in the canonical CalendarState records or
+a second calendar writer) when editable fields differ from the initial form.
+Notes, names, timezone-fold selections, repeat settings, reminders, and dates
+remain recoverable through a reload or interrupted browser session.
+
+On startup, an unfinished draft blocks normal editing until the owner chooses
+Review recovered draft, Download draft, or Discard unfinished draft. Reviewing
+reopens the original editor with its creation/edit/copy/recurrence-instance/
+future-series context. The original source event, recurrence parent and
+generated new-ID ownership are checked against live canonical records. A
+changed or deleted source prevents unsafe restoration. Unrelated valid source
+changes cannot be silently overwritten, and all current calendar records are
+rechecked by the original editor when explicitly saving.
+
+There is no automatic commit, backend upload, sync, or second recurring writer.
+The same conflict/clock acknowledgement, parent/exception writer, guarded CAS,
+previous-version checkpoint, rescue and imported ICS read-only authority apply.
+Discard/reset/successful Save conditionally clear only the editor's own saved
+draft revision. Another tab's newer draft cannot be silently replaced.
+Unreadable draft bytes are preserved until explicit download or discard.
+Draft storage is local plaintext, not part of portable saved-event backups.
+The browser can delete local storage; export the full saved calendar separately.
+
+Node and desktop/mobile Chromium acceptance cover interrupted mobile creation,
+explicit recovery, real detached occurrence recovery, read-only imported source
+preservation and stale original edit rejection. Physical devices, native process
+death, Safari/Firefox/WebKit and real external provider sync remain unqualified.

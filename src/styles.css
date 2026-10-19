@@ -734,3 +734,17 @@
  .source-picker-pages span{grid-row:1;grid-column:1/-1}
  .source-picker-pages button{min-height:44px}
 }
+
+
+.draft-recovery-backdrop{z-index:1100;display:flex;align-items:center;justify-content:center;padding:16px}
+.draft-recovery{width:min(480px,100%);max-height:90dvh;overflow:auto;padding:24px}
+.draft-recovery h2{margin:0 0 12px;font-size:21px}
+.draft-recovery p{line-height:1.5;font-size:14px;overflow-wrap:anywhere}
+.draft-recovery-date{font-size:12px!important;color:#687b6c}
+.draft-recovery-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.draft-recovery-actions button{min-height:43px}
+@media(max-width:740px){
+  .draft-recovery{padding:17px}
+  .draft-recovery-actions{display:grid;grid-template-columns:1fr}
+  .draft-recovery-actions button{min-height:46px}
+}

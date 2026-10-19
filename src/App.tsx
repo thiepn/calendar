@@ -21,6 +21,7 @@ import {mergeIcs,previewIcs,type IcsPreview} from './core/ics'
 import {downloadPersonalExport,type ReviewedPersonalExportOptions} from './core/personal-export'
 import {reviewImportedChanges,exportImportedChangeCsv} from './core/ics-change-review'
 import {EventEditor} from './components/EventEditor'
+import {EVENT_DRAFT_KEY,readEventDraft,clearEventDraft,assertDraftCanResume,type SavedEventDraft} from './core/event-draft'
 import {AllDayDialog} from './components/AllDayDialog'
 import {RestoreDialog} from './components/RestoreDialog'
 import {PersonalExportDialog} from './components/PersonalExportDialog'
@@ -45,8 +46,16 @@ function download(name:string,contents:string,type:string){
 }
 const initial=loadState()
 const initialView=(()=>{try{return loadViewPreferences()}catch{return {mode:'week' as const,filter:'all' as const,agendaSpan:14 as const,agendaBusyOnly:false}}})()
+const initialDraft=(()=>{
+  let raw:string|null=null
+  try{raw=localStorage.getItem(EVENT_DRAFT_KEY);return {draft:readEventDraft(),error:'',raw}}
+  catch(error){return {draft:null,error:'Unfinished event draft cannot be read: '+String(error),raw}}
+})()
 export default function App(){
   const [calendar,setCalendar]=useState<CalendarState>(initial.state)
+  const [pendingDraft,setPendingDraft]=useState<SavedEventDraft|null>(initialDraft.draft)
+  const [restoredDraft,setRestoredDraft]=useState<SavedEventDraft|null>(null)
+  const [draftReadError,setDraftReadError]=useState(initialDraft.error)
   const [remindersOpen,setRemindersOpen]=useState(false)
   const [overdueDays,setOverdueDays]=useState<1|7>(1)
   const [reminderSettings,setReminderSettings]=useState<ReminderSettings>(()=>{try{return loadReminderSettings()}catch{return DEFAULT_REMINDER_SETTINGS}})
@@ -337,6 +346,30 @@ export default function App(){
     catch(error){setNotice('Finder date unchanged: '+String(error))}
   }
 
+  function resumeDraft(){
+    if(!pendingDraft)return
+    try{
+      const latest=loadState()
+      if(latest.error)throw new Error('Saved calendar is unreadable; recover the calendar before resuming a draft')
+      assertDraftCanResume(pendingDraft,latest.state)
+      const o=pendingDraft.origin
+      setCalendar(latest.state)
+      setEditing(o.event??null);setCopyDraft(o.copy)
+      setEditInstance(o.instance??null);setEditFuture(o.future??null)
+      setNewEventRange(o.initialRange??null);setNewAllDay(o.initialAllDay??null)
+      setSelected(o.date);setEditorDate(o.date);setActive(null)
+      setRestoredDraft(pendingDraft);setPendingDraft(null);setDraftReadError('')
+    }catch(error){setDraftReadError('Cannot resume safely: '+String(error))}
+  }
+  function discardPendingDraft(){
+    try{
+      if(pendingDraft)clearEventDraft(pendingDraft.id,pendingDraft.revision)
+      else if(localStorage.getItem(EVENT_DRAFT_KEY)===initialDraft.raw)
+        localStorage.removeItem(EVENT_DRAFT_KEY)
+      else throw new Error('Draft changed since startup. Reload before discarding it.')
+      setPendingDraft(null);setDraftReadError('')
+    }catch(error){setDraftReadError('Draft was preserved: '+String(error))}
+  }
   function create(date:LocalDate){setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setEditorDate(date)}
   function startFinderSlot(slot:FreeSlot){
     try{
@@ -466,16 +499,18 @@ export default function App(){
     if(!next){setNotice('No later active occurrence found in the next 365 days');return}
     setActive(next);setSelected(next.date);setMoveDate(next.startDate)
   }
-  function save(record:CalendarRecord){
+  function save(record:CalendarRecord):boolean{
     try{
       const next=editFuture?saveWholeEvent(splitSeriesAt(calendar,editFuture.parentId,editFuture.date,editFuture.newId),record):
         editInstance?replaceOccurrence(calendar,editInstance.parentId,editInstance.date,record):
         calendar.records.some(r=>r.id===record.id)?saveWholeEvent(calendar,record):
         {schemaVersion:1 as const,records:[...calendar.records,record]}
       if(commit(next,'Event saved locally')){
-        setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)
+        setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setRestoredDraft(null)
+        return true
       }
     }catch(error){setNotice('Not saved: '+String(error))}
+    return false
   }
   function remove(recordId:string) {
     const record=calendar.records.find(r=>r.id===recordId)
@@ -795,10 +830,35 @@ export default function App(){
       onOpen={item=>{setMonthPeekDate(null);open(item)}}
       onShowDay={date=>{setMonthPeekDate(null);setSelected(date);setMode('day')}}
       onCreate={date=>{setMonthPeekDate(null);create(date)}}/>}
-    {editorDate!==null&&<EventEditor key={(editing?.id??'new')+editorDate+(newEventRange?.start??'')+(newAllDay?.through??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} initialAllDay={newAllDay??undefined} records={calendar.records} isCopy={copyDraft} defaultReminderMinutes={reminderSettings.defaultLead}
+    {(pendingDraft||draftReadError)&&editorDate===null&&<div className="modal-backdrop draft-recovery-backdrop">
+      <section className="dialog-surface draft-recovery" role="dialog" aria-modal="true" aria-label="Recover unfinished event">
+        <h2>Unfinished event</h2>
+        {pendingDraft?<><p>Unsaved edits to <strong>{pendingDraft.fields.title.trim()||'Untitled event'}</strong> were kept on this device.</p>
+          <p>Restoring opens the editor for review. Nothing is added or changed until you choose Save.</p>
+          <p className="draft-recovery-date">Last edited {new Date(pendingDraft.savedAt).toLocaleString()}</p></>:
+          <p>The unfinished draft cannot be read. The saved calendar was not changed.</p>}
+        {draftReadError&&<p role="alert" className="error">{draftReadError}</p>}
+        <div className="draft-recovery-actions">
+          {pendingDraft&&<button className="primary" type="button" onClick={resumeDraft}>Review recovered draft</button>}
+          <button className="secondary" type="button" onClick={()=>{
+            const raw=localStorage.getItem(EVENT_DRAFT_KEY)
+            if(raw)download('calendar-unfinished-draft.json',raw,'application/json')
+          }}>Download draft</button>
+          <button className="danger" type="button" onClick={discardPendingDraft}>Discard unfinished draft</button>
+        </div>
+      </section>
+    </div>}
+    {editorDate!==null&&<EventEditor key={(restoredDraft?.id??'')+(editing?.id??'new')+editorDate+(newEventRange?.start??'')+(newAllDay?.through??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} initialAllDay={newAllDay??undefined} records={calendar.records} isCopy={copyDraft} defaultReminderMinutes={restoredDraft?.origin.defaultReminderMinutes??reminderSettings.defaultLead}
+      recoveredDraft={restoredDraft??undefined}
+      draftOrigin={{date:editorDate,event:editing??undefined,copy:copyDraft,
+        baseRecord:copyDraft?undefined:editInstance?calendar.records.find(r=>r.id===editInstance.parentId):
+          editFuture?calendar.records.find(r=>r.id===editFuture.parentId):editing?calendar.records.find(r=>r.id===editing.id):undefined,
+        initialRange:newEventRange??undefined,initialAllDay:newAllDay??undefined,
+        instance:editInstance??undefined,future:editFuture??undefined,
+        defaultReminderMinutes:restoredDraft?.origin.defaultReminderMinutes??reminderSettings.defaultLead}}
       ignoreOccurrence={editInstance?{id:editInstance.parentId,date:editInstance.date}:undefined}
       ignoreParentFrom={editFuture?{id:editFuture.parentId,date:editFuture.date}:undefined}
-      scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null)}}/>}
+      scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setRestoredDraft(null)}}/>}
     {restoreCandidate&&<RestoreDialog current={calendar} candidate={restoreCandidate.state} origin={restoreCandidate.origin} unreadableCurrent={unreadable}
       onClose={()=>setRestoreCandidate(null)} onConfirm={confirmRestore} onRecoverMissing={unreadable?undefined:confirmRecoverMissing}/>}
     {remindersOpen&&<ReminderCenter items={reminders} dismissed={dismissedReminders}

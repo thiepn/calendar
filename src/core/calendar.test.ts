@@ -26,6 +26,7 @@ import {searchOccurrencePage} from './search-pages'
 import {detailNeighbors} from './detail-navigation'
 import {mobileTimedChange,mobileAllDayShift} from './mobile-editor'
 import {changedEditorFields,type EventEditorFields} from './editor-changes'
+import {EVENT_DRAFT_KEY,validateEventDraft,readEventDraft,writeEventDraft,clearEventDraft,assertDraftCanResume,type EventDraftOrigin} from './event-draft'
 import {visibleCalendarRecords,toggleImportedCalendarVisibility} from './source-visibility'
 import {applySourcePicker,sourcePickerPage,type NamedSource} from './source-picker'
 import {adjacentBusyDay,exportAgendaCsv} from './agenda'
@@ -2762,5 +2763,86 @@ describe('C33 original ICS source picker and preferences-only bulk visibility',(
     expect(sourcePickerPage(sources,[],'',99)).toMatchObject({page:1,fromIndex:9,throughIndex:14})
     expect(sourcePickerPage(sources,[],'no source matches',99)).toMatchObject({
       total:14,page:0,pages:1,fromIndex:0,throughIndex:0,matching:[],items:[]})
+  })
+})
+
+
+describe('C34 original editor draft recovery',()=>{
+  const initial:EventEditorFields={
+    title:'',description:'',location:'',reminder:-1,allDay:false,
+    start:'2026-11-26T09:00',end:'2026-11-26T10:00',startFold:'',endFold:'',
+    frequency:'none',interval:1,until:'',weekdays:[]
+  }
+  const origin:EventDraftOrigin={date:'2026-11-26',copy:false,defaultReminderMinutes:-1}
+  function withLocalStorage(run:(map:Map<string,string>)=>void){
+    const map=new Map<string,string>(),previous=globalThis.localStorage
+    const mock={getItem:(key:string)=>map.get(key)??null,
+      setItem:(key:string,value:string)=>{map.set(key,value)},removeItem:(key:string)=>{map.delete(key)},
+      clear:()=>map.clear(),key:(i:number)=>Array.from(map.keys())[i]??null,get length(){return map.size}}
+    Object.defineProperty(globalThis,'localStorage',{configurable:true,value:mock})
+    try{run(map)}finally{
+      if(previous)Object.defineProperty(globalThis,'localStorage',{configurable:true,value:previous})
+      else Reflect.deleteProperty(globalThis,'localStorage')
+    }
+  }
+  it('persists a changed original editor form, not calendar records, and removes only the owned revision',()=>{
+    withLocalStorage(map=>{
+      const fields={...initial,title:'Saved only as unsaved draft',description:'Retain Unicode 한글 한국어'}
+      const saved=writeEventDraft({id:'c34-draft',origin,initial,fields},null)
+      expect(readEventDraft()).toEqual(saved)
+      expect(map.has(STORAGE_KEY)).toBe(false)
+      expect(map.has(EVENT_DRAFT_KEY)).toBe(true)
+      expect(saved.fields.description).toContain('한국어')
+      const updated=writeEventDraft({id:saved.id,origin,initial,fields:{...fields,location:'Room 301'}},saved.revision)
+      expect(updated.revision).not.toBe(saved.revision)
+      expect(()=>clearEventDraft(saved.id,saved.revision)).toThrow('changed')
+      expect(()=>writeEventDraft({id:saved.id,origin,initial,fields},saved.revision)).toThrow('changed')
+      expect(()=>writeEventDraft({id:'other-tab',origin,initial,fields},null)).toThrow('changed')
+      expect(readEventDraft()?.fields.location).toBe('Room 301')
+      clearEventDraft(updated.id,updated.revision)
+      expect(readEventDraft()).toBeNull()
+    })
+  })
+  it('requires meaningful edits, validates entire sidecar and refuses corrupted drafts without overwriting',()=>{
+    withLocalStorage(map=>{
+      expect(()=>writeEventDraft({id:'empty',origin,initial,fields:initial},null)).toThrow('Unchanged')
+      expect(map.has(EVENT_DRAFT_KEY)).toBe(false)
+      const saved=writeEventDraft({id:'valid',origin,initial,fields:{...initial,title:'A'}},null)
+      expect(()=>validateEventDraft({...saved,fields:{...saved.fields,weekdays:[9]}})).toThrow()
+      expect(()=>validateEventDraft({...saved,origin:{...origin,event:record({source:'ics'})}})).toThrow('Imported')
+      const raw='{"schemaVersion":1,"truncated":'
+      map.set(EVENT_DRAFT_KEY,raw)
+      expect(()=>readEventDraft()).toThrow()
+      expect(()=>writeEventDraft({id:'valid',origin,initial,fields:{...initial,title:'B'}},saved.revision)).toThrow()
+      expect(map.get(EVENT_DRAFT_KEY)).toBe(raw)
+    })
+  })
+  it('allows unrelated valid source updates but refuses stale edits and unsafe duplicate IDs',()=>{
+    const base=record({id:'c34-parent',repeat:{frequency:'weekly',interval:1}})
+    const edit:EventDraftOrigin={...origin,event:base,baseRecord:base}
+    const fields={...initial,title:'C34 changed title'}
+    withLocalStorage(()=>{
+      const saved=writeEventDraft({id:'c34-edit',origin:edit,initial,fields},null)
+      const added=record({id:'c34-imported',source:'ics',sourceCalendar:'Campus',sourceKey:'uid',transparent:true})
+      expect(()=>assertDraftCanResume(saved,{schemaVersion:1,records:[base,added]})).not.toThrow()
+      expect(()=>assertDraftCanResume(saved,{schemaVersion:1,records:[{...base,title:'Changed elsewhere'},added]})).toThrow('changed')
+      expect(()=>assertDraftCanResume(saved,{schemaVersion:1,records:[added]})).toThrow('changed')
+      expect(()=>assertDraftCanResume(saved,{schemaVersion:1,records:[base,base]})).toThrow('Duplicate')
+      const copy=validateEventDraft({...saved,origin:{...origin,copy:true,event:record({id:'copy-new'})}})
+      expect(()=>assertDraftCanResume(copy,{schemaVersion:1,records:[record({id:'copy-new'})]})).toThrow('already saved')
+    })
+  })
+  it('retains original recurring parent and generated occurrence identity, without writing on resume',()=>{
+    const parent=record({id:'c34-series',repeat:{frequency:'weekly',interval:1}})
+    const event=record({id:'c34-instance',repeat:undefined})
+    const o:EventDraftOrigin={...origin,event,baseRecord:parent,instance:{parentId:parent.id,date:'2026-11-23'}}
+    withLocalStorage(map=>{
+      const saved=writeEventDraft({id:'c34-occurrence',origin:o,initial,fields:{...initial,title:'Instance notes'}},null)
+      const originalCalendar:CalendarState={schemaVersion:1,records:[parent]}
+      expect(()=>assertDraftCanResume(saved,originalCalendar)).not.toThrow()
+      expect(map.has(STORAGE_KEY)).toBe(false)
+      expect(()=>assertDraftCanResume({...saved,origin:{...o,instance:{...o.instance!,parentId:'different'}}},originalCalendar)).toThrow('parent')
+      expect(()=>assertDraftCanResume(saved,{schemaVersion:1,records:[{...parent,repeat:undefined}]})).toThrow()
+    })
   })
 })
