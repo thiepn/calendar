@@ -688,3 +688,44 @@ Next C38 (proposed): native read-only integration handoff between original
 Calendar, Hub and StudyOS/Folio owners, preserving single-source authority,
 reviewable return links, date continuity and opt-in privacy, rather than
 duplicating schedulers or grading engines.
+
+## C38 — consented Calendar → Hub read-only file handoff
+
+C38 uses only verified existing owner-app contracts. On inspected Hub main,
+/home/calendar/ includes the H10 session-only External calendar read-only
+viewer, accepting a user-selected .ics file; there is no certified cross-origin
+Calendar connection. Hub clears the session import on privacy masking,
+navigation and page reload, treating it as stale after six hours and expired
+after 24 hours.
+
+Event details can share the precise original selected occurrence; Sources &
+data offers a separate 31-day range. Privacy modes are Busy-only (randomized
+UIDs, no names/IDs), Titles plus source identity, and Full details. Imported
+ICS source events require explicit opt-in. Review shows actual occurrence
+counts, names/dates and original sources before a confirmation checkbox
+allows download. The original ICS serialization helpers, recurrence,
+UTF-8 line-folding and exclusive all-day DTEND are reused. Titles and details
+exports retain original record/occurrence ID and source zone as read-only
+X-THIEPN provenance, while event times remain canonical UTC. All files
+are rechecked against the current original calendar before download via
+the existing CAS-read discipline. Nothing is automatically uploaded or
+written to Hub, StudyOS, Folio, providers or a second local store.
+
+After download the user may open Hub's verified native calendar screen and
+select the file there. Calendar offers verified owner root links:
+https://thiepn.dev/home/calendar/ for Hub,
+https://study.thiepn.dev/ for StudyOS,
+https://thiepn.dev/folio/ for Folio.
+
+StudyOS currently uses its authenticated Google Calendar workflow and no
+verified arbitrary Calendar-file intake. Folio's ICS import writes newly
+confirmed Folio-owned time blocks; it is NOT a read-only preview connector.
+C38 does not route this file into Folio or StudyOS or claim live sync.
+No owner offers a verified per-event Calendar return deep-link contract.
+Hub's event viewer is read-only and temporary. No account permission,
+cross-origin session or calendar-owner write is implied.
+
+No extra event database, schema migration, OAuth, provider writes, telemetry,
+new writer, scheduler or background transport is introduced. All C1–C37,
+C34 recovery, C35/C36 zones, C37 subscriptions, original CAS and backups
+and owner-app rights remain unchanged.

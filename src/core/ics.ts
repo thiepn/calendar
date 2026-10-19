@@ -1,9 +1,10 @@
-import type {CalendarRecord,CalendarState} from '../types'
+import type {CalendarOccurrence,CalendarRecord,CalendarState} from '../types'
 import {addDays,day,daysBetween,localInstantOptions} from './dates'
 import {occurrencesBetween} from './occurrences'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {finiteTimedDates,timedWallTemplate,wallValueOn} from './ics-timed'
 import {endFromIcsDuration} from './ics-duration'
+import {validateState} from './storage'
 import {embeddedTimeZones,verifyEmbeddedOffset} from './ics-vtimezone'
 
 export interface IcsPreview {records:CalendarRecord[];warnings:string[];name:string;skippedEvents:number}
@@ -500,20 +501,95 @@ export function exportIcs(state:CalendarState,from:string,through:string,
     // for lossless same-device recovery.
     const uid=privacy==='busy'?crypto.randomUUID()+'@calendar.thiepn.local':
       item.key+'@calendar.thiepn.local'
-    lines.push('BEGIN:VEVENT','UID:'+textValue(uid),'DTSTAMP:'+utcValue(new Date().toISOString()),
-      'SUMMARY:'+textValue(privacy==='busy'?'Busy':item.title))
-    if(privacy==='details'){
-      lines.push('DESCRIPTION:'+textValue(item.description),'LOCATION:'+textValue(item.location))
-    }
-    if(item.allDay){
-      lines.push('DTSTART;VALUE=DATE:'+item.startDate.replace(/-/g,''),'DTEND;VALUE=DATE:'+item.endDateExclusive.replace(/-/g,''))
-    }else lines.push('DTSTART:'+utcValue(item.start),'DTEND:'+utcValue(item.end))
-    if(withReminders&&record.reminderMinutes!==undefined){
-      lines.push('BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+textValue(item.title),
-        'TRIGGER:-PT'+record.reminderMinutes+'M','END:VALARM')
-    }
-    lines.push('END:VEVENT')
+    appendEvent(lines,item,record,uid,privacy,withReminders)
   }
   lines.push('END:VCALENDAR')
   return lines.map(fold).join('\r\n')+'\r\n'
+}
+
+/** Shared original source-backed ICS writer for personal export and H38
+ * human-reviewed read-only Hub handoff. No second recurrence engine. */
+function appendEvent(lines:string[],item:CalendarOccurrence,record:CalendarRecord,
+  uid:string,privacy:PersonalIcsPrivacy,withReminders:boolean,sourceProof=false):void{
+  lines.push('BEGIN:VEVENT','UID:'+textValue(uid),'DTSTAMP:'+utcValue(new Date().toISOString()),
+    'SUMMARY:'+textValue(privacy==='busy'?'Busy':item.title))
+  if(privacy==='details'){
+    lines.push('DESCRIPTION:'+textValue(item.description),'LOCATION:'+textValue(item.location))
+  }
+  if(item.allDay){
+    lines.push('DTSTART;VALUE=DATE:'+item.startDate.replace(/-/g,''),
+      'DTEND;VALUE=DATE:'+item.endDateExclusive.replace(/-/g,''))
+  }else lines.push('DTSTART:'+utcValue(item.start),'DTEND:'+utcValue(item.end))
+  if(sourceProof&&privacy!=='busy'){
+    lines.push('X-THIEPN-SOURCE-OWNER:'+textValue(record.source==='personal'?'CALENDAR':'ICS'),
+      'X-THIEPN-ORIGINAL-RECORD:'+textValue(record.id),
+      'X-THIEPN-OCCURRENCE:'+textValue(item.key),
+      'X-THIEPN-READ-ONLY:TRUE')
+    if(record.sourceCalendar)lines.push('X-THIEPN-SOURCE-CALENDAR:'+textValue(record.sourceCalendar))
+    if(record.sourceTimeZone||record.timeZone)
+      lines.push('X-THIEPN-SOURCE-TZID:'+textValue(record.sourceTimeZone??record.timeZone!))
+  }
+  if(withReminders&&record.source==='personal'&&record.reminderMinutes!==undefined){
+    lines.push('BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:'+textValue(item.title),
+      'TRIGGER:-PT'+record.reminderMinutes+'M','END:VALARM')
+  }
+  lines.push('END:VEVENT')
+}
+export interface HubHandoffOptions{
+  from:string;through:string;privacy:PersonalIcsPrivacy
+  includeImported:boolean
+  /** Exact currently selected instance. Other recurring instances cannot leak. */
+  occurrenceKey?:string
+}
+export interface HubHandoffReview{
+  count:number;personal:number;imported:number;excludedImported:number
+  sources:string[];from:string;through:string;privacy:PersonalIcsPrivacy
+  items:CalendarOccurrence[]
+}
+export function reviewHubHandoff(state:CalendarState,options:HubHandoffOptions):HubHandoffReview{
+  const verified=validateState(state)
+  const from=day(options.from),through=day(options.through)
+  const span=daysBetween(options.from,options.through)
+  if(span<0||span>30)throw new Error('Read-only handoff range must be at most 31 days')
+  if(!['busy','titles','details'].includes(options.privacy)||typeof options.includeImported!=='boolean')
+    throw new Error('Select a supported handoff privacy and source scope')
+  if(options.occurrenceKey!==undefined&&(!options.occurrenceKey||options.occurrenceKey.length>400))
+    throw new Error('Invalid original instance selection')
+  const permitted=verified.records.filter(r=>r.source==='personal'||options.includeImported)
+  const all=occurrencesBetween(permitted,options.from,options.through)
+  const items=options.occurrenceKey?all.filter(x=>x.key===options.occurrenceKey):all
+  if(options.occurrenceKey&&items.length!==1)throw new Error('Selected original occurrence changed or is outside this window')
+  if(!items.length)throw new Error('No source-backed events within this handoff selection')
+  if(items.length>300)throw new Error('More than 300 occurrences. Narrow the handoff range.')
+  const owners=new Map(permitted.map(r=>[r.id,r]))
+  const imported=items.filter(item=>owners.get(item.recordId)?.source==='ics').length
+  const sources=[...new Set(items.map(item=>{
+    const r=owners.get(item.recordId)!
+    return r.source==='personal'?'Calendar personal':r.sourceCalendar??'Imported ICS'
+  }))].sort()
+  if(from.getTime()>through.getTime())throw new Error('Invalid source dates')
+  return {count:items.length,personal:items.length-imported,imported,
+    excludedImported:verified.records.filter(r=>r.source==='ics').length-imported,
+    sources,from:options.from,through:options.through,privacy:options.privacy,items}
+}
+/** This export is a temporary, explicit-consent read-only file; not a new
+ * canonical calendar or a target-app write. The target must separately import. */
+export function exportHubHandoffIcs(state:CalendarState,options:HubHandoffOptions):string{
+  const review=reviewHubHandoff(state,options)
+  const byId=new Map(state.records.map(r=>[r.id,r]))
+  const lines=['BEGIN:VCALENDAR','VERSION:2.0',
+    'PRODID:-//THIEPN//Calendar read-only human handoff//EN','CALSCALE:GREGORIAN',
+    'X-WR-CALNAME:THIEPN Calendar reviewed snapshot']
+  for(const item of review.items){
+    const original=byId.get(item.recordId)
+    if(!original)throw new Error('Original calendar record disappeared')
+    const uid=options.privacy==='busy'?crypto.randomUUID()+'@calendar.thiepn.local':
+      item.key+'@calendar.thiepn.local'
+    appendEvent(lines,item,original,uid,options.privacy,false,true)
+  }
+  lines.push('END:VCALENDAR')
+  const text=lines.map(fold).join('\r\n')+'\r\n'
+  if(new TextEncoder().encode(text).byteLength>2_000_000)
+    throw new Error('Handoff file exceeds Hub 2 MB snapshot limit')
+  return text
 }

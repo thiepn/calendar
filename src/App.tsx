@@ -17,7 +17,7 @@ import {personalDraftFromImported} from './core/personal-copy'
 import {proposeTimedChange,applyTimedChange,type TimedAction} from './core/reschedule'
 import {findAdjustmentAlternatives,type AdjustmentAlternative} from './core/adjustment-alternatives'
 import {exportBackup,importBackup,loadState,saveState,readRecovery,rawCalendarBackup,rescuedUnparsedCalendar,restoreUnreadableCalendar,STORAGE_KEY,type RecoverySnapshot} from './core/storage'
-import {mergeIcs,previewIcs,type IcsPreview} from './core/ics'
+import {mergeIcs,previewIcs,exportHubHandoffIcs,type HubHandoffOptions,type IcsPreview} from './core/ics'
 import {downloadPersonalExport,type ReviewedPersonalExportOptions} from './core/personal-export'
 import {reviewImportedChanges,exportImportedChangeCsv} from './core/ics-change-review'
 import {EventEditor} from './components/EventEditor'
@@ -25,6 +25,7 @@ import {EVENT_DRAFT_KEY,readEventDraft,clearEventDraft,assertDraftCanResume,type
 import {AllDayDialog} from './components/AllDayDialog'
 import {RestoreDialog} from './components/RestoreDialog'
 import {PersonalExportDialog} from './components/PersonalExportDialog'
+import {EcosystemHandoff} from './components/EcosystemHandoff'
 import {ReminderCenter} from './components/ReminderCenter'
 import {OfflineReadiness} from './components/OfflineReadiness'
 import {loadViewPreferences,saveViewPreferences,resetViewPreferences,VIEW_PREFERENCES_KEY,type ViewPreferences} from './core/view-preferences'
@@ -122,6 +123,7 @@ export default function App(){
     id:string;revision:string;etag?:string;lastModified?:string
   }|null>(null)
   const [personalExportOpen,setPersonalExportOpen]=useState(false)
+  const [ecosystemHandoff,setEcosystemHandoff]=useState<CalendarOccurrence|null|true>(null)
   const [mobileNav,setMobileNav]=useState(false)
   const importInput=useRef<HTMLInputElement>(null)
   const restoreInput=useRef<HTMLInputElement>(null)
@@ -798,6 +800,21 @@ export default function App(){
       closeIcsReview()
     }
   }
+  function downloadHubProjection(options:HubHandoffOptions):boolean{
+    try{
+      const latest=loadState()
+      if(latest.error||JSON.stringify(latest.state)!==JSON.stringify(calendar))
+        throw new Error('Original calendar changed. Reopen the snapshot review before sharing.')
+      const text=exportHubHandoffIcs(latest.state,options)
+      download('thiepn-calendar-readonly-'+options.from+'-to-'+options.through+'.ics',
+        text,'text/calendar;charset=utf-8')
+      setNotice('Downloaded the reviewed read-only ICS snapshot. Import it separately in Hub.')
+      return true
+    }catch(error){
+      setNotice('Snapshot not downloaded: '+String(error))
+      return false
+    }
+  }
   function exportReviewedPersonalIcs(options:ReviewedPersonalExportOptions){
     try{
       const latest=loadState()
@@ -1187,6 +1204,8 @@ export default function App(){
               })())
           }}><Clock3 size={15}/> Adjust time & duration</button>}
           {active.source==='personal'&&<button className="secondary" onClick={()=>edit(active)}><Pencil size={15}/> {activeRecord?.repeat?'Edit whole series':'Edit event'}</button>}
+          <button className="secondary" onClick={()=>{setEcosystemHandoff(active);setActive(null)}}>
+            <Download size={15}/> Share read-only snapshot</button>
           <button className="danger" onClick={()=>remove(active.recordId)}><Trash2 size={15}/> {active.source==='ics'?'Remove copy':activeRecord?.repeat?'Delete series':'Delete'}</button>
         </footer>
       </section>
@@ -1245,6 +1264,17 @@ export default function App(){
       <p className="fine-print">Read-only local snapshot; not live sync. Unsupported RRULE masters are skipped with warnings. Neither method modifies Google, Folio, KLIPS or personal events.</p>
       <footer className="editor-actions"><button className="secondary" onClick={closeIcsReview}>Cancel</button><button className="primary" onClick={applyImport} disabled={!importReview?.result}>Apply reviewed changes</button></footer>
     </section></div>}
+    {ecosystemHandoff!==null&&<EcosystemHandoff
+      state={calendar} selectedDate={selected}
+      occurrence={ecosystemHandoff===true?null:ecosystemHandoff}
+      onExport={downloadHubProjection} onClose={()=>{
+        const origin=ecosystemHandoff===true?null:ecosystemHandoff
+        setEcosystemHandoff(null)
+        if(origin){
+          const valid=calendar.records.some(r=>r.id===origin.recordId)
+          if(valid)setActive(origin)
+        }else setSourcePanel(true)
+      }}/>}
     {personalExportOpen&&<PersonalExportDialog state={calendar} selected={selected}
       onClose={()=>setPersonalExportOpen(false)} onExport={exportReviewedPersonalIcs}/>}
     {sourcePanel&&<div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setSourcePanel(false)}}>
@@ -1255,6 +1285,9 @@ export default function App(){
         <SourcePicker sources={sources} hidden={hiddenImportedCalendars} onApply={applyImportedVisibility}
           onToggle={toggleImported} onRemove={removeSource} error={sourcePickerError}/>
         {!sources.length&&<p className="empty-note">No imported ICS snapshots.</p>}
+        <button type="button" className="secondary" onClick={()=>{
+          setSourcePanel(false);setEcosystemHandoff(true)
+        }}><Download size={16}/> Share selected events to Hub</button>
         <SubscriptionManager subscriptions={subscriptions.items} error={subscriptionError}
           activeId={checkingFeedId} onAdd={addFeed} onCheck={checkFeed}
           onCancel={cancelFeed} onRemove={removeFeed}/>

@@ -3967,6 +3967,127 @@ async function exerciseC37MobileOfflineAbortReloadAndManualRetry(){
   await context.close()
 }
 
+
+async function exerciseC38DesktopReviewedHubOriginalOccurrenceAndSources(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',
+    locale:'en-GB',acceptDownloads:true})
+  const page=await context.newPage()
+  const errors=[];page.on('pageerror',e=>errors.push(e.message))
+  const records=[
+    {id:'c38-original-personal',source:'personal',title:'C38 personal source',
+      description:'Confidential meeting notes',location:'Private room 99',allDay:false,
+      timeZone:'Europe/Berlin',start:'2026-11-26T09:00:00.000Z',
+      end:'2026-11-26T10:00:00.000Z',updatedAt:'2026-10-19T06:00:00.000Z'},
+    {id:'ics-c38-original-source',source:'ics',title:'C38 imported university lecture',
+      description:'Academic original provider',location:'Institute',allDay:false,
+      sourceCalendar:'University original source',sourceKey:'University original source|uid-38',
+      sourceTimeZone:'Europe/Berlin',start:'2026-11-26T11:00:00.000Z',
+      end:'2026-11-26T12:00:00.000Z',updatedAt:'2026-10-19T06:00:00.000Z'}
+  ]
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.evaluate(rows=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records:rows})),records)
+  await page.reload({waitUntil:'networkidle'})
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.locator('.timeline-block').filter({hasText:'C38 personal source'}).first().click()
+  await page.getByRole('dialog',{name:'Event details'}).getByRole('button',{name:'Share read-only snapshot'}).click()
+  let handoff=page.getByRole('dialog',{name:'Calendar ecosystem handoff'})
+  await handoff.waitFor()
+  assert.equal(await handoff.getByLabel('Handoff source preview').locator('li').count(),1)
+  assert.match(await handoff.getByLabel('Handoff source preview').innerText(),/C38 personal source/)
+  assert.equal(await handoff.getByRole('button',{name:'Download reviewed snapshot'}).isDisabled(),true)
+  await handoff.getByLabel('Handoff privacy').selectOption('busy')
+  await handoff.getByLabel('Confirm read-only handoff').check()
+  const firstDownload=page.waitForEvent('download')
+  await handoff.getByRole('button',{name:'Download reviewed snapshot'}).click()
+  const first=await firstDownload
+  const busy=await readFile(await first.path(),'utf-8')
+  assert.equal(busy.split('BEGIN:VEVENT').length-1,1)
+  assert.ok(busy.includes('SUMMARY:Busy'))
+  for(const secret of ['C38 personal source','Confidential meeting notes','Private room 99','c38-original-personal',
+    'C38 imported university lecture','University original source'])assert.ok(!busy.includes(secret),secret)
+  assert.equal(await handoff.getByRole('link',{name:'Open Hub calendar'}).getAttribute('href'),
+    'https://thiepn.dev/home/calendar/')
+  assert.equal(await handoff.getByRole('link',{name:'Open StudyOS Today'}).getAttribute('href'),
+    'https://study.thiepn.dev/')
+  assert.equal(await handoff.getByRole('link',{name:'Open Folio'}).getAttribute('href'),
+    'https://thiepn.dev/folio/')
+  for(const link of await handoff.getByRole('link').all()){
+    assert.equal(await link.getAttribute('target'),'_blank')
+    assert.match(await link.getAttribute('rel'),/noreferrer/)
+  }
+  await handoff.getByRole('button',{name:'Return to Calendar'}).click()
+  await page.getByRole('dialog',{name:'Event details'}).waitFor()
+  await page.getByRole('dialog',{name:'Event details'}).getByRole('button',{name:'Close event'}).click()
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  let sources=page.getByRole('dialog',{name:'Calendar data management'})
+  await sources.getByRole('button',{name:'Share selected events to Hub'}).click()
+  handoff=page.getByRole('dialog',{name:'Calendar ecosystem handoff'})
+  await handoff.waitFor()
+  assert.equal(await handoff.getByLabel('Handoff source preview').locator('li').count(),1)
+  await handoff.getByLabel('Include imported read-only sources').check()
+  assert.equal(await handoff.getByLabel('Handoff source preview').locator('li').count(),2)
+  await handoff.getByLabel('Handoff privacy').selectOption('details')
+  await handoff.getByLabel('Confirm read-only handoff').check()
+  const secondDownload=page.waitForEvent('download')
+  await handoff.getByRole('button',{name:'Download reviewed snapshot'}).click()
+  const second=await secondDownload
+  const payload=await readFile(await second.path(),'utf-8')
+  assert.equal(payload.split('BEGIN:VEVENT').length-1,2)
+  assert.match(payload,/X-THIEPN-ORIGINAL-RECORD:c38-original-personal/)
+  assert.match(payload,/X-THIEPN-ORIGINAL-RECORD:ics-c38-original-source/)
+  assert.match(payload,/X-THIEPN-SOURCE-TZID:Europe\/Berlin/)
+  assert.match(payload,/DESCRIPTION:Confidential meeting notes/)
+  assert.match(payload,/DTSTART:20261126T090000Z/)
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C38_DESKTOP_VERIFIED_HUB_SNAPSHOT_REVIEW_PRIVACY_OWNER_LINKS_NO_WRITES_PASS')
+  await context.close()
+}
+async function exerciseC38MobileHandoffRangeAndPrivacyBoundary(){
+  const context=await browser.newContext({viewport:{width:390,height:844},
+    isMobile:true,hasTouch:true,timezoneId:'Europe/Berlin',locale:'en-GB',acceptDownloads:true})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  await page.evaluate(()=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records:[
+      {id:'c38-mobile-record',title:'C38 mobile original',description:'',
+        location:'',start:'2026-11-26T09:00:00.000Z',end:'2026-11-26T10:00:00.000Z',
+        allDay:false,source:'personal',timeZone:'Europe/Berlin',updatedAt:'2026-10-19T07:00:00.000Z'}
+    ]})))
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  let sources=page.getByRole('dialog',{name:'Calendar data management'})
+  await sources.getByRole('button',{name:'Share selected events to Hub'}).click()
+  const handoff=page.getByRole('dialog',{name:'Calendar ecosystem handoff'})
+  await handoff.waitFor()
+  await handoff.getByLabel('Handoff through date').fill('2027-02-10')
+  await handoff.getByRole('alert').getByText(/31 days/).waitFor()
+  assert.equal(await handoff.getByRole('button',{name:'Download reviewed snapshot'}).isDisabled(),true)
+  await handoff.getByLabel('Handoff through date').fill('2026-11-29')
+  await handoff.getByLabel('Confirm read-only handoff').check()
+  const downloadPromise=page.waitForEvent('download')
+  await handoff.getByRole('button',{name:'Download reviewed snapshot'}).click()
+  const download=await downloadPromise
+  const ics=await readFile(await download.path(),'utf-8')
+  assert.match(ics,/SUMMARY:C38 mobile original/)
+  assert.match(ics,/X-THIEPN-ORIGINAL-RECORD:c38-mobile-record/)
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+  const width=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:innerWidth}))
+  assert.ok(width.scroll<=width.width+2,'C38 mobile handoff overflow')
+  await handoff.getByRole('button',{name:'Return to Calendar'}).click()
+  await sources.waitFor()
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C38_MOBILE_REVIEW_RANGE_NO_WRITES_RESTORE_SOURCE_PANEL_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -4046,6 +4167,8 @@ try{
   await exerciseC36MobileBadZoneBlocksReplaceAndKeepsOriginal()
   await exerciseC37DesktopManualFeedReviewConditionalAndSourceLock()
   await exerciseC37MobileOfflineAbortReloadAndManualRetry()
+  await exerciseC38DesktopReviewedHubOriginalOccurrenceAndSources()
+  await exerciseC38MobileHandoffRangeAndPrivacyBoundary()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true

@@ -784,3 +784,35 @@
  .subscription-actions{display:grid;grid-template-columns:1fr 1fr}
  .subscription-actions button{min-width:0}
 }
+
+.ecosystem-handoff-backdrop{z-index:1120;padding:16px;display:flex;align-items:center;justify-content:center}
+.ecosystem-handoff{width:min(660px,100%);max-height:92dvh;overflow-y:auto;min-width:0}
+.ecosystem-handoff .handoff-scope{display:flex;gap:14px;flex-wrap:wrap;margin:14px 0}
+.ecosystem-handoff .handoff-scope label{display:flex;gap:7px;align-items:center;min-height:42px;font-size:15px}
+.handoff-dates{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.handoff-dates label,.handoff-options>label:not(.handoff-check){min-width:0;display:grid;gap:6px;font-size:15px}
+.handoff-dates input,.handoff-options select{min-width:0;width:100%;min-height:44px;font-size:16px}
+.handoff-options{display:grid;gap:14px;margin:14px 0}
+.handoff-check{display:flex;gap:9px;align-items:start;line-height:1.5;font-size:14px}
+.handoff-check input{flex-shrink:0;width:19px;height:19px;margin-top:2px}
+.handoff-review{border-top:1px solid #d4ddd6;border-bottom:1px solid #d4ddd6;padding:12px 0;margin:16px 0}
+.handoff-review strong{font-size:16px}
+.handoff-review p{margin:5px 0;font-size:14px;overflow-wrap:anywhere}
+.handoff-review ol{max-height:180px;overflow:auto;margin:9px 0 0;padding-left:22px}
+.handoff-review li{margin-bottom:9px;line-height:1.35}
+.handoff-review li span{display:block;font-size:14px}
+.handoff-review li small{font-size:13px}
+.handoff-actions{display:flex;align-items:center;flex-wrap:wrap;gap:14px;margin:18px 0}
+.handoff-actions button{min-height:44px}
+.handoff-actions a,.handoff-owner-links a{font-size:15px;text-decoration:underline;text-underline-offset:2px}
+.handoff-owner-links{display:grid;grid-template-columns:1fr 1fr;gap:13px;border-top:1px solid #d4ddd6;padding-top:14px}
+.handoff-owner-links strong{font-size:16px}
+.handoff-owner-links p{font-size:14px;line-height:1.5;margin:6px 0 10px}
+@media(max-width:740px){
+ .ecosystem-handoff-backdrop{padding:8px}
+ .ecosystem-handoff{width:100%;max-height:95dvh;padding:14px}
+ .handoff-dates,.handoff-owner-links{grid-template-columns:1fr}
+ .handoff-actions{display:grid;gap:12px}
+ .handoff-actions button{width:100%}
+ .handoff-review ol{max-height:150px}
+}
