@@ -4,6 +4,7 @@ import {occurrencesBetween} from './occurrences'
 import {parseFiniteAllDayRule,expandFiniteAllDay} from './ics-recurrence'
 import {finiteTimedDates,timedWallTemplate,wallValueOn} from './ics-timed'
 import {endFromIcsDuration} from './ics-duration'
+import {embeddedTimeZones,verifyEmbeddedOffset} from './ics-vtimezone'
 
 export interface IcsPreview {records:CalendarRecord[];warnings:string[];name:string;skippedEvents:number}
 type Property={name:string;params:Record<string,string>;value:string}
@@ -141,6 +142,9 @@ export function previewIcs(text:string):IcsPreview {
   if(stack.length||!calendarClosed)
     throw new Error('Incomplete ICS file: missing END:VEVENT or END:VCALENDAR')
   if(!items.length)throw new Error('ICS snapshot contains no VEVENT entries; empty deletion-only snapshots are not supported')
+  const declaredZones=embeddedTimeZones(lines)
+  for(const declaration of declaredZones.values())if(declaration.hasRecurrence)
+    warnings.push('VTIMEZONE '+declaration.id+': installed IANA rules resolve instants; embedded RRULE transitions were not independently applied.')
   // Resolve all-day recurrence overrides regardless of their position in the ICS file.
   const replacements=new Map<string,Property[]>()
   const duplicateAllDayOverrides=new Set<string>()
@@ -168,6 +172,17 @@ export function previewIcs(text:string):IcsPreview {
       for(const unique of ['DTSTART','DTEND','DURATION','RRULE','UID','RECURRENCE-ID']){
         if(props.filter(p=>p.name===unique).length>1)
           throw new Error('Duplicate '+unique+' property in source event')
+      }
+      // A named IANA timezone can be used without a VTIMEZONE block. When a
+      // source embeds its own offset declaration, require agreement with the
+      // same installed IANA rules used for resolution before accepting any UID.
+      for(const part of props){
+        if(!part.params.TZID||!['DTSTART','DTEND','RECURRENCE-ID','RDATE','EXDATE'].includes(part.name))continue
+        for(const value of part.value.split(',')){
+          const parsed=parseInstant({...part,value})
+          if(parsed.date)throw new Error('TZID cannot modify DATE-only event identity')
+          verifyEmbeddedOffset(part.params.TZID,parsed.iso,declaredZones)
+        }
       }
       const masterTransparent=readTransparency(props)
       if(get('RECURRENCE-ID')?.params.RANGE)
@@ -277,7 +292,10 @@ export function previewIcs(text:string):IcsPreview {
             const sourceKey=name+'|'+uid+'|'+original
             generated.push({id:'ics-'+hash(sourceKey),source:'ics',sourceCalendar:name,sourceKey,
               title:updatedTitle,description,location,start:from.iso,end:to.iso,allDay:false,
-              ...(free?{transparent:true}:{}),updatedAt:new Date().toISOString()})
+              ...(free?{transparent:true}:{}),
+              ...((fromProp?.params.TZID??rawStart.params.TZID)?{
+                sourceTimeZone:fromProp?.params.TZID??rawStart.params.TZID}:{}),
+              updatedAt:new Date().toISOString()})
           }
           if(Array.from(overrides.keys()).some(key=>!generatedKeys.has(key)))
             throw new Error('Timed recurrence contains an override outside the supported bounded series')
@@ -397,7 +415,9 @@ export function previewIcs(text:string):IcsPreview {
       records.push({id:'ics-'+hash(sourceKey),source:'ics',sourceCalendar:name,sourceKey,
         title,description,location,start:start.iso,end:end.iso,allDay:Boolean(start.date),
         startDate:start.date,endDateExclusive:end.date,
-        ...(masterTransparent?{transparent:true}:{}),updatedAt:new Date().toISOString()})
+        ...(masterTransparent?{transparent:true}:{}),
+        ...(!start.date&&rawStart.params.TZID?{sourceTimeZone:rawStart.params.TZID}:{}),
+        updatedAt:new Date().toISOString()})
     }catch(error){skippedEvents++;warnings.push(title+': '+(error instanceof Error?error.message:String(error)))}
   }
   return {records,warnings,name,skippedEvents}
@@ -423,7 +443,7 @@ export function mergeIcs(state:CalendarState,preview:IcsPreview,mode:'update'|'r
     seenKeys.add(record.sourceKey)
     const existing=prior.get(record.sourceKey)
     if(existing){
-      const keys=['title','description','location','start','end','allDay','startDate','endDateExclusive','transparent'] as const
+      const keys=['title','description','location','start','end','allDay','startDate','endDateExclusive','transparent','sourceTimeZone'] as const
       const same=keys.every(k=>existing[k]===record[k])
       if(same)duplicates++;else updated++
       const chosen=same?existing:{...record,id:existing.id}

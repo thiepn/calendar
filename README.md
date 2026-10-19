@@ -606,3 +606,37 @@ C35 travel-view navigation: Now & next and event-details "Show this day"
 use the viewer's actual device-local calendar date for a timed event;
 canonical source-local recurrence dates are deliberately unchanged for
 splitting, detached overrides, recovery and original ICS identities.
+
+
+## C36 — IANA VTIMEZONE provenance and guarded ICS refresh
+
+The original ICS importer now examines the enclosing VTIMEZONE declarations,
+including STANDARD/DAYLIGHT offsets. Safely recognized IANA TZID sources have
+their UTC offsets checked against the browser's IANA rules for each referenced
+source event. Contradictory or malformed embedded timezone data cannot produce
+a trustworthy complete source replacement; invalid events are skipped and
+the existing incomplete-source protection prevents destructive replacement.
+
+The browser's IANA rules still resolve real instants; embedded recurring
+VTIMEZONE RRULE transitions are NOT independently executed. The import
+review explicitly warns about that limitation rather than claiming arbitrary
+historical VTIMEZONE interoperability. Unsupported vendor/Windows timezone
+aliases are not guessed or silently remapped.
+
+Imported timed events preserve an optional original IANA sourceTimeZone
+field. The user sees that immutable source timezone in event details and
+the import review, while canonical UTC starts/ends, imported UID identities,
+recurrence overrides, read-only authority, free/busy, original CAS, checkpoints,
+and saved-event backups remain unchanged. Meaningful source TZID changes
+appear in the existing original-source change review, not a separate index.
+
+Focused original-source tests cover realistic STANDARD/DAYLIGHT ICS,
+detached RECURRENCE-ID source preservation through refresh, unsupported
+vendor zones, missing embedded definitions, inconsistent offsets and
+incomplete source replacement. Genuine Chromium desktop/mobile flows also
+exercise source-zone display, read-only source authority, stable source IDs,
+and incomplete refresh safety.
+
+Next C37 (proposed): explicitly consented ICS subscription and refresh
+provenance, stale-feed safety and user-reviewed updates. C36 adds no remote
+polling, providers, accounts, credentials, migrations or background writes.

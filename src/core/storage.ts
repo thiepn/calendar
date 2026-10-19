@@ -17,6 +17,10 @@ export function validateRecord(value:unknown):CalendarRecord {
     if(r.source!=='personal'||r.allDay)throw new Error('Only timed personal events own time zones')
     validTimeZone(r.timeZone)
   }
+  if(r.sourceTimeZone!==undefined){
+    if(r.source!=='ics'||r.allDay)throw new Error('Only timed imported events own read-only source TZID')
+    validTimeZone(r.sourceTimeZone)
+  }
   if(r.transparent!==undefined&&(r.source!=='ics'||r.transparent!==true))
     throw new Error('Only imported ICS records may explicitly be non-blocking')
   if(r.reminderMinutes!==undefined&&(!validReminderLead(r.reminderMinutes)||r.source!=='personal'))

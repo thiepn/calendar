@@ -3709,6 +3709,104 @@ async function exerciseC35DesktopRecurrenceOriginalZoneAndKeepInstant(){
   await context.close()
 }
 
+
+async function exerciseC36DesktopSourceZoneAndDetachedUidRefresh(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const zone=['BEGIN:VTIMEZONE','TZID:Europe/Berlin',
+    'BEGIN:DAYLIGHT','DTSTART:20260329T020000','TZOFFSETFROM:+0100','TZOFFSETTO:+0200',
+    'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU','END:DAYLIGHT',
+    'BEGIN:STANDARD','DTSTART:20261025T030000','TZOFFSETFROM:+0200','TZOFFSETTO:+0100',
+    'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU','END:STANDARD','END:VTIMEZONE'].join('\r\n')
+  const series=['BEGIN:VEVENT','UID:c36-department-uid','SUMMARY:C36 Campus original',
+    'DTSTART;TZID=Europe/Berlin:20261126T090000',
+    'DTEND;TZID=Europe/Berlin:20261126T100000',
+    'RRULE:FREQ=DAILY;COUNT=2','END:VEVENT'].join('\r\n')
+  const override=['BEGIN:VEVENT','UID:c36-department-uid',
+    'RECURRENCE-ID;TZID=Europe/Berlin:20261127T090000',
+    'DTSTART;TZID=Europe/Berlin:20261127T113000',
+    'DTEND;TZID=Europe/Berlin:20261127T123000',
+    'SUMMARY:C36 Campus moved','END:VEVENT'].join('\r\n')
+  const calendar=(events,z=zone)=>['BEGIN:VCALENDAR','VERSION:2.0',
+    'X-WR-CALNAME:C36 Campus',z,events,'END:VCALENDAR'].filter(Boolean).join('\r\n')
+  const put=ics=>page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'source-vtimezone.ics',mimeType:'text/calendar',buffer:Buffer.from(ics)})
+  await put(calendar(series))
+  let review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  assert.match(await review.locator('.import-preview').innerText(),/Europe\/Berlin/)
+  assert.match(await review.getByLabel('Import change preview').innerText(),/2 new/)
+  assert.match(await review.innerText(),/embedded RRULE transitions were not independently applied/)
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const initial=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(initial.records.length,2)
+  assert.ok(initial.records.every(r=>r.source==='ics'&&r.sourceTimeZone==='Europe/Berlin'))
+  await page.getByLabel('Jump to date').fill('2026-11-26')
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.locator('.timeline-block').filter({hasText:'C36 Campus original'}).first().click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  assert.match(await details.innerText(),/Imported source timezone: Europe\/Berlin/)
+  assert.equal(await details.getByRole('button',{name:'Edit event'}).count(),0)
+  await details.getByRole('button',{name:'Close event'}).click()
+  await put(calendar([override,series].join('\r\n')))
+  review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  assert.match(await review.getByLabel('Import change preview').innerText(),/1 updated/)
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const refreshed=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(refreshed.records.length,2)
+  const original=initial.records.find(r=>r.sourceKey?.includes('2026-11-27T08:00'))!
+  const current=refreshed.records.find(r=>r.id===original.id)
+  assert.ok(current,'Original detached UID must retain its source identity')
+  assert.equal(current.title,'C36 Campus moved')
+  assert.equal(current.start,'2026-11-27T10:30:00.000Z')
+  assert.equal(current.sourceTimeZone,'Europe/Berlin')
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C36_DESKTOP_VTIMEZONE_SOURCE_ZONE_DETACHED_REFRESH_PASS')
+  await context.close()
+}
+async function exerciseC36MobileBadZoneBlocksReplaceAndKeepsOriginal(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const good=['BEGIN:VCALENDAR','VERSION:2.0','X-WR-CALNAME:C36 Mobile Source',
+    'BEGIN:VEVENT','UID:c36-mobile-uid','SUMMARY:C36 Original mobile source',
+    'DTSTART;TZID=Europe/Berlin:20261126T090000',
+    'DTEND;TZID=Europe/Berlin:20261126T100000','END:VEVENT','END:VCALENDAR'].join('\r\n')
+  const put=ics=>page.locator('input[accept=".ics,text/calendar"]').setInputFiles({
+    name:'vendor-mobile.ics',mimeType:'text/calendar',buffer:Buffer.from(ics)})
+  await put(good)
+  const initialReview=page.getByRole('dialog',{name:'ICS import review'})
+  await initialReview.getByRole('button',{name:'Apply reviewed changes'}).click()
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(saved.records[0].sourceTimeZone,'Europe/Berlin')
+  await page.reload({waitUntil:'networkidle'})
+  const badZone=['BEGIN:VTIMEZONE','TZID:Europe/Berlin',
+    'BEGIN:STANDARD','DTSTART:20261025T030000','TZOFFSETFROM:+1200','TZOFFSETTO:+1100',
+    'END:STANDARD','END:VTIMEZONE'].join('\r\n')
+  await put(good.replace('BEGIN:VEVENT',badZone+'\r\nBEGIN:VEVENT'))
+  const review=page.getByRole('dialog',{name:'ICS import review'})
+  await review.waitFor()
+  assert.match(await review.innerText(),/source event could not be read/)
+  assert.match(await review.innerText(),/VTIMEZONE offset disagrees/)
+  await review.locator('input[type="radio"]').nth(1).check()
+  assert.match(await review.getByRole('alert').innerText(),/Cannot replace an incomplete ICS snapshot/)
+  assert.equal(await review.getByRole('button',{name:'Apply reviewed changes'}).isDisabled(),true)
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),saved)
+  await review.locator('input[type="radio"]').nth(0).check()
+  await review.getByRole('button',{name:'Apply reviewed changes'}).click()
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),saved)
+  const width=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:innerWidth}))
+  assert.ok(width.scroll<=width.width+2,'Mobile ICS source-zone content overflow')
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C36_MOBILE_SOURCE_ZONE_MISMATCH_SAFE_REFRESH_NO_WRITES_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -3784,6 +3882,8 @@ try{
   await exerciseC34DesktopRecurringResumeAndStaleBlock()
   await exerciseC35MobileIanaClockReloadAndTravel()
   await exerciseC35DesktopRecurrenceOriginalZoneAndKeepInstant()
+  await exerciseC36DesktopSourceZoneAndDetachedUidRefresh()
+  await exerciseC36MobileBadZoneBlocksReplaceAndKeepsOriginal()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true

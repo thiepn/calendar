@@ -1010,6 +1010,7 @@ export default function App(){
           </button>
         </nav>
         <h2>{active.title}</h2><p className="details-dates">{active.allDay?'All day · '+friendlyRange(active.startDate,addDays(active.endDateExclusive,-1)):new Date(active.start).toLocaleString()+' – '+new Date(active.end).toLocaleString()}</p>
+        {activeRecord?.sourceTimeZone&&!active.allDay&&<p className="details-event-zone"><strong>Imported source timezone:</strong> {activeRecord.sourceTimeZone} · {zoneWall(active.start,activeRecord.sourceTimeZone)} – {zoneWall(active.end,activeRecord.sourceTimeZone)} (read only)</p>}
         {activeRecord?.timeZone&&!active.allDay&&<p className="details-event-zone"><strong>Event time zone:</strong> {activeRecord.timeZone} · {zoneWall(active.start,activeRecord.timeZone)}–{zoneWall(active.end,activeRecord.timeZone).slice(11)} (device: {deviceTimeZone()})</p>}
         <button type="button" className="details-show-day secondary compact"
           onClick={()=>{setMode('day');setSelected(active.allDay?active.date:localDate(new Date(active.start)));setActive(null)}}>
@@ -1055,7 +1056,7 @@ export default function App(){
       {pending.skippedEvents>0&&<p className="incomplete-ics-notice" role="status">
         {pending.skippedEvents} source event{pending.skippedEvents===1?'':'s'} could not be read. Update matching UIDs retains earlier read-only copies; full replacement is blocked to prevent deletion of omitted records.
       </p>}
-      <div className="import-preview">{pending.records.slice(0,7).map(r=><div key={r.id}><span>{r.title}</span><small>{r.startDate??new Date(r.start).toLocaleString()}</small></div>)}{pending.records.length>7&&<p>+{pending.records.length-7} additional entries</p>}</div>
+      <div className="import-preview">{pending.records.slice(0,7).map(r=><div key={r.id}><span>{r.title}</span><small>{r.startDate??new Date(r.start).toLocaleString()}{r.sourceTimeZone?' · '+r.sourceTimeZone:''}</small></div>)}{pending.records.length>7&&<p>+{pending.records.length-7} additional entries</p>}</div>
       {pending.warnings.length>0&&<div className="import-warnings"><b>{pending.warnings.length} skipped or warned events</b>{pending.warnings.slice(0,12).map((w,i)=><p key={i}>{w}</p>)}</div>}
       <fieldset className="import-options"><legend>How to handle this calendar</legend>
         <label><input type="radio" checked={importMode==='update'} onChange={()=>setImportMode('update')}/> Add new entries and refresh matching event UIDs; keep others</label>
@@ -1084,7 +1085,7 @@ export default function App(){
                 {after&&before.title!==after.title?' · '+before.title:''}</small>}
               {after&&<small>After: {after.allDay?after.startDate:new Date(after.start).toLocaleString()}</small>}
               {after?.transparent&&<small>Free · does not block time</small>}
-              {item.changedFields.length>0&&<small>Changed: {item.changedFields.map(field=>field==='transparent'?'free/busy status':field).join(', ')}</small>}
+              {item.changedFields.length>0&&<small>Changed: {item.changedFields.map(field=>field==='transparent'?'free/busy status':field==='sourceTimeZone'?'source time zone':field).join(', ')}</small>}
             </div>
           })}
           {!importReview.changes.changes.some(item=>item.kind!=='unchanged')&&

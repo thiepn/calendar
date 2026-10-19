@@ -24,6 +24,8 @@ export interface CalendarRecord {
   transparent?: boolean
   sourceCalendar?: string
   sourceKey?: string
+  /** Original IANA TZID for a read-only imported timed event, not editable authority. */
+  sourceTimeZone?:string
   /** An independently editable personal replacement for a recurring instance. */
   recurrenceParentId?: string
   recurrenceDate?: LocalDate
