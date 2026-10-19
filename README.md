@@ -498,3 +498,31 @@ The pure `src/core/now-next.ts` adds no source copies, secondary store,
 writer, reminder scheduler, navigation persistence, schema or production
 network actions. All original save CAS, recoverability and privacy remain
 unchanged.
+
+## C33 — searchable and batch-editable imported calendar visibility
+
+Previously the desktop/mobile sidebar displayed only the **first five**
+imported source names (`sources.slice(0,5)`). "Manage sources" listed
+every import as an unfiltered stack with one-by-one checkboxes; learners
+with many source-owned ICS calendars had to scroll through dozens of
+records just to find or temporarily isolate a relevant source.
+
+The original **Sources & data** dialog now includes a responsive
+**Imported calendar visibility** picker: source-name search, truthful
+shown/hidden and match counts, eight sources per page, preserved original
+per-source checkboxes/removal controls, plus explicit **Show matching**,
+**Hide matching** and (for a nonempty query) **Only matching imports**
+actions. These operate on all name matches, not just the visible page.
+The sidebar explicitly discloses how many imports are beyond the first
+five. Personal event visibility is unaffected by matching/only filters.
+The old 80-hidden-name preference schema limit is enforced with an honest
+error rather than silently truncating a batch.
+
+`src/core/source-picker.ts` is a pure, validated transformation of the
+**existing display preference list**. It preserves dormant source names
+in preferences so reimporting the same source retains user choices;
+source names are compared exactly and safe with `__proto__` keys.
+The existing `visibleCalendarRecords` controls display/search/planning.
+The complete original ICS/event array still controls availability and
+overlap review, guarded CAS, portable backups/recovery and source identity.
+No new store, schema, source write, provider sync, or Folio delegation.

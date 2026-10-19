@@ -703,3 +703,34 @@
  .now-next-event-actions button{min-height:44px;min-width:57px;font-size:11px}
  .now-next-footnote{font-size:11px}
 }
+
+/* C33 import-source picker: existing view preferences, never source writes. */
+.source-picker{border:1px solid #d7e2d9;padding:12px;background:#f8faf7;margin:9px 0 16px;min-width:0}
+.source-picker-heading{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 9px}
+.source-picker-heading h3{font-family:Georgia,serif;font-size:17px;margin:0;color:#345841;font-weight:500}
+.source-picker-heading p{margin:0;color:#62796a;font-size:11px}
+.source-picker-search{display:flex;align-items:center;gap:8px;margin:12px 0 8px;background:white;
+ border:1px solid #cfded3;padding:8px 10px;color:#5e8069;min-height:44px}
+.source-picker-search input{min-width:0;width:100%;background:transparent;border:0;outline:0;font-size:16px;color:#314d3c}
+.source-picker-result{font-size:11px;color:#557664;line-height:1.5;margin:6px 0}
+.source-picker-batch{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:9px 0}
+.source-picker-batch button{min-width:0;min-height:40px;padding:6px;font-size:11px;white-space:normal}
+.source-picker-batch button:disabled{opacity:.48;cursor:not-allowed}
+.source-picker-caption{font-size:11px;color:#758578;line-height:1.5;margin:7px 0 10px}
+.source-picker-error{padding:8px;border:1px solid #e1a699;background:#fff2eb;color:#a24835;font-size:12px;line-height:1.5}
+.source-picker-list{max-height:340px;overflow-y:auto;overscroll-behavior:contain;padding-right:3px}
+.source-picker-list .source-card{background:#fff;margin-bottom:6px}
+.source-picker-pages{display:flex;align-items:center;justify-content:space-between;gap:6px;padding-top:10px;flex-wrap:wrap}
+.source-picker-pages span{font-size:10px;text-align:center;color:#6a8370}
+.source-picker-pages button{min-height:39px;font-size:11px;white-space:normal}
+@media(max-width:740px){
+ .source-picker{padding:9px;margin-top:9px}
+ .source-picker-heading{display:grid}
+ .source-picker-batch{grid-template-columns:1fr 1fr;gap:8px}
+ .source-picker-batch button{min-height:44px;font-size:12px}
+ .source-picker-batch button:last-child{grid-column:1/-1}
+ .source-picker-list{max-height:42dvh}
+ .source-picker-pages{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+ .source-picker-pages span{grid-row:1;grid-column:1/-1}
+ .source-picker-pages button{min-height:44px}
+}

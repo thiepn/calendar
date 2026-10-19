@@ -33,6 +33,8 @@ import {applyAllDayChange,type AllDayProposal} from './core/all-day'
 import {CalendarViews,type Mode} from './components/CalendarViews'
 import {MonthDayPeek} from './components/MonthDayPeek'
 import {NowNext} from './components/NowNext'
+import {SourcePicker} from './components/SourcePicker'
+import {applySourcePicker,type SourcePickerAction} from './core/source-picker'
 
 type Filter='all'|'personal'|'ics'
 function download(name:string,contents:string,type:string){
@@ -94,6 +96,7 @@ export default function App(){
   const [monthPeekDate,setMonthPeekDate]=useState<LocalDate|null>(null)
   const [pending,setPending]=useState<IcsPreview|null>(null)
   const [sourcePanel,setSourcePanel]=useState(false)
+  const [sourcePickerError,setSourcePickerError]=useState('')
   const [personalExportOpen,setPersonalExportOpen]=useState(false)
   const [mobileNav,setMobileNav]=useState(false)
   const importInput=useRef<HTMLInputElement>(null)
@@ -276,8 +279,18 @@ export default function App(){
   }
   const sources=Array.from(sourceCounts.entries()).sort((a,b)=>a[0].localeCompare(b[0]))
   function toggleImported(name:string){
-    try{setHiddenImportedCalendars(current=>toggleImportedCalendarVisibility(current,name))}
-    catch(error){setNotice('Imported calendar visibility unchanged: '+String(error))}
+    try{setHiddenImportedCalendars(current=>toggleImportedCalendarVisibility(current,name));setSourcePickerError('')}
+    catch(error){setSourcePickerError('Visibility unchanged: '+String(error))}
+  }
+  function applyImportedVisibility(action:SourcePickerAction,matching:string[]){
+    try{
+      const next=applySourcePicker(hiddenImportedCalendars,sources.map(([name])=>name),matching,action)
+      setHiddenImportedCalendars(next)
+      setSourcePickerError('')
+      setNotice('Updated display visibility for '+matching.length+' matching imported calendar'+(matching.length===1?'':'s')+'. Busy source records remain included in Find time.')
+    }catch(error){
+      setSourcePickerError('Visibility unchanged: '+String(error))
+    }
   }
   const personalCount=calendar.records.filter(x=>x.source==='personal').length
   const activeRecord=active?calendar.records.find(x=>x.id===active.recordId):undefined
@@ -652,6 +665,7 @@ export default function App(){
           <span className="source-swatch ics" aria-hidden="true"/><span className="source-name">{name}</span>
           <small>{hiddenImportedSet.has(name)?'Hidden':'Shown'}</small>
         </button>)}
+        {sources.length>5&&<p className="source-filter-note">{sources.length-5} additional imported calendars are available in Manage sources.</p>}
         {hiddenImportedCalendars.some(name=>sourceCounts.has(name))&&
           <p className="source-filter-note">Hidden snapshots remain saved and still block Find Time suggestions.</p>}
         <button className="text-action" onClick={()=>{setSourcePanel(true);setMobileNav(false)}}>Manage sources <ChevronRight size={14}/></button>
@@ -1032,15 +1046,8 @@ export default function App(){
         <header className="editor-head"><h2>Sources & data</h2><button className="icon-button" aria-label="Close sources" onClick={()=>setSourcePanel(false)}><X size={19}/></button></header>
         <div className="source-card"><strong>Personal <span>{personalCount} records</span></strong><p>Editable device-local events. This is not Folio's schedule.</p></div>
         <p className="fine-print">Show or hide each imported snapshot without deleting its source records. Hidden snapshots are excluded from calendar views, search, workload and visible agenda exports; Find Time and overlap checks still include every saved commitment.</p>
-        {sources.map(([name,count])=><div key={name} className="source-card source-visibility-card">
-          <strong><span className="source-card-name">{name}</span><span>{count} entries</span></strong>
-          <p>ICS snapshot · read-only · no ongoing provider connection</p>
-          <div className="source-visibility-actions">
-            <label><input type="checkbox" aria-label={'Show '+name+' on calendar'} checked={!hiddenImportedSet.has(name)}
-              onChange={()=>toggleImported(name)}/> Show on calendar</label>
-            <button className="danger small" onClick={()=>removeSource(name)}>Remove local copy</button>
-          </div>
-        </div>)}
+        <SourcePicker sources={sources} hidden={hiddenImportedCalendars} onApply={applyImportedVisibility}
+          onToggle={toggleImported} onRemove={removeSource} error={sourcePickerError}/>
         {!sources.length&&<p className="empty-note">No imported ICS snapshots.</p>}
         <hr/><h3>Backups & interop</h3><div className="button-stack">
           <button className="secondary" onClick={()=>importInput.current?.click()}><Upload size={16}/> Import ICS snapshot</button>
