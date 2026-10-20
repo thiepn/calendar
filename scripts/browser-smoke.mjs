@@ -3281,13 +3281,15 @@ async function exerciseC32MobileLiveOriginalEventsAndHiddenBusySource(){
   const page=await context.newPage(),errors=[]
   page.on('pageerror',error=>errors.push(error.message))
   await page.goto(url,{waitUntil:'networkidle'})
-  const {fixture,today}=await page.evaluate(()=>{
+  const {fixture,today,freeDate,currentDate}=await page.evaluate(()=>{
     const now=new Date(),ms=now.getTime(),mk=offset=>new Date(ms+offset*60000).toISOString()
     const day=offset=>{const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()+offset);
       return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
     const midnight=offset=>new Date(now.getFullYear(),now.getMonth(),now.getDate()+offset).toISOString()
     const updatedAt=new Date(ms-200000).toISOString()
-    return {today:day(0),fixture:{schemaVersion:1,records:[
+    const timeDay=offset=>{const d=new Date(ms+offset*60000);
+      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+    return {today:day(0),freeDate:timeDay(70),currentDate:timeDay(-10),fixture:{schemaVersion:1,records:[
       {id:'c32-current-original',source:'personal',title:'C32 Current appointment',description:'Keep canonical',
         location:'',allDay:false,start:mk(-10),end:mk(180),updatedAt},
       {id:'c32-next-original',source:'personal',title:'C32 Next upcoming personal',description:'',
@@ -3319,14 +3321,14 @@ async function exerciseC32MobileLiveOriginalEventsAndHiddenBusySource(){
   await page.getByRole('button',{name:'Close navigation'}).click({position:{x:350,y:340}})
   assert.equal(await panel.getByText('C32 Busy hidden original').count(),0)
   assert.match(await panel.innerText(),/C32 Free imported/)
-  const free=panel.getByRole('button',{name:'Open details c32-visible-free@'+today})
+  const free=panel.getByRole('button',{name:'Open details c32-visible-free@'+freeDate})
   await free.click()
   const details=page.getByRole('dialog',{name:'Event details'})
   await details.waitFor()
   assert.match(await details.innerText(),/TRANSP:TRANSPARENT/)
   assert.equal(await details.getByRole('button',{name:'Edit event'}).count(),0)
   await details.getByRole('button',{name:'Close event'}).click()
-  await panel.getByRole('button',{name:'Open day for c32-current-original@'+today}).click()
+  await panel.getByRole('button',{name:'Open day for c32-current-original@'+currentDate}).click()
   assert.equal(await page.locator('.view-switch button.active').innerText(),'Day')
   assert.equal(await page.getByLabel('Jump to date').inputValue(),today)
   assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1'))),fixture)
