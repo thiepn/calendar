@@ -1,0 +1,17 @@
+name: Calendar source and build
+on:
+  push:
+    branches: [main, feature/c1-standalone-local-first-calendar]
+  pull_request:
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    permissions: {contents: read}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: npm install --no-audit --no-fund
+      - run: npm run test
+        env: {TZ: Europe/Berlin}
+      - run: npm run build

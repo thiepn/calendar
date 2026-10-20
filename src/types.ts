@@ -1,0 +1,58 @@
+export type LocalDate = string
+export type Source = 'personal' | 'ics'
+export type Frequency = 'daily' | 'weekly' | 'monthly'
+export interface RepeatRule {
+  frequency: Frequency
+  interval: number
+  until?: LocalDate
+  weekdays?: number[]
+}
+export interface CalendarRecord {
+  id: string
+  title: string
+  description: string
+  location: string
+  start: string
+  end: string
+  allDay: boolean
+  startDate?: LocalDate
+  endDateExclusive?: LocalDate
+  source: Source
+  /** IANA timezone for authored timed personal events; omitted legacy records remain device-local. */
+  timeZone?:string
+  /** ICS TRANSP:TRANSPARENT; absent means opaque. */
+  transparent?: boolean
+  sourceCalendar?: string
+  sourceKey?: string
+  /** Original IANA TZID for a read-only imported timed event, not editable authority. */
+  sourceTimeZone?:string
+  /** An independently editable personal replacement for a recurring instance. */
+  recurrenceParentId?: string
+  recurrenceDate?: LocalDate
+  repeat?: RepeatRule
+  excludedDates?: LocalDate[]
+  /** Optional local-only reminder lead time for personal events; imported ICS never owns reminders. */
+  reminderMinutes?: number
+  updatedAt: string
+}
+export interface CalendarOccurrence {
+  key: string
+  recordId: string
+  date: LocalDate
+  start: string
+  end: string
+  allDay: boolean
+  startDate: LocalDate
+  endDateExclusive: LocalDate
+  title: string
+  source: Source
+  /** Imported transparent occurrences are visible, but do not block time. */
+  transparent?: boolean
+  sourceCalendar?: string
+  location: string
+  description: string
+}
+export interface CalendarState {
+  schemaVersion: 1
+  records: CalendarRecord[]
+}
