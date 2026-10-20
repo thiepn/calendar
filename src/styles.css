@@ -945,3 +945,38 @@
  .overlap-inbox-pages span{grid-column:1/-1;grid-row:1}
  .overlap-inbox-pages button{white-space:normal}
 }
+
+
+/* C42 — one original-source-backed weekly planner, no separate scheduler. */
+.weekly-plan-backdrop{z-index:1180;padding:12px}
+.weekly-plan-dialog{width:min(840px,100%);max-height:96dvh;min-width:0}
+.weekly-plan-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.weekly-plan-controls label{font-size:15px;display:grid;gap:6px;min-width:0}
+.weekly-plan-controls input,.weekly-plan-controls select{width:100%;min-width:0;min-height:44px;font-size:16px}
+.weekly-plan-all-day,.weekly-plan-reveal{display:flex;gap:9px;align-items:center;font-size:14px;line-height:1.5;margin:14px 0}
+.weekly-plan-all-day input,.weekly-plan-reveal input{width:18px;height:18px;flex:none}
+.weekly-plan-total{font-size:16px;font-weight:600;margin:12px 0}
+.weekly-plan-candidates{max-height:40dvh;overflow:auto;border-block:1px solid #d8e0d8}
+.weekly-plan-candidate{padding:11px 2px;border-bottom:1px solid #dce4dd}
+.weekly-plan-row{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.weekly-plan-row>div:first-child{display:grid;gap:4px}
+.weekly-plan-row strong{font-size:18px}
+.weekly-plan-row span{font-size:14px}
+.weekly-plan-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.weekly-plan-actions button{min-height:44px}
+.weekly-plan-actions .primary:disabled{opacity:.55;cursor:not-allowed}
+.weekly-plan-weeks{display:grid;gap:8px;padding:11px 4px}
+.weekly-plan-week{border-left:2px solid #bdcfc0;padding:4px 10px;display:grid;gap:5px}
+.weekly-plan-week strong{font-size:14px}
+.weekly-plan-week span,.weekly-plan-week li{font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+.weekly-plan-week ul{margin:0;padding-left:18px}
+.weekly-plan-scope{font-size:14px;line-height:1.5;margin:12px 0}
+@media(max-width:740px){
+ .weekly-plan-backdrop{padding:6px}
+ .weekly-plan-dialog{width:100%;max-height:96dvh;padding:14px}
+ .weekly-plan-controls{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .weekly-plan-row{display:grid;grid-template-columns:minmax(0,1fr);gap:9px}
+ .weekly-plan-actions{display:grid;grid-template-columns:1fr 1fr}
+ .weekly-plan-actions button{font-size:14px;padding:9px;min-width:0;white-space:normal}
+ .weekly-plan-candidates{max-height:38dvh}
+}

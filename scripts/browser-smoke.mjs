@@ -4560,6 +4560,94 @@ async function exerciseC42MobileDenseOverlapPagesAndDateWindows(){
   await context.close()
 }
 
+
+async function exerciseC42DesktopWeeklyRecurringSourceBackedSave(){
+ const ctx=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+ const page=await ctx.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message))
+ await page.goto(url,{waitUntil:'networkidle'})
+ const imported={id:'c42-provider-original',title:'C42 private source class',description:'Original notes',location:'',
+  source:'ics',sourceCalendar:'C42 private feed',sourceKey:'C42 private feed|official-UID',
+  sourceTimeZone:'Europe/Berlin',allDay:false,
+  start:'2026-11-10T07:00:00.000Z',end:'2026-11-10T16:00:00.000Z',
+  updatedAt:'2026-10-20T10:00:00.000Z'}
+ await page.evaluate(v=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify({schemaVersion:1,records:[v]})),imported)
+ await page.reload({waitUntil:'networkidle'})
+ await page.getByLabel('Jump to date').fill('2026-11-03')
+ await page.getByRole('button',{name:'Manage sources'}).click()
+ const source=page.getByRole('dialog',{name:'Calendar data management'})
+ await source.getByLabel('Show C42 private feed on calendar').uncheck()
+ await source.getByRole('button',{name:'Close sources'}).click()
+ await page.locator('.view-switch button').filter({hasText:'List'}).click()
+ const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+ await page.getByRole('button',{name:'Plan weekly recurring time'}).click()
+ const planner=page.getByRole('dialog',{name:'Plan a weekly recurring meeting'})
+ await planner.waitFor()
+ assert.equal(await planner.getByLabel('Weekly planner start date').inputValue(),'2026-11-03')
+ await planner.getByRole('button',{name:'Review weeks at 10:00'}).click()
+ const review=planner.getByLabel('Original weekly checks at 10:00')
+ assert.match(await review.innerText(),/Hidden imported commitment/)
+ assert.equal(await review.getByText('C42 private source class').count(),0)
+ await review.getByLabel('Reveal hidden imported calendar names in this review').check()
+ assert.match(await review.innerText(),/C42 private source class/)
+ assert.equal(await planner.getByRole('button',{name:'Plan weekly series at 10:00'}).isDisabled(),true)
+ assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+ await planner.getByRole('button',{name:'Plan weekly series at 17:30'}).click()
+ const editor=page.getByRole('dialog',{name:'New event'})
+ await editor.waitFor()
+ assert.equal(await editor.getByLabel('Repeats').inputValue(),'weekly')
+ assert.equal(await editor.getByLabel('Repeat until (optional)').inputValue(),'2026-11-24')
+ assert.match(await editor.locator('input[type="datetime-local"]').first().inputValue(),/2026-11-03T17:30$/)
+ assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+ await editor.getByLabel('Event name').fill('C42 genuine weekly event')
+ await editor.getByRole('button',{name:'Create event'}).click()
+ await editor.waitFor({state:'detached'})
+ const result=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+ assert.equal(result.records.length,2)
+ assert.deepEqual(result.records.find(x=>x.source==='personal').repeat,
+  {frequency:'weekly',interval:1,until:'2026-11-24',weekdays:[2]})
+ assert.equal(result.records.find(x=>x.source==='ics').sourceKey,imported.sourceKey)
+ assert.equal(errors.length,0,errors.join('; '))
+ console.log('BROWSER_C42_DESKTOP_ORIGINAL_WEEKLY_PRIVATE_SOURCE_PREFILL_SAVE_PASS')
+ await ctx.close()
+}
+async function exerciseC42MobileAllDayWeeklyConsentNoWrites(){
+ const ctx=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+  timezoneId:'Europe/Berlin',locale:'en-GB'})
+ const page=await ctx.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message))
+ await page.goto(url,{waitUntil:'networkidle'})
+ const busy={id:'c42-mobile-allday',title:'C42 real all-day original',description:'',location:'',
+  source:'personal',allDay:true,startDate:'2026-11-17',endDateExclusive:'2026-11-18',
+  start:'2026-11-17T00:00:00.000Z',end:'2026-11-18T00:00:00.000Z',
+  updatedAt:'2026-10-20T10:00:00.000Z'}
+ await page.evaluate(v=>localStorage.setItem('thiepn.calendar.local.v1',JSON.stringify({schemaVersion:1,records:[v]})),busy)
+ await page.reload({waitUntil:'networkidle'})
+ await page.getByLabel('Jump to date').fill('2026-11-03')
+ await page.getByRole('button',{name:'Find time'}).click()
+ const finder=page.getByRole('dialog',{name:'Find an available time'})
+ await finder.getByRole('button',{name:'Plan a weekly series instead'}).click()
+ const planner=page.getByRole('dialog',{name:'Plan a weekly recurring meeting'})
+ await planner.waitFor()
+ assert.match(await planner.innerText(),/0 times free for all 4 weeks/)
+ assert.equal(await planner.getByRole('button',{name:'Plan weekly series at 08:00'}).isDisabled(),true)
+ await planner.getByLabel('Treat all-day events as unavailable').uncheck()
+ await planner.getByRole('button',{name:'Review weeks at 08:00'}).click()
+ assert.equal(await planner.getByLabel('Original weekly checks at 08:00').getByText('Free').count(),4)
+ const size=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+ assert.ok(size.scroll<=size.width+2,'C42 mobile overflow')
+ const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+ await planner.getByRole('button',{name:'Plan weekly series at 08:00'}).click()
+ const editor=page.getByRole('dialog',{name:'New event'})
+ await editor.waitFor()
+ assert.equal(await editor.getByLabel('Repeats').inputValue(),'weekly')
+ assert.equal(await editor.getByLabel('Repeat until (optional)').inputValue(),'2026-11-24')
+ await editor.getByRole('button',{name:'Cancel'}).click()
+ await editor.waitFor({state:'detached'})
+ assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+ assert.equal(errors.length,0,errors.join('; '))
+ console.log('BROWSER_C42_MOBILE_WEEKLY_ALLDAY_USER_CHOICE_CANCEL_NO_WRITES_PASS')
+ await ctx.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -4649,6 +4737,8 @@ try{
   await exerciseC41MobileHiddenSourceCompareAndExactReturn()
   await exerciseC42DesktopHiddenSourceActualOverlapAndAdjustmentHandoff()
   await exerciseC42MobileDenseOverlapPagesAndDateWindows()
+  await exerciseC42DesktopWeeklyRecurringSourceBackedSave()
+  await exerciseC42MobileAllDayWeeklyConsentNoWrites()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true

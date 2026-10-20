@@ -907,3 +907,43 @@ remain untouched.
 C43 priority: evaluate executable C42 acceptance results first; then
 implement a genuinely distinct calendar usability workflow, not a
 duplicated overlap inbox or a release-qualification-only phase.
+
+
+## C42 — plan a weekly recurring meeting against all original sources
+
+C42 implements a distinct local **Plan weekly series** journey from List
+and the existing one-off Find Time dialog. The user chooses a future start
+date, weekday, four or eight weekly occurrences, duration (30/60/90 min),
+daytime/evening hours, spacing (0/15/30 min) and optional all-day blocking.
+
+The original \`occurrencesBetween\` engine evaluates every candidate's real
+UTC interval on **each** selected week, across ALL canonical Calendar v1
+records, including hidden imported ICS calendars. Imported
+\`TRANSP:TRANSPARENT\` records do not block; unambiguous device-local wall
+clock times are required and repeated/nonexistent DST times cannot be called
+available. The review ranks fully available times first. Expanding a
+candidate shows actual weekly dates, blockers and original source labels;
+hidden imported titles are masked until the user explicitly reveals them
+in this single review. Partial or expired candidates cannot open a draft.
+
+Selecting a fully available time re-reads canonical local storage, rejects
+cross-tab changes and rechecks the selected start clock against ALL original
+source commitments before handing the first UTC interval, source weekday
+and last checked date to the ORIGINAL EventEditor. Its existing canonical
+weekly repeat options are prefilled, but the event does not exist until the
+user names and saves it through the original draft/review/CAS authority.
+The existing editor continues to check up to its selected 90–365-day
+horizon: a four/eight-week planner is NOT a claim that dates beyond the
+proposed original series \`until\` are free. Editing/recovery retains the
+original editor's draft fields and permissions; no new booking engine,
+shadow event store, provider calendar write or separate recurrence grader.
+
+Unlike the single-slot Find Time workflow, C42 tests the *same* clock
+against a real finite future weekly series before opening the original
+editor. Unlike OverlapInbox or Compare Days, it does not only review
+existing conflicts; it finds a candidate recurring schedule that can be
+authored without conflicts in the selected real weeks. C1–C41 source
+ownership, exact imported ICS UID/TZID, personal recurrence/detached
+instances, C34 unfinished drafts, C37 subscriptions, C38/C39 Hub
+handoff, C40 Series & Source Trail, C41 Compare Days, JSON backups,
+CAS and privacy remain unchanged.

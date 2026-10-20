@@ -5,6 +5,7 @@ import {addDays,addMonths,dateLabel,dateSeries,friendlyRange,localDate,monday,mo
 import {dayOccurrences,excludeOccurrence,occurrencesBetween} from './core/occurrences'
 import {replaceOccurrence,restoreOccurrence,saveWholeEvent,shiftOccurrence,splitSeriesAt,endSeriesAt} from './core/series'
 import {findFreeSlots,type FreeSlot} from './core/availability'
+import {confirmWeeklyMeeting,type WeeklyPlanOptions} from './core/weekly-planner'
 import {finderDayWindow,advanceFinderDay,type FinderDaySpan} from './core/finder-day'
 import {adjacentBusyDay,exportAgendaCsv} from './core/agenda'
 import {adjacentAgendaRange} from './core/agenda-navigation'
@@ -41,6 +42,7 @@ import {SourcePicker} from './components/SourcePicker'
 import {AgendaTrail} from './components/AgendaTrail'
 import {AgendaCompareDialog} from './components/AgendaCompareDialog'
 import {OverlapInbox} from './components/OverlapInbox'
+import {WeeklySeriesPlanner} from './components/WeeklySeriesPlanner'
 import {resolveOverlapParticipant,type OriginalOverlapParticipant} from './core/overlap-inbox'
 import {resolveComparedOccurrence} from './core/agenda-compare'
 import {resolveTrailSelection,type TrailTarget,type TrailRow} from './core/agenda-trail'
@@ -107,6 +109,8 @@ export default function App(){
   const [adjustAlternativeBuffer,setAdjustAlternativeBuffer]=useState<0|15|30>(0)
   const [importMode,setImportMode]=useState<'update'|'replace'>('update')
   const [finderOpen,setFinderOpen]=useState(false)
+  const [weeklyPlannerOpen,setWeeklyPlannerOpen]=useState(false)
+  const [weeklyPlannerDate,setWeeklyPlannerDate]=useState<LocalDate>(()=>addDays(localDate(),1))
   const [finderDuration,setFinderDuration]=useState(60)
   const [finderDays,setFinderDays]=useState<FinderDaySpan>(7)
   const [finderFrom,setFinderFrom]=useState<LocalDate>(()=>localDate())
@@ -115,6 +119,7 @@ export default function App(){
   const [finderDaySelection,setFinderDaySelection]=useState<'all'|'weekdays'|'weekends'>('all')
   const [finderBufferMinutes,setFinderBufferMinutes]=useState<0|15|30>(0)
   const [newEventRange,setNewEventRange]=useState<{start:string;end:string}|null>(null)
+  const [newEventRecurrence,setNewEventRecurrence]=useState<{frequency:'weekly';weekdays:number[];until:LocalDate}|null>(null)
   const [newAllDay,setNewAllDay]=useState<{from:LocalDate;through:LocalDate}|null>(null)
   const [allDayAdjustment,setAllDayAdjustment]=useState<{item:CalendarOccurrence;from:LocalDate;through:LocalDate}|null>(null)
   const [editorDate,setEditorDate]=useState<LocalDate|null>(null)
@@ -409,7 +414,27 @@ export default function App(){
       setPendingDraft(null);setDraftReadError('')
     }catch(error){setDraftReadError('Draft was preserved: '+String(error))}
   }
-  function create(date:LocalDate){setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setEditorDate(date)}
+  function create(date:LocalDate){setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewEventRecurrence(null);setNewAllDay(null);setEditorDate(date)}
+  function showWeeklyPlanner(from?:LocalDate){
+    const candidate=from??selected
+    setWeeklyPlannerDate(candidate<localDate()?localDate():candidate)
+    setFinderOpen(false);setWeeklyPlannerOpen(true)
+  }
+  function startWeeklySeries(options:WeeklyPlanOptions,clock:string){
+    try{
+      const latest=loadState()
+      if(latest.error||JSON.stringify(latest.state)!==JSON.stringify(calendar)){
+        if(!latest.error)setCalendar(latest.state)
+        throw new Error('Original calendar changed in another tab. Review current weekly options.')
+      }
+      const proposal=confirmWeeklyMeeting(latest.state.records,options,clock,hiddenImportedCalendars)
+      setEditing(null);setCopyDraft(false);setActive(null)
+      setEditInstance(null);setEditFuture(null);setNewAllDay(null)
+      setNewEventRange({start:proposal.start,end:proposal.end})
+      setNewEventRecurrence({frequency:'weekly',weekdays:[proposal.weekday],until:proposal.until})
+      setEditorDate(proposal.date);setSelected(proposal.date);setWeeklyPlannerOpen(false)
+    }catch(error){setNotice('Weekly proposal not opened: '+String(error))}
+  }
   function startFinderSlot(slot:FreeSlot){
     try{
       // A suggested slot can expire or become occupied in another tab.
@@ -435,12 +460,12 @@ export default function App(){
   }
   function startSlot(slot:FreeSlot){
     setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null)
-    setNewAllDay(null);setNewEventRange({start:slot.start,end:slot.end});setEditorDate(slot.date)
+    setNewAllDay(null);setNewEventRecurrence(null);setNewEventRange({start:slot.start,end:slot.end});setEditorDate(slot.date)
     setSelected(slot.date);setFinderOpen(false)
   }
   function startAllDay(from:LocalDate,through:LocalDate){
     setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null)
-    setNewAllDay({from,through});setEditorDate(from);setSelected(from)
+    setNewEventRecurrence(null);setNewAllDay({from,through});setEditorDate(from);setSelected(from)
   }
   function requestAllDayAdjustment(item:CalendarOccurrence,from:LocalDate,through:LocalDate){
     if(item.source!=='personal'||!item.allDay)return
@@ -562,7 +587,7 @@ export default function App(){
     }catch(error){setNotice('Reschedule rejected: '+String(error))}
   }
   function edit(item:CalendarOccurrence,scope:'series'|'instance'|'future'='series'){
-    setCopyDraft(false)
+    setNewEventRecurrence(null);setCopyDraft(false)
     const record=calendar.records.find(x=>x.id===item.recordId)
     if(!record||record.source!=='personal')return
     setEditFuture(null)
@@ -616,7 +641,7 @@ export default function App(){
         calendar.records.some(r=>r.id===record.id)?saveWholeEvent(calendar,record):
         {schemaVersion:1 as const,records:[...calendar.records,record]}
       if(commit(next,'Event saved locally')){
-        setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setRestoredDraft(null)
+        setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewEventRecurrence(null);setNewAllDay(null);setRestoredDraft(null)
         return true
       }
     }catch(error){setNotice('Not saved: '+String(error))}
@@ -1076,6 +1101,9 @@ export default function App(){
             <button className="secondary compact" type="button" aria-label="Next visible commitments"
               onClick={()=>jumpAgenda(1)}>Next events <ChevronRight size={15}/></button>
           </nav>
+          <button className="secondary compact" type="button"
+            aria-label="Plan weekly recurring time" onClick={()=>showWeeklyPlanner(selected)}>
+            <Clock3 size={15}/> Plan weekly series</button>
           <button className="secondary compact" type="button" aria-label="Review all saved overlaps"
             onClick={()=>showOverlapInbox(selected)}><AlertTriangle size={15}/> Review overlaps</button>
           <button className="secondary compact" type="button" aria-label="Compare original agenda days"
@@ -1126,7 +1154,7 @@ export default function App(){
         </div>
       </section>
     </div>}
-    {editorDate!==null&&<EventEditor key={(restoredDraft?.id??'')+(editing?.id??'new')+editorDate+(newEventRange?.start??'')+(newAllDay?.through??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} initialAllDay={newAllDay??undefined} records={calendar.records} isCopy={copyDraft} defaultReminderMinutes={restoredDraft?.origin.defaultReminderMinutes??reminderSettings.defaultLead}
+    {editorDate!==null&&<EventEditor key={(restoredDraft?.id??'')+(editing?.id??'new')+editorDate+(newEventRange?.start??'')+(newAllDay?.through??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} initialRecurrence={newEventRecurrence??undefined} initialAllDay={newAllDay??undefined} records={calendar.records} isCopy={copyDraft} defaultReminderMinutes={restoredDraft?.origin.defaultReminderMinutes??reminderSettings.defaultLead}
       recoveredDraft={restoredDraft??undefined}
       draftOrigin={{date:editorDate,event:editing??undefined,copy:copyDraft,
         baseRecord:copyDraft?undefined:editInstance?calendar.records.find(r=>r.id===editInstance.parentId):
@@ -1137,7 +1165,7 @@ export default function App(){
         deviceTimeZone:restoredDraft?.origin.deviceTimeZone??deviceTimeZone()}}
       ignoreOccurrence={editInstance?{id:editInstance.parentId,date:editInstance.date}:undefined}
       ignoreParentFrom={editFuture?{id:editFuture.parentId,date:editFuture.date}:undefined}
-      scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewAllDay(null);setRestoredDraft(null)}}/>}
+      scope={editInstance?'instance':editFuture?'future':undefined} onSave={save} onClose={()=>{setEditorDate(null);setEditing(null);setCopyDraft(false);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewEventRecurrence(null);setNewAllDay(null);setRestoredDraft(null)}}/>}
     {restoreCandidate&&<RestoreDialog current={calendar} candidate={restoreCandidate.state} origin={restoreCandidate.origin} unreadableCurrent={unreadable}
       onClose={()=>setRestoreCandidate(null)} onConfirm={confirmRestore} onRecoverMissing={unreadable?undefined:confirmRecoverMissing}/>}
     {remindersOpen&&<ReminderCenter items={reminders} dismissed={dismissedReminders}
@@ -1154,6 +1182,8 @@ export default function App(){
       <section className="finder-dialog dialog-surface" role="dialog" aria-modal="true" aria-label="Find an available time">
         <header className="editor-head"><div className="heading-inline"><Clock3 size={20}/><h2>Find time</h2></div><button className="icon-button" aria-label="Close time finder" onClick={()=>setFinderOpen(false)}><X size={19}/></button></header>
         <p className="fine-print">Find a free time from {dateLabel(finderFrom)} onward. All saved calendars are checked, including hidden imported events. A slot is only booked after you save a new personal event.</p>
+        <button className="secondary compact" type="button" aria-label="Plan a weekly series instead"
+          onClick={()=>showWeeklyPlanner(finderFrom)}>Plan weekly series instead</button>
         <div className="finder-day-navigation" aria-label="Choose availability date">
           <label>Search starts <input aria-label="Finder start date" type="date" min={localDate()} value={finderFrom}
             onChange={e=>{if(e.target.value)updateFinderDay(e.target.value)}}/></label>
@@ -1398,6 +1428,9 @@ export default function App(){
       <p className="fine-print">Read-only local snapshot; not live sync. Unsupported RRULE masters are skipped with warnings. Neither method modifies Google, Folio, KLIPS or personal events.</p>
       <footer className="editor-actions"><button className="secondary" onClick={closeIcsReview}>Cancel</button><button className="primary" onClick={applyImport} disabled={!importReview?.result}>Apply reviewed changes</button></footer>
     </section></div>}
+    {weeklyPlannerOpen&&<WeeklySeriesPlanner records={calendar.records}
+      hiddenSources={hiddenImportedCalendars} initialDate={weeklyPlannerDate}
+      onSelect={startWeeklySeries} onClose={()=>setWeeklyPlannerOpen(false)}/>}
     {overlapInboxOpen&&<OverlapInbox state={calendar} initialDate={overlapInboxDate}
       hiddenSources={hiddenImportedCalendars}
       onOpen={inspectOverlapParticipant} onClose={()=>setOverlapInboxOpen(false)}/>}

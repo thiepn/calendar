@@ -8,8 +8,8 @@ import {changedEditorFields,type EventEditorFields} from '../core/editor-changes
 import {writeEventDraft,clearEventDraft,type EventDraftOrigin,type SavedEventDraft} from '../core/event-draft'
 import {deviceTimeZone,zoneWall,zoneInstantOptions,zoneOffsetLabel,zoneChoices} from '../core/time-zone'
 const weekdays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
-type Props={date:LocalDate;event?:CalendarRecord;initialRange?:{start:string;end:string};initialAllDay?:{from:LocalDate;through:LocalDate};records:CalendarRecord[];ignoreOccurrence?:{id:string;date:LocalDate};ignoreParentFrom?:{id:string;date:LocalDate};scope?:'instance'|'future';isCopy?:boolean;defaultReminderMinutes?:number;draftOrigin:EventDraftOrigin;recoveredDraft?:SavedEventDraft;onSave:(record:CalendarRecord)=>boolean;onClose:()=>void}
-export function EventEditor({date,event,initialRange,initialAllDay,records,ignoreOccurrence,ignoreParentFrom,scope,isCopy=false,defaultReminderMinutes=-1,draftOrigin,recoveredDraft,onSave,onClose}:Props){
+type Props={date:LocalDate;event?:CalendarRecord;initialRange?:{start:string;end:string};initialRecurrence?:{frequency:'weekly';weekdays:number[];until:LocalDate};initialAllDay?:{from:LocalDate;through:LocalDate};records:CalendarRecord[];ignoreOccurrence?:{id:string;date:LocalDate};ignoreParentFrom?:{id:string;date:LocalDate};scope?:'instance'|'future';isCopy?:boolean;defaultReminderMinutes?:number;draftOrigin:EventDraftOrigin;recoveredDraft?:SavedEventDraft;onSave:(record:CalendarRecord)=>boolean;onClose:()=>void}
+export function EventEditor({date,event,initialRange,initialRecurrence,initialAllDay,records,ignoreOccurrence,ignoreParentFrom,scope,isCopy=false,defaultReminderMinutes=-1,draftOrigin,recoveredDraft,onSave,onClose}:Props){
   const [title,setTitle]=useState(recoveredDraft?.fields.title??event?.title??'')
   const [description,setDescription]=useState(recoveredDraft?.fields.description??event?.description??'')
   const [location,setLocation]=useState(recoveredDraft?.fields.location??event?.location??'')
@@ -21,10 +21,10 @@ export function EventEditor({date,event,initialRange,initialAllDay,records,ignor
   const options=useMemo(()=>zoneChoices(timeZone),[timeZone])
   const [start,setStart]=useState(recoveredDraft?.fields.start??(event ? event.allDay?event.startDate!:event.timeZone?zoneWall(event.start,event.timeZone):localDateTime(event.start) : initialAllDay?initialAllDay.from:initialRange?localDateTime(initialRange.start):date+'T09:00'))
   const [end,setEnd]=useState(recoveredDraft?.fields.end??(event ? event.allDay?addDays(event.endDateExclusive!,-1):event.timeZone?zoneWall(event.end,event.timeZone):localDateTime(event.end) : initialAllDay?initialAllDay.through:initialRange?localDateTime(initialRange.end):date+'T10:00'))
-  const [frequency,setFrequency]=useState<'none'|Frequency>(recoveredDraft?.fields.frequency??event?.repeat?.frequency??'none')
+  const [frequency,setFrequency]=useState<'none'|Frequency>(recoveredDraft?.fields.frequency??event?.repeat?.frequency??initialRecurrence?.frequency??'none')
   const [interval,setInterval]=useState(recoveredDraft?.fields.interval??event?.repeat?.interval??1)
-  const [until,setUntil]=useState(recoveredDraft?.fields.until??event?.repeat?.until??'')
-  const [weekdaysSet,setWeekdaysSet]=useState<number[]>(recoveredDraft?.fields.weekdays??event?.repeat?.weekdays??[])
+  const [until,setUntil]=useState(recoveredDraft?.fields.until??event?.repeat?.until??initialRecurrence?.until??'')
+  const [weekdaysSet,setWeekdaysSet]=useState<number[]>(recoveredDraft?.fields.weekdays??event?.repeat?.weekdays??initialRecurrence?.weekdays??[])
   const [error,setError]=useState('')
   function inferredFold(iso?:string,zone=timeZone):''|'earlier'|'later' {
     if(!iso)return ''
