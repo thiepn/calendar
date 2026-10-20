@@ -1,5 +1,5 @@
-import type {CalendarOccurrence,CalendarRecord,CalendarState,LocalDate} from '../types'
-import {addDays,dateSeries,daysBetween,day,localDate} from './dates'
+import type {CalendarOccurrence,CalendarState,LocalDate} from '../types'
+import {addDays,dateSeries,localDate} from './dates'
 import {findFreeSlots,type FreeSlot} from './availability'
 import {occurrencesBetween} from './occurrences'
 import {validateState} from './storage'
