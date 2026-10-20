@@ -1,5 +1,5 @@
-import type {CalendarOccurrence,CalendarRecord,CalendarState,LocalDate} from '../types'
-import {addDays,day} from './dates'
+import type {CalendarOccurrence,CalendarState,LocalDate} from '../types'
+import {addDays,day,localDate} from './dates'
 import {occurrencesBetween} from './occurrences'
 import {validateState} from './storage'
 
@@ -66,11 +66,8 @@ export function overlapInbox(state:CalendarState,from:LocalDate,days:7|14|30,
       const key=[first.key,second.key].sort().join('|')
       const instance:OriginalOverlap={id:key,first:source(first),second:source(second),
         start:new Date(startMs).toISOString(),end:new Date(endMs).toISOString(),
-        day:from
+        day:localDate(new Date(startMs))
       }
-      const date=new Date(startMs)
-      const pad=(n:number)=>String(n).padStart(2,'0')
-      instance.day=`${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`
       collisions.push(instance)
       if(collisions.length>1000)throw new Error('More than 1,000 overlaps. Select a shorter window.')
     }

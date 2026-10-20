@@ -1,5 +1,5 @@
 import {useMemo,useState} from 'react'
-import type {CalendarState,CalendarOccurrence,LocalDate} from '../types'
+import type {CalendarState,LocalDate} from '../types'
 import {addDays} from '../core/dates'
 import {overlapInbox,type OriginalOverlapParticipant} from '../core/overlap-inbox'
 
