@@ -1,21 +1,22 @@
 import {describe,it,expect} from 'vitest'
 import type {CalendarRecord} from '../types'
 import {confirmWeeklyMeeting,planWeeklyMeeting,type WeeklyPlanOptions} from './weekly-planner'
+import {fromLocalDateTime} from './dates'
 
 const now=new Date('2026-10-20T00:00:00.000Z')
 const options:WeeklyPlanOptions={from:'2026-11-03',weekday:2,weeks:4,duration:60,
   window:'daytime',buffer:0,blockAllDay:true}
 const personal:CalendarRecord={id:'c42-personal',title:'Original personal class',
   description:'',location:'',source:'personal',allDay:false,
-  start:'2026-11-17T09:00:00.000Z',end:'2026-11-17T10:00:00.000Z',
+  start:fromLocalDateTime('2026-11-17T09:00'),end:fromLocalDateTime('2026-11-17T10:00'),
   updatedAt:'2026-10-19T12:00:00.000Z'}
 const imported:CalendarRecord={...personal,id:'c42-hidden-import',source:'ics',
   title:'Private imported source',sourceCalendar:'Hidden calendar',
   sourceKey:'Hidden calendar|original-UID',sourceTimeZone:'Europe/Berlin',
-  start:'2026-11-10T09:00:00.000Z',end:'2026-11-10T10:00:00.000Z'}
+  start:fromLocalDateTime('2026-11-10T09:00'),end:fromLocalDateTime('2026-11-10T10:00')}
 const transparent:CalendarRecord={...imported,id:'c42-transparent',title:'Transparent imported',
-  transparent:true,sourceKey:'Hidden calendar|free-UID',start:'2026-11-24T08:00:00.000Z',
-  end:'2026-11-24T10:00:00.000Z'}
+  transparent:true,sourceKey:'Hidden calendar|free-UID',start:fromLocalDateTime('2026-11-24T08:00'),
+  end:fromLocalDateTime('2026-11-24T10:00')}
 const allDay:CalendarRecord={...personal,id:'c42-all-day',title:'All-day original commitment',
   allDay:true,timeZone:undefined,startDate:'2026-11-24',endDateExclusive:'2026-11-25',
   start:'2026-11-24T00:00:00.000Z',end:'2026-11-25T00:00:00.000Z'}
@@ -57,8 +58,8 @@ describe('C42 original-source weekly-series planner',()=>{
     expect(busy.fullyAvailable).toBe(0)
     const ignored=planWeeklyMeeting([allDay],{...options,blockAllDay:false},[],now)
     expect(ignored.fullyAvailable).toBe(ignored.count)
-    const near:CalendarRecord={...personal,start:'2026-11-10T07:45:00.000Z',
-      end:'2026-11-10T08:00:00.000Z'}
+    const near:CalendarRecord={...personal,start:fromLocalDateTime('2026-11-10T07:45'),
+      end:fromLocalDateTime('2026-11-10T08:00')}
     expect(()=>confirmWeeklyMeeting([near],options,'08:00',[],now)).not.toThrow()
     expect(()=>confirmWeeklyMeeting([near],{...options,buffer:15},'08:00',[],now))
       .toThrow('no longer free')
@@ -74,8 +75,8 @@ describe('C42 original-source weekly-series planner',()=>{
   it('rejects a stale originally free proposal when a canonical imported commitment appears',()=>{
     const fresh=confirmWeeklyMeeting([],options,'10:00',[],now)
     expect(fresh.start).toBeTruthy()
-    const newImport={...imported,start:'2026-11-17T10:00:00.000Z',
-      end:'2026-11-17T11:00:00.000Z'}
+    const newImport={...imported,start:fromLocalDateTime('2026-11-17T10:00'),
+      end:fromLocalDateTime('2026-11-17T11:00')}
     expect(()=>confirmWeeklyMeeting([newImport],options,'10:00',[],now))
       .toThrow('no longer free')
   })

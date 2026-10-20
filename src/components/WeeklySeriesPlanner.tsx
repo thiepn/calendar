@@ -1,6 +1,6 @@
 import {useMemo,useState} from 'react'
 import type {CalendarRecord,LocalDate} from '../types'
-import {addDays,day,localDate} from '../core/dates'
+import {day,localDate} from '../core/dates'
 import {planWeeklyMeeting,type WeeklyCandidate,type WeeklyPlanOptions} from '../core/weekly-planner'
 
 interface Props {
