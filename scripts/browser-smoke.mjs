@@ -4650,6 +4650,117 @@ async function exerciseC42MobileAllDayWeeklyConsentNoWrites(){
  await ctx.close()
 }
 
+
+async function exerciseC42DesktopImportedEventPreparationOriginalSourceAndSave(){
+  const ctx=await browser.newContext({viewport:{width:1440,height:900},timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await ctx.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const original={id:'c42-prep-target',title:'C42 final assessment',description:'Upstream source',
+    location:'Campus',source:'ics',sourceCalendar:'C42 assessment source',
+    sourceKey:'C42 assessment source|EXAM-UID',sourceTimeZone:'Europe/Berlin',
+    allDay:false,start:'2026-11-18T14:00:00.000Z',end:'2026-11-18T15:00:00.000Z',
+    updatedAt:'2026-10-20T10:00:00.000Z'}
+  const blocked={...original,id:'c42-prep-private-source',title:'Hidden private commitment',
+    sourceCalendar:'C42 private prep source',sourceKey:'C42 private prep source|PRIVATE-UID',
+    start:'2026-11-17T10:00:00.000Z',end:'2026-11-17T18:00:00.000Z'}
+  const transparent={...original,id:'c42-prep-transparent',title:'Unblocked source time',
+    sourceKey:'C42 assessment source|TRANSPARENT-UID',transparent:true,
+    start:'2026-11-16T10:00:00.000Z',end:'2026-11-16T18:00:00.000Z'}
+  await page.evaluate(rows=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records:rows})),[original,blocked,transparent])
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-18')
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  const source=page.getByRole('dialog',{name:'Calendar data management'})
+  await source.getByLabel('Show C42 private prep source on calendar').uncheck()
+  await source.getByRole('button',{name:'Close sources'}).click()
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.locator('.timeline-block').filter({hasText:'C42 final assessment'}).first().click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.getByRole('button',{name:'Plan preparation before this event'}).click()
+  const planner=page.getByRole('dialog',{name:'Plan preparation before original event'})
+  await planner.waitFor()
+  assert.match(await planner.innerText(),/C42 final assessment/)
+  assert.match(await planner.innerText(),/3 sessions possible on separate dates/)
+  assert.equal(await planner.locator('.preparation-day').filter({hasText:'2026-11-17'}).count(),0)
+  assert.equal(await planner.locator('.preparation-day').filter({hasText:'2026-11-16'}).count(),1)
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  await planner.getByLabel('Preparation lookback days').selectOption('14')
+  await planner.getByLabel('Preparation session goal').selectOption('6')
+  assert.match(await planner.innerText(),/Before 2026-11-18/)
+  await planner.getByRole('button',{name:/Prepare a personal block 2026-11-16/}).first().click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.waitFor()
+  assert.equal(await editor.getByLabel('Event name').inputValue(),'Prepare: C42 final assessment')
+  assert.equal(await editor.getByLabel('Repeats').inputValue(),'none')
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+  await editor.getByRole('button',{name:'Create event'}).click()
+  await editor.waitFor({state:'detached'})
+  const result=await page.evaluate(()=>JSON.parse(localStorage.getItem('thiepn.calendar.local.v1')))
+  assert.equal(result.records.length,4)
+  const saved=result.records.find(record=>record.source==='personal')
+  assert.equal(saved.title,'Prepare: C42 final assessment')
+  assert.equal(saved.repeat,undefined)
+  assert.ok(Date.parse(saved.end)<=Date.parse(original.start))
+  assert.equal(result.records.find(x=>x.id===original.id).sourceKey,original.sourceKey)
+  assert.equal(result.records.find(x=>x.id===blocked.id).sourceKey,blocked.sourceKey)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C42_DESKTOP_IMPORTED_ORIGINAL_PREPARATION_HIDDEN_BUSY_FREE_SOURCE_EDITOR_SAVE_PASS')
+  await ctx.close()
+}
+async function exerciseC42MobileRecurringPreparationStaleOwnerAndNoWrites(){
+  const ctx=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await ctx.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const recurring={id:'c42-prep-recurring',title:'C42 mobile recurring original',description:'',
+    location:'',source:'personal',allDay:false,timeZone:'Europe/Berlin',
+    start:'2026-11-11T09:00:00.000Z',end:'2026-11-11T10:00:00.000Z',
+    repeat:{frequency:'weekly',interval:1,until:'2026-12-01'},
+    updatedAt:'2026-10-20T10:00:00.000Z'}
+  await page.evaluate(record=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records:[record]})),recurring)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-18')
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.locator('.timeline-block').filter({hasText:'C42 mobile recurring original'}).first().click()
+  await page.getByRole('dialog',{name:'Event details'}).getByRole('button',{
+    name:'Plan preparation before this event'}).click()
+  const planner=page.getByRole('dialog',{name:'Plan preparation before original event'})
+  await planner.waitFor()
+  await planner.getByLabel('Preparation lookback days').selectOption('14')
+  await planner.getByLabel('Preparation days').selectOption('weekdays')
+  await planner.getByLabel('Preparation duration').selectOption('90')
+  assert.match(await planner.innerText(),/sessions possible on separate dates/)
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  const bounds=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(bounds.scroll<=bounds.width+2,'C42 preparation mobile viewport overflow')
+  await planner.getByRole('button',{name:/Prepare a personal block/}).first().click()
+  const editor=page.getByRole('dialog',{name:'New event'})
+  await editor.waitFor()
+  assert.equal(await editor.getByLabel('Event name').inputValue(),'Prepare: C42 mobile recurring original')
+  await editor.getByRole('button',{name:'Cancel'}).click()
+  await editor.waitFor({state:'detached'})
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+  await page.locator('.timeline-block').filter({hasText:'C42 mobile recurring original'}).first().click()
+  await page.getByRole('dialog',{name:'Event details'}).getByRole('button',{
+    name:'Plan preparation before this event'}).click()
+  const reviewed=page.getByRole('dialog',{name:'Plan preparation before original event'})
+  await reviewed.waitFor()
+  await page.evaluate(()=>{const key='thiepn.calendar.local.v1'
+    const state=JSON.parse(localStorage.getItem(key));state.records[0].title='C42 changed in other tab'
+    localStorage.setItem(key,JSON.stringify(state))})
+  await reviewed.getByRole('button',{name:/Prepare a personal block/}).first().click()
+  assert.match(await reviewed.getByRole('alert').innerText(),/Calendar changed in another tab/)
+  await reviewed.getByRole('button',{name:'Return to event'}).click()
+  assert.equal(await page.getByRole('dialog',{name:'New event'}).count(),0)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C42_MOBILE_RECURRING_PREPARATION_CANCEL_STALE_SOURCE_NO_WRITES_PASS')
+  await ctx.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -4741,6 +4852,8 @@ try{
   await exerciseC42MobileDenseOverlapPagesAndDateWindows()
   await exerciseC42DesktopWeeklyRecurringSourceBackedSave()
   await exerciseC42MobileAllDayWeeklyConsentNoWrites()
+  await exerciseC42DesktopImportedEventPreparationOriginalSourceAndSave()
+  await exerciseC42MobileRecurringPreparationStaleOwnerAndNoWrites()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true

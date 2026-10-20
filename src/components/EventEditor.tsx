@@ -8,9 +8,9 @@ import {changedEditorFields,type EventEditorFields} from '../core/editor-changes
 import {writeEventDraft,clearEventDraft,type EventDraftOrigin,type SavedEventDraft} from '../core/event-draft'
 import {deviceTimeZone,zoneWall,zoneInstantOptions,zoneOffsetLabel,zoneChoices} from '../core/time-zone'
 const weekdays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
-type Props={date:LocalDate;event?:CalendarRecord;initialRange?:{start:string;end:string};initialRecurrence?:{frequency:'weekly';weekdays:number[];until:LocalDate};initialAllDay?:{from:LocalDate;through:LocalDate};records:CalendarRecord[];ignoreOccurrence?:{id:string;date:LocalDate};ignoreParentFrom?:{id:string;date:LocalDate};scope?:'instance'|'future';isCopy?:boolean;defaultReminderMinutes?:number;draftOrigin:EventDraftOrigin;recoveredDraft?:SavedEventDraft;onSave:(record:CalendarRecord)=>boolean;onClose:()=>void}
-export function EventEditor({date,event,initialRange,initialRecurrence,initialAllDay,records,ignoreOccurrence,ignoreParentFrom,scope,isCopy=false,defaultReminderMinutes=-1,draftOrigin,recoveredDraft,onSave,onClose}:Props){
-  const [title,setTitle]=useState(recoveredDraft?.fields.title??event?.title??'')
+type Props={date:LocalDate;event?:CalendarRecord;initialTitle?:string;initialRange?:{start:string;end:string};initialRecurrence?:{frequency:'weekly';weekdays:number[];until:LocalDate};initialAllDay?:{from:LocalDate;through:LocalDate};records:CalendarRecord[];ignoreOccurrence?:{id:string;date:LocalDate};ignoreParentFrom?:{id:string;date:LocalDate};scope?:'instance'|'future';isCopy?:boolean;defaultReminderMinutes?:number;draftOrigin:EventDraftOrigin;recoveredDraft?:SavedEventDraft;onSave:(record:CalendarRecord)=>boolean;onClose:()=>void}
+export function EventEditor({date,event,initialTitle,initialRange,initialRecurrence,initialAllDay,records,ignoreOccurrence,ignoreParentFrom,scope,isCopy=false,defaultReminderMinutes=-1,draftOrigin,recoveredDraft,onSave,onClose}:Props){
+  const [title,setTitle]=useState(recoveredDraft?.fields.title??event?.title??initialTitle??'')
   const [description,setDescription]=useState(recoveredDraft?.fields.description??event?.description??'')
   const [location,setLocation]=useState(recoveredDraft?.fields.location??event?.location??'')
   const [reminder,setReminder]=useState<number>(recoveredDraft?.fields.reminder??event?.reminderMinutes??(event?-1:defaultReminderMinutes))

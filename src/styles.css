@@ -980,3 +980,35 @@
  .weekly-plan-actions button{font-size:14px;padding:9px;min-width:0;white-space:normal}
  .weekly-plan-candidates{max-height:38dvh}
 }
+
+
+/* Event-linked preparation: one source-complete decision, never a shadow calendar. */
+.preparation-backdrop{z-index:1150;padding:12px}
+.preparation-dialog{width:min(840px,100%);max-height:94dvh;min-width:0}
+.preparation-anchor{display:grid;gap:5px;min-width:0;margin:8px 0 16px}
+.preparation-anchor strong{font-size:18px;line-height:1.4;overflow-wrap:anywhere}
+.preparation-anchor time{font-size:15px;line-height:1.5}
+.preparation-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.preparation-controls label{display:grid;gap:6px;min-width:0;font-size:15px;font-weight:600}
+.preparation-controls select{min-height:44px;min-width:0;width:100%;font-size:16px}
+.preparation-all-day{display:flex;align-items:center;gap:10px;font-size:15px;margin:14px 0}
+.preparation-all-day input{width:20px;height:20px;flex-shrink:0}
+.preparation-summary{font-size:16px;font-weight:650;line-height:1.5;margin:14px 0}
+.preparation-days{display:grid;gap:10px;max-height:min(39dvh,400px);overflow-y:auto}
+.preparation-day{border:1px solid #d9e1da;padding:12px;min-width:0}
+.preparation-day header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:9px;align-items:center;margin-bottom:9px}
+.preparation-day header strong{font-size:16px}
+.preparation-day header span{font-size:14px;font-weight:600}
+.preparation-slots{display:flex;gap:8px;flex-wrap:wrap}
+.preparation-slots button{min-height:44px;font-size:15px}
+.preparation-slots button span{font-weight:600}
+.preparation-scope,.preparation-empty{font-size:14px;line-height:1.5;margin:15px 0;overflow-wrap:anywhere}
+@media(max-width:740px){
+ .preparation-backdrop{padding:6px}
+ .preparation-dialog{padding:14px;width:100%;max-height:96dvh}
+ .preparation-controls{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .preparation-day{padding:10px}
+ .preparation-slots{display:grid;grid-template-columns:1fr}
+ .preparation-slots button{justify-content:space-between;width:100%}
+ .preparation-days{max-height:37dvh}
+}

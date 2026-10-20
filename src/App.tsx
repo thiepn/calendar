@@ -43,6 +43,8 @@ import {AgendaTrail} from './components/AgendaTrail'
 import {AgendaCompareDialog} from './components/AgendaCompareDialog'
 import {OverlapInbox} from './components/OverlapInbox'
 import {WeeklySeriesPlanner} from './components/WeeklySeriesPlanner'
+import {EventPreparation} from './components/EventPreparation'
+import {confirmPreparationSlot,resolvePreparationAnchor,type PreparationAnchor,type PreparationOptions} from './core/event-preparation'
 import {resolveOverlapParticipant,type OriginalOverlapParticipant} from './core/overlap-inbox'
 import {resolveComparedOccurrence} from './core/agenda-compare'
 import {resolveTrailSelection,type TrailTarget,type TrailRow} from './core/agenda-trail'
@@ -110,6 +112,8 @@ export default function App(){
   const [importMode,setImportMode]=useState<'update'|'replace'>('update')
   const [finderOpen,setFinderOpen]=useState(false)
   const [weeklyPlannerOpen,setWeeklyPlannerOpen]=useState(false)
+  const [preparationAnchor,setPreparationAnchor]=useState<PreparationAnchor|null>(null)
+  const [preparationError,setPreparationError]=useState('')
   const [weeklyPlannerDate,setWeeklyPlannerDate]=useState<LocalDate>(()=>addDays(localDate(),1))
   const [finderDuration,setFinderDuration]=useState(60)
   const [finderDays,setFinderDays]=useState<FinderDaySpan>(7)
@@ -119,6 +123,7 @@ export default function App(){
   const [finderDaySelection,setFinderDaySelection]=useState<'all'|'weekdays'|'weekends'>('all')
   const [finderBufferMinutes,setFinderBufferMinutes]=useState<0|15|30>(0)
   const [newEventRange,setNewEventRange]=useState<{start:string;end:string}|null>(null)
+  const [newEventTitle,setNewEventTitle]=useState('')
   const [newEventRecurrence,setNewEventRecurrence]=useState<{frequency:'weekly';weekdays:number[];until:LocalDate}|null>(null)
   const [newAllDay,setNewAllDay]=useState<{from:LocalDate;through:LocalDate}|null>(null)
   const [allDayAdjustment,setAllDayAdjustment]=useState<{item:CalendarOccurrence;from:LocalDate;through:LocalDate}|null>(null)
@@ -414,7 +419,7 @@ export default function App(){
       setPendingDraft(null);setDraftReadError('')
     }catch(error){setDraftReadError('Draft was preserved: '+String(error))}
   }
-  function create(date:LocalDate){setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewEventRecurrence(null);setNewAllDay(null);setEditorDate(date)}
+  function create(date:LocalDate){setNewEventTitle('');setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null);setNewEventRecurrence(null);setNewAllDay(null);setEditorDate(date)}
   function showWeeklyPlanner(from?:LocalDate){
     const candidate=from??selected
     setWeeklyPlannerDate(candidate<localDate()?localDate():candidate)
@@ -430,7 +435,8 @@ export default function App(){
       const proposal=confirmWeeklyMeeting(latest.state.records,options,clock,hiddenImportedCalendars)
       setEditing(null);setCopyDraft(false);setActive(null)
       setEditInstance(null);setEditFuture(null);setNewAllDay(null)
-      setNewEventRange({start:proposal.start,end:proposal.end})
+      setNewEventTitle('')
+    setNewEventRange({start:proposal.start,end:proposal.end})
       setNewEventRecurrence({frequency:'weekly',weekdays:[proposal.weekday],until:proposal.until})
       setEditorDate(proposal.date);setSelected(proposal.date);setWeeklyPlannerOpen(false)
     }catch(error){setNotice('Weekly proposal not opened: '+String(error))}
@@ -459,9 +465,44 @@ export default function App(){
     startSlot(slot)
   }
   function startSlot(slot:FreeSlot){
+    setNewEventTitle('')
     setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null)
     setNewAllDay(null);setNewEventRecurrence(null);setNewEventRange({start:slot.start,end:slot.end});setEditorDate(slot.date)
     setSelected(slot.date);setFinderOpen(false)
+  }
+  function openPreparation(item:CalendarOccurrence){
+    const source=calendar.records.find(record=>record.id===item.recordId)
+    if(!source)return
+    setPreparationError('')
+    setPreparationAnchor({item,
+      ...(source.sourceKey?{originalSourceKey:source.sourceKey}:{}),
+      ...(source.sourceTimeZone||source.timeZone?
+        {originalTimeZone:source.sourceTimeZone??source.timeZone}:{})})
+    setActive(null)
+  }
+  function closePreparation(){
+    const previous=preparationAnchor
+    setPreparationAnchor(null);setPreparationError('')
+    if(previous){
+      try{open(resolvePreparationAnchor(calendar,previous))}
+      catch{setNotice('The original event changed. Review the current calendar before planning.')}
+    }
+  }
+  function prepareForEvent(slot:FreeSlot,options:PreparationOptions){
+    if(!preparationAnchor)return
+    try{
+      const latest=loadState()
+      if(latest.error)throw new Error('Saved Calendar is unreadable; recover it before scheduling.')
+      if(JSON.stringify(latest.state)!==JSON.stringify(calendar)){
+        setCalendar(latest.state)
+        throw new Error('Calendar changed in another tab. Review the updated preparation plan.')
+      }
+      const checked=confirmPreparationSlot(latest.state,preparationAnchor,options,slot,new Date())
+      const source=resolvePreparationAnchor(latest.state,preparationAnchor)
+      startSlot(checked)
+      setNewEventTitle(('Prepare: '+source.title).slice(0,240))
+      setPreparationAnchor(null);setPreparationError('')
+    }catch(error){setPreparationError('Preparation not opened: '+String(error))}
   }
   function startAllDay(from:LocalDate,through:LocalDate){
     setCopyDraft(false);setActive(null);setEditing(null);setEditInstance(null);setEditFuture(null);setNewEventRange(null)
@@ -1154,7 +1195,7 @@ export default function App(){
         </div>
       </section>
     </div>}
-    {editorDate!==null&&<EventEditor key={(restoredDraft?.id??'')+(editing?.id??'new')+editorDate+(newEventRange?.start??'')+(newAllDay?.through??'')} date={editorDate} event={editing??undefined} initialRange={newEventRange??undefined} initialRecurrence={newEventRecurrence??undefined} initialAllDay={newAllDay??undefined} records={calendar.records} isCopy={copyDraft} defaultReminderMinutes={restoredDraft?.origin.defaultReminderMinutes??reminderSettings.defaultLead}
+    {editorDate!==null&&<EventEditor key={(restoredDraft?.id??'')+(editing?.id??'new')+editorDate+(newEventRange?.start??'')+(newAllDay?.through??'')} date={editorDate} event={editing??undefined} initialTitle={newEventRange?newEventTitle:undefined} initialRange={newEventRange??undefined} initialRecurrence={newEventRecurrence??undefined} initialAllDay={newAllDay??undefined} records={calendar.records} isCopy={copyDraft} defaultReminderMinutes={restoredDraft?.origin.defaultReminderMinutes??reminderSettings.defaultLead}
       recoveredDraft={restoredDraft??undefined}
       draftOrigin={{date:editorDate,event:editing??undefined,copy:copyDraft,
         baseRecord:copyDraft?undefined:editInstance?calendar.records.find(r=>r.id===editInstance.parentId):
@@ -1330,6 +1371,9 @@ export default function App(){
           onClick={()=>showAgendaComparison(active.allDay?active.date:localDate(new Date(active.start)))}>
           Compare this day</button>
         </div>
+        <button type="button" className="secondary compact" onClick={()=>openPreparation(active)}>
+          <CalendarDays size={15}/> Plan preparation before this event
+        </button>
         <button type="button" className="details-show-day secondary compact"
           onClick={()=>{setMode('day');setSelected(active.allDay?active.date:localDate(new Date(active.start)));setActive(null)}}>
           <CalendarDays size={15}/> Show this day
@@ -1428,6 +1472,8 @@ export default function App(){
       <p className="fine-print">Read-only local snapshot; not live sync. Unsupported RRULE masters are skipped with warnings. Neither method modifies Google, Folio, KLIPS or personal events.</p>
       <footer className="editor-actions"><button className="secondary" onClick={closeIcsReview}>Cancel</button><button className="primary" onClick={applyImport} disabled={!importReview?.result}>Apply reviewed changes</button></footer>
     </section></div>}
+    {preparationAnchor&&<EventPreparation state={calendar} anchor={preparationAnchor}
+      onPrepare={prepareForEvent} onClose={closePreparation} externalError={preparationError}/>}
     {weeklyPlannerOpen&&<WeeklySeriesPlanner records={calendar.records}
       hiddenSources={hiddenImportedCalendars} initialDate={weeklyPlannerDate}
       onSelect={startWeeklySeries} onClose={()=>setWeeklyPlannerOpen(false)}/>}

@@ -947,3 +947,44 @@ ownership, exact imported ICS UID/TZID, personal recurrence/detached
 instances, C34 unfinished drafts, C37 subscriptions, C38/C39 Hub
 handoff, C40 Series & Source Trail, C41 Compare Days, JSON backups,
 CAS and privacy remain unchanged.
+
+
+## C42 distinct extension — preparation sessions before an original event
+
+From **Event details → Plan preparation before this event**, Calendar now offers
+a bounded, event-anchored planning workflow that is separate from the generic
+Find Time, C42 weekly recurring meeting planner, overlap inbox and comparison.
+It works for original personal/recurring/detached occurrences and imported
+read-only ICS events. An all-day target's preparation must occur on earlier
+dates. A timed target may use a free period earlier on its own device-local
+calendar date, but no suggested block may finish after the target's original
+UTC start instant.
+
+Choose a 7/14-day lookback, 2–6 preparation sessions on **distinct days**,
+30/60/90-minute sessions, morning/afternoon/evening hours, day-of-week scope,
+0/15/30-minute padding and optional all-day blocking. The planner delegates
+all free-time calculation to the original source-complete **findFreeSlots**
+engine, which considers canonical local records, original recurring/detached
+materializations, hidden imported ICS commitments and DST real instants.
+Transparent imported source events do not block. At most three alternative
+times are offered per available day; they are **alternatives**, not three
+reservations or an automatically scheduled multi-session plan. The nearest
+free dates are labeled as recommended until the goal is met; insufficient
+days produce an explicit count of missing sessions.
+
+Choosing a time re-reads the original Calendar v1 store, rejects any
+cross-tab change, verifies the exact original event/recurring occurrence,
+provider UID/source calendar and original IANA TZID, recomputes the
+source-complete preparation options, and then opens the **existing
+EventEditor** with the one selected free UTC interval and editable
+"Prepare: [original event]" title. The selected block becomes a normal
+independent personal event only if the user explicitly saves it through
+original C34 draft recovery, collision preview and guarded CAS authority.
+No imported event is copied or changed, no direct link is claimed, and
+preparation progress or proposed reservations are not stored. Repeat the
+planning action from the original event to schedule another separate block.
+
+This extends C42 without duplicating the weekly-series planner, rewriting
+source-owned ICS or changing C1–C41 IDs, timezone authority, D1/privacy,
+backup/recovery, C37 subscriptions or C38–C39 Hub handoff. The module
+is entirely local and does not contact Folio, Hub, StudyOS or providers.
