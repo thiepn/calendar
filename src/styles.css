@@ -868,3 +868,44 @@
  .trail-page-navigation span{grid-row:1;grid-column:1/-1}
  .trail-page-navigation button{white-space:normal}
 }
+
+
+/* C41 — source-backed two-day comparison; no second calendar engine. */
+.agenda-compare-backdrop{z-index:1150;padding:12px}
+.agenda-compare-dialog{width:min(1080px,100%);max-height:96dvh;min-width:0}
+.agenda-compare-controls{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+.agenda-compare-controls label{display:grid;gap:6px;flex:1 1 160px;min-width:0;font-size:15px}
+.agenda-compare-controls input{min-width:0;width:100%;min-height:44px;font-size:16px}
+.agenda-compare-controls button{min-height:44px;white-space:normal}
+.agenda-compare-scope,.agenda-compare-common{font-size:14px;line-height:1.5;margin:12px 0}
+.agenda-compare-common{font-weight:600}
+.agenda-compare-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+.agenda-compare-column{min-width:0;border:1px solid #d9e1da}
+.agenda-compare-column>header{padding:12px;border-bottom:1px solid #d9e1da;display:grid;gap:5px}
+.agenda-compare-column h3{font-size:19px;margin:0}
+.agenda-compare-column>header strong{font-size:15px}
+.agenda-compare-column>header span{font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+.agenda-compare-items{max-height:43dvh;overflow:auto;padding:0 12px}
+.agenda-compare-event{display:grid;gap:5px;text-align:left;width:100%;border:0;border-bottom:1px solid #dce4dc;
+ padding:13px 2px;background:transparent;color:inherit;min-width:0}
+.agenda-compare-event:hover,.agenda-compare-event:focus-visible{background:#f0f6f0}
+.agenda-compare-event-time{font-size:14px;font-weight:600}
+.agenda-compare-event strong{font-size:16px;overflow-wrap:anywhere}
+.agenda-compare-event span:last-child{font-size:14px;line-height:1.4;overflow-wrap:anywhere}
+.agenda-compare-event.is-imported{border-left:3px solid #b8874a;padding-left:9px}
+.agenda-compare-empty{font-size:15px;padding:10px 0}
+.agenda-compare-pages{display:flex;justify-content:space-between;align-items:center;gap:9px;padding:12px;flex-wrap:wrap}
+.agenda-compare-pages span{font-size:14px}
+.agenda-compare-pages button{min-height:44px}
+.details-compare-actions{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.details-compare-actions button{min-height:44px}
+@media(max-width:740px){
+ .agenda-compare-backdrop{padding:6px}
+ .agenda-compare-dialog{width:100%;max-height:96dvh;padding:14px}
+ .agenda-compare-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ .agenda-compare-controls label{min-width:0}
+ .agenda-compare-controls button{min-height:44px;font-size:14px}
+ .agenda-compare-grid{grid-template-columns:minmax(0,1fr);gap:14px}
+ .agenda-compare-items{max-height:31dvh}
+ .agenda-compare-pages button{white-space:normal}
+}

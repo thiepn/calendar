@@ -825,3 +825,44 @@ C34 recovered drafts, C35/C36 IANA/TZID behavior, C37 subscriptions,
 C38/C39 Hub handoff and Folio/StudyOS/Hub authority. Imported records remain
 read-only, even when inspected from a hidden source. The new trail keeps
 desktop/mobile readable text and no ornamental helper microcopy.
+
+
+## C41 — Source-authentic Compare Days
+
+C41 adds an explicit **Compare days** action to the existing List/Agenda
+toolbar, and **Compare this day** in the native event-details view. Choose
+two device-local calendar dates, swap them or advance the second day one week.
+The comparison renders two independent, paged original occurrence columns
+using the existing C19/C30 day-navigator, original dayOccurrences, conflict
+detection and sevenDayWorkload UTC timed-union authority. The comparison
+shows each day's real event count, imported/all-day counts, timed occupied
+minutes, overlap warnings and per-source counts. For high-density dates,
+paging is independent (12 original events per column).
+
+**Also on other day** uses only actual canonical owner identity. Personal
+recurring detached replacements inherit their original recurrenceParentId;
+spanning all-day items retain the same source record; unrelated imported
+events with similar titles are never matched as if they were the same
+provider event. Imported ICS remains read-only and TRANSP:TRANSPARENT
+entries stay visible but do not count as busy minutes. Existing device-local
+DST/day boundaries, canonical UTC times, all-day endDateExclusive,
+C35/C36 IANA/TZID and all original source IDs remain authoritative.
+
+The compare dialog uses the *existing currently visible* Calendar filter,
+search and hidden imported-source preferences. This display comparison
+does not relax hidden-source rules or reinterpret free/busy: Find time and
+actual guarded saves continue to check all saved original sources. Press
+an event to open native Calendar event details; the handler re-reads the
+actual original source, current filter and canonical UTC occurrence at
+interaction time, failing closed if another tab changed the calendar or
+if the original UID/source ownership differs. **Return to day comparison**
+restores the previous dates, without a new datastore, writes, tasks,
+provider sync, remote deep-link or calendar engine.
+
+Unlike C30 daily paging, C32 neighboring event navigation, C40 single
+series/source trail and earlier seven-day workload summaries, C41 compares
+the content of **two independently selected calendar days**, with
+source-authentic cross-day identity, overlap context and direct original
+record navigation for dense schedules. Original C1–C40 behavior, CAS,
+backups/checkpoints, recovered drafts, C37 consented subscriptions and
+C38/C39 Hub read-only handoff remain unchanged.

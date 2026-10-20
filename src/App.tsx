@@ -39,6 +39,8 @@ import {MonthDayPeek} from './components/MonthDayPeek'
 import {NowNext} from './components/NowNext'
 import {SourcePicker} from './components/SourcePicker'
 import {AgendaTrail} from './components/AgendaTrail'
+import {AgendaCompareDialog} from './components/AgendaCompareDialog'
+import {resolveComparedOccurrence} from './core/agenda-compare'
 import {resolveTrailSelection,type TrailTarget,type TrailRow} from './core/agenda-trail'
 import {SubscriptionManager} from './components/SubscriptionManager'
 import {ICS_SUBSCRIPTIONS_KEY,readSubscriptions,reviseSubscriptions,addSubscription,changeSubscription,dropSubscription,assertFeedSource,fetchSubscribedIcs,historyEntry,type SubscriptionStore,type IcsSubscription} from './core/ics-subscriptions'
@@ -118,6 +120,10 @@ export default function App(){
   const [monthPeekDate,setMonthPeekDate]=useState<LocalDate|null>(null)
   const [pending,setPending]=useState<IcsPreview|null>(null)
   const [sourcePanel,setSourcePanel]=useState(false)
+  const [agendaCompareOpen,setAgendaCompareOpen]=useState(false)
+  const [compareFirst,setCompareFirst]=useState<LocalDate>(()=>localDate())
+  const [compareSecond,setCompareSecond]=useState<LocalDate>(()=>addDays(localDate(),7))
+  const [returnToComparison,setReturnToComparison]=useState(false)
   const [agendaTrail,setAgendaTrail]=useState<{
     target:TrailTarget;initialDate:LocalDate;origin?:CalendarOccurrence
   }|null>(null)
@@ -444,7 +450,28 @@ export default function App(){
       }
     }catch(error){setNotice('All-day adjustment rejected: '+String(error))}
   }
-  function open(item:CalendarOccurrence){setActive(item);setSelected(item.allDay?item.date:localDate(new Date(item.start)));setMoveDate(item.startDate)}
+  function open(item:CalendarOccurrence){
+    setReturnToComparison(false)
+    setActive(item);setSelected(item.allDay?item.date:localDate(new Date(item.start)))
+    setMoveDate(item.startDate)
+  }
+  function showAgendaComparison(from:LocalDate){
+    setCompareFirst(from);setCompareSecond(addDays(from,7))
+    setAgendaCompareOpen(true);setReturnToComparison(false);setActive(null)
+  }
+  function openComparedOccurrence(item:CalendarOccurrence,date:LocalDate){
+    try{
+      const latest=loadState()
+      if(latest.error||JSON.stringify(latest.state)!==JSON.stringify(calendar))
+        throw new Error('Calendar changed in another tab; reload the original events first.')
+      const stillVisible=visibleCalendarRecords(latest.state.records,filter,hiddenImportedSet,query)
+      const original=calendar.records.find(r=>r.id===item.recordId)
+      if(!original)throw new Error('Original event no longer exists')
+      const verified=resolveComparedOccurrence(stillVisible,date,item,original)
+      setAgendaCompareOpen(false);setMode('day');open(verified)
+      setReturnToComparison(true)
+    }catch(error){setNotice('Comparison event not opened: '+String(error))}
+  }
   function openAgendaTrailFromEvent(item:CalendarOccurrence){
     const original=calendar.records.find(record=>record.id===item.recordId)
     if(!original)return
@@ -1022,6 +1049,8 @@ export default function App(){
             <button className="secondary compact" type="button" aria-label="Next visible commitments"
               onClick={()=>jumpAgenda(1)}>Next events <ChevronRight size={15}/></button>
           </nav>
+          <button className="secondary compact" type="button" aria-label="Compare original agenda days"
+            onClick={()=>showAgendaComparison(selected)}><CalendarDays size={15}/> Compare days</button>
           <button className="secondary compact" type="button" onClick={saveDisplayedAgenda} aria-label="Download visible agenda CSV"><Download size={14}/> Download visible agenda CSV</button>
           <p className="fine-print agenda-jump-note">Skip directly to the nearest visible event outside this displayed range, up to 365 days away. Keeps List view and displayed source filters; hidden busy imports still count independently for Find time.</p>
         </div>}
@@ -1231,6 +1260,14 @@ export default function App(){
         <h2>{active.title}</h2><p className="details-dates">{active.allDay?'All day · '+friendlyRange(active.startDate,addDays(active.endDateExclusive,-1)):new Date(active.start).toLocaleString()+' – '+new Date(active.end).toLocaleString()}</p>
         {activeRecord?.sourceTimeZone&&!active.allDay&&<p className="details-event-zone"><strong>Imported source timezone:</strong> {activeRecord.sourceTimeZone} · {zoneWall(active.start,activeRecord.sourceTimeZone)} – {zoneWall(active.end,activeRecord.sourceTimeZone)} (read only)</p>}
         {activeRecord?.timeZone&&!active.allDay&&<p className="details-event-zone"><strong>Event time zone:</strong> {activeRecord.timeZone} · {zoneWall(active.start,activeRecord.timeZone)}–{zoneWall(active.end,activeRecord.timeZone).slice(11)} (device: {deviceTimeZone()})</p>}
+        <div className="details-compare-actions">
+        {returnToComparison&&<button type="button" className="secondary compact"
+          onClick={()=>{setActive(null);setAgendaCompareOpen(true);setReturnToComparison(false)}}>
+          Return to day comparison</button>}
+        <button type="button" className="secondary compact"
+          onClick={()=>showAgendaComparison(active.allDay?active.date:localDate(new Date(active.start)))}>
+          Compare this day</button>
+        </div>
         <button type="button" className="details-show-day secondary compact"
           onClick={()=>{setMode('day');setSelected(active.allDay?active.date:localDate(new Date(active.start)));setActive(null)}}>
           <CalendarDays size={15}/> Show this day
@@ -1329,6 +1366,11 @@ export default function App(){
       <p className="fine-print">Read-only local snapshot; not live sync. Unsupported RRULE masters are skipped with warnings. Neither method modifies Google, Folio, KLIPS or personal events.</p>
       <footer className="editor-actions"><button className="secondary" onClick={closeIcsReview}>Cancel</button><button className="primary" onClick={applyImport} disabled={!importReview?.result}>Apply reviewed changes</button></footer>
     </section></div>}
+    {agendaCompareOpen&&<AgendaCompareDialog records={visible}
+      first={compareFirst} second={compareSecond}
+      onFirst={setCompareFirst} onSecond={setCompareSecond}
+      sourceDescription={filter==='personal'?'Personal events':filter==='ics'?'Displayed imported events':'Displayed personal and imported events'}
+      onOpen={openComparedOccurrence} onClose={()=>setAgendaCompareOpen(false)}/>}
     {agendaTrail&&<AgendaTrail state={calendar} target={agendaTrail.target}
       initialDate={agendaTrail.initialDate} hiddenSources={hiddenImportedCalendars}
       onOpen={openAgendaTrailRow} onClose={closeAgendaTrail}/>}

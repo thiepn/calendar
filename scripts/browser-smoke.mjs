@@ -4323,6 +4323,139 @@ async function exerciseC40MobileHiddenImportedSourcePagedTrail(){
   await context.close()
 }
 
+
+async function exerciseC41DesktopDenseSourceAuthenticCompareReturn(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const master={
+    id:'c41-master',title:'C41 original course series',description:'',location:'',
+    source:'personal',allDay:false,timeZone:'Europe/Berlin',
+    start:'2026-11-10T09:00:00.000Z',end:'2026-11-10T10:00:00.000Z',
+    repeat:{frequency:'daily',interval:1,until:'2026-11-21'},
+    excludedDates:['2026-11-11'],updatedAt:'2026-10-19T12:00:00.000Z'
+  }
+  const detached={...master,id:'c41-replacement',title:'C41 edited original instance',
+    start:'2026-11-11T12:00:00.000Z',end:'2026-11-11T13:00:00.000Z',
+    repeat:undefined,excludedDates:undefined,
+    recurrenceParentId:'c41-master',recurrenceDate:'2026-11-11'}
+  const allDay={...master,id:'c41-multi',title:'C41 all-day source span',
+    start:'2026-11-11T00:00:00.000Z',end:'2026-11-19T00:00:00.000Z',
+    repeat:undefined,excludedDates:undefined,timeZone:undefined,allDay:true,
+    startDate:'2026-11-11',endDateExclusive:'2026-11-19'}
+  const importedDate=(day,id)=>({
+    id,source:'ics',sourceCalendar:'C41 original university',sourceKey:'C41 original university|'+id,
+    title:'C41 common-looking lecture',description:'',location:'',allDay:false,
+    sourceTimeZone:'Europe/Berlin',start:day+'T16:00:00.000Z',
+    end:day+'T17:00:00.000Z',updatedAt:'2026-10-19T12:00:00.000Z'
+  })
+  const dense=Array.from({length:32},(_,i)=>({
+    ...master,id:'c41-dense-'+i,title:'C41 dense original '+i,
+    start:'2026-11-11T08:00:00.000Z',end:'2026-11-11T09:00:00.000Z',
+    repeat:undefined,excludedDates:undefined,timeZone:undefined
+  }))
+  const rows=[master,detached,allDay,importedDate('2026-11-11','c41-ics-1'),
+    importedDate('2026-11-18','c41-ics-2'),...dense]
+  await page.evaluate(input=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records:input})),rows)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-11')
+  await page.locator('.view-switch button').filter({hasText:'List'}).click()
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  await page.getByRole('button',{name:'Compare original agenda days'}).click()
+  const dialog=page.getByRole('dialog',{name:'Compare original calendar days'})
+  await dialog.waitFor()
+  assert.equal(await dialog.getByLabel('First comparison date').inputValue(),'2026-11-11')
+  assert.equal(await dialog.getByLabel('Second comparison date').inputValue(),'2026-11-18')
+  assert.match(await dialog.innerText(),/2 original event\/series owners appear on both days/)
+  const first=dialog.getByRole('region',{name:'Compared day 2026-11-11'})
+  const second=dialog.getByRole('region',{name:'Compared day 2026-11-18'})
+  assert.match(await first.innerText(),/35 events/)
+  assert.match(await second.innerText(),/3 events/)
+  assert.match(await first.innerText(),/C41 original university/)
+  assert.match(await second.innerText(),/C41 original university/)
+  assert.equal(await first.getByRole('button',{name:'Next'}).isDisabled(),false)
+  await first.getByRole('button',{name:'Next'}).click()
+  assert.match(await first.innerText(),/13–24 of 35/)
+  assert.match(await second.innerText(),/3 events/)
+  const originalAction=first.getByRole('button',{name:/Inspect compared event C41 dense original/}).first()
+  const name=await originalAction.getAttribute('aria-label')
+  const openedTitle=name.match(/Inspect compared event (.*?) 2026-11-11/)?.[1]
+  assert.ok(openedTitle,'Source-backed original action must retain original name')
+  await originalAction.click()
+  const detail=page.getByRole('dialog',{name:'Event details'})
+  await detail.waitFor()
+  assert.match(await detail.innerText(),new RegExp(openedTitle))
+  await detail.getByRole('button',{name:'Return to day comparison'}).click()
+  await dialog.waitFor()
+  assert.equal(await dialog.getByLabel('Second comparison date').inputValue(),'2026-11-18')
+  await dialog.getByRole('button',{name:'Swap dates'}).click()
+  assert.equal(await dialog.getByLabel('First comparison date').inputValue(),'2026-11-18')
+  await dialog.getByRole('button',{name:'Next comparison week'}).click()
+  await dialog.getByRole('alert').getByText(/two different days/).waitFor()
+  await dialog.getByLabel('Second comparison date').fill('2026-11-25')
+  assert.equal(await dialog.getByRole('alert').count(),0)
+  await dialog.getByRole('button',{name:'Return to Calendar'}).click()
+  assert.equal(await page.getByRole('dialog',{name:'Compare original calendar days'}).count(),0)
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C41_DESKTOP_DENSE_TWO_DAYS_SOURCE_OWNER_RECURRENCE_PAGING_RETURN_PASS')
+  await context.close()
+}
+async function exerciseC41MobileHiddenSourceCompareAndExactReturn(){
+  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',error=>errors.push(error.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const personal={id:'c41-mobile-original',title:'C41 mobile personal task',description:'',
+    location:'',source:'personal',allDay:false,
+    timeZone:'Europe/Berlin',start:'2026-11-11T09:00:00.000Z',
+    end:'2026-11-11T10:00:00.000Z',updatedAt:'2026-10-19T12:00:00.000Z'}
+  const imported={...personal,id:'c41-mobile-import',title:'C41 mobile read-only hidden',
+    source:'ics',sourceCalendar:'C41 invisible original',sourceKey:'C41 invisible original|source-uid',
+    timeZone:undefined,sourceTimeZone:'Europe/Berlin',
+    start:'2026-11-11T11:00:00.000Z',end:'2026-11-11T12:00:00.000Z'}
+  await page.evaluate(rows=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records:rows})),[personal,imported])
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-11')
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  const sources=page.getByRole('dialog',{name:'Calendar data management'})
+  await sources.getByLabel('Show C41 invisible original on calendar').uncheck()
+  await sources.getByRole('button',{name:'Close sources'}).click()
+  await page.locator('.view-switch button').filter({hasText:'Day'}).click()
+  await page.locator('.timeline-block').filter({hasText:'C41 mobile personal task'}).first().click()
+  await page.getByRole('dialog',{name:'Event details'}).getByRole('button',{name:'Compare this day'}).click()
+  const dialog=page.getByRole('dialog',{name:'Compare original calendar days'})
+  await dialog.waitFor()
+  let side=dialog.getByRole('region',{name:'Compared day 2026-11-11'})
+  assert.match(await side.innerText(),/1 events/)
+  assert.equal(await side.getByText('C41 mobile read-only hidden').count(),0)
+  assert.match(await dialog.innerText(),/hidden imported busy events still affect Find time/)
+  await side.getByRole('button',{name:'Inspect compared event C41 mobile personal task 2026-11-11'}).click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.innerText(),/C41 mobile personal task/)
+  await details.getByRole('button',{name:'Return to day comparison'}).click()
+  await dialog.waitFor()
+  const sizes=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}))
+  assert.ok(sizes.scroll<=sizes.width+2,'C41 comparison should not overflow viewport on mobile')
+  await dialog.getByRole('button',{name:'Return to Calendar'}).click()
+  await page.getByRole('button',{name:'Open navigation'}).click()
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  assert.equal(await page.getByRole('dialog',{name:'Calendar data management'})
+    .getByLabel('Show C41 invisible original on calendar').isChecked(),false)
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C41_MOBILE_HIDDEN_SOURCE_TWO_DAY_COMPARE_RETURN_CANONICAL_NO_WRITES_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -4408,6 +4541,8 @@ try{
   await exerciseC39MobilePrivateBusyReceiptClearedOnReload()
   await exerciseC40DesktopOriginalRecurringTrailDetachesAndSkips()
   await exerciseC40MobileHiddenImportedSourcePagedTrail()
+  await exerciseC41DesktopDenseSourceAuthenticCompareReturn()
+  await exerciseC41MobileHiddenSourceCompareAndExactReturn()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
