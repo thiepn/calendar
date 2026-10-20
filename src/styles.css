@@ -909,3 +909,39 @@
  .agenda-compare-items{max-height:31dvh}
  .agenda-compare-pages button{white-space:normal}
 }
+
+
+/* C42 — original saved-appointment overlap inbox. */
+.overlap-inbox-backdrop{z-index:1150;padding:12px}
+.overlap-inbox-dialog{width:min(870px,100%);max-height:96dvh;min-width:0}
+.overlap-inbox-controls{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
+.overlap-inbox-controls label{display:grid;gap:6px;flex:1 1 140px;min-width:0;font-size:15px}
+.overlap-inbox-controls input,.overlap-inbox-controls select{width:100%;min-width:0;min-height:44px;font-size:16px}
+.overlap-inbox-controls button{min-height:44px;white-space:normal}
+.overlap-inbox-total{font-size:15px;font-weight:600;line-height:1.5;margin:15px 0}
+.overlap-reveal{display:flex;gap:9px;align-items:center;line-height:1.5;font-size:14px}
+.overlap-reveal input{width:19px;height:19px;flex-shrink:0}
+.overlap-pairs{list-style:none;padding:0;margin:12px 0;display:grid;gap:10px;max-height:48dvh;overflow:auto}
+.overlap-pair{border:1px solid #d8e0d8;padding:12px;min-width:0;display:grid;gap:12px}
+.overlap-pair time{font-size:15px;font-weight:600}
+.overlap-participants{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.overlap-participant{min-width:0;display:grid;align-content:start;gap:7px}
+.overlap-participant strong{font-size:16px;overflow-wrap:anywhere}
+.overlap-participant span{font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+.overlap-participant-actions{display:flex;gap:8px;flex-wrap:wrap}
+.overlap-participant-actions button{font-size:14px;min-height:44px;white-space:normal}
+.overlap-inbox-pages{display:flex;align-items:center;justify-content:space-between;gap:9px;flex-wrap:wrap}
+.overlap-inbox-pages button{min-height:44px}
+.overlap-inbox-pages span,.overlap-inbox-note,.overlap-empty{font-size:14px;line-height:1.5}
+@media(max-width:740px){
+ .overlap-inbox-backdrop{padding:6px}
+ .overlap-inbox-dialog{padding:14px;width:100%;max-height:96dvh}
+ .overlap-inbox-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ .overlap-inbox-controls label{min-width:0}
+ .overlap-inbox-controls button{font-size:14px}
+ .overlap-participants{grid-template-columns:1fr}
+ .overlap-pairs{max-height:46dvh}
+ .overlap-inbox-pages{display:grid;grid-template-columns:1fr 1fr}
+ .overlap-inbox-pages span{grid-column:1/-1;grid-row:1}
+ .overlap-inbox-pages button{white-space:normal}
+}

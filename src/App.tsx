@@ -40,6 +40,8 @@ import {NowNext} from './components/NowNext'
 import {SourcePicker} from './components/SourcePicker'
 import {AgendaTrail} from './components/AgendaTrail'
 import {AgendaCompareDialog} from './components/AgendaCompareDialog'
+import {OverlapInbox} from './components/OverlapInbox'
+import {resolveOverlapParticipant,type OriginalOverlapParticipant} from './core/overlap-inbox'
 import {resolveComparedOccurrence} from './core/agenda-compare'
 import {resolveTrailSelection,type TrailTarget,type TrailRow} from './core/agenda-trail'
 import {SubscriptionManager} from './components/SubscriptionManager'
@@ -121,6 +123,8 @@ export default function App(){
   const [pending,setPending]=useState<IcsPreview|null>(null)
   const [sourcePanel,setSourcePanel]=useState(false)
   const [agendaCompareOpen,setAgendaCompareOpen]=useState(false)
+  const [overlapInboxOpen,setOverlapInboxOpen]=useState(false)
+  const [overlapInboxDate,setOverlapInboxDate]=useState<LocalDate>(()=>localDate())
   const [compareFirst,setCompareFirst]=useState<LocalDate>(()=>localDate())
   const [compareSecond,setCompareSecond]=useState<LocalDate>(()=>addDays(localDate(),7))
   const [returnToComparison,setReturnToComparison]=useState(false)
@@ -471,6 +475,29 @@ export default function App(){
       setAgendaCompareOpen(false);setMode('day');open(verified)
       setReturnToComparison(true)
     }catch(error){setNotice('Comparison event not opened: '+String(error))}
+  }
+  function showOverlapInbox(date:LocalDate){
+    setOverlapInboxDate(date);setOverlapInboxOpen(true);setActive(null)
+  }
+  function inspectOverlapParticipant(participant:OriginalOverlapParticipant,action:'inspect'|'adjust'){
+    try{
+      const latest=loadState()
+      if(latest.error||JSON.stringify(latest.state)!==JSON.stringify(calendar))
+        throw new Error('The calendar changed in another tab. Reload before reviewing overlap actions.')
+      const original=resolveOverlapParticipant(latest.state,participant)
+      setOverlapInboxOpen(false)
+      setSelected(original.allDay?original.date:localDate(new Date(original.start)))
+      if(action==='adjust'){
+        if(original.source!=='personal'||original.allDay)
+          throw new Error('Only original timed personal events can be adjusted')
+        const d=new Date(original.start)
+        const date=localDate(d)
+        const duration=Math.round((Date.parse(original.end)-Date.parse(original.start))/60000)
+        const choices=localInstantOptions(localDateTime(original.start))
+        const fold=choices.length===2?(choices[0]===original.start?'earlier':'later'):undefined
+        requestAdjustment(original,'move',date,d.getHours()*60+d.getMinutes(),duration,fold)
+      }else{setMode('day');open(original)}
+    }catch(error){setNotice('Overlap action unavailable: '+String(error))}
   }
   function openAgendaTrailFromEvent(item:CalendarOccurrence){
     const original=calendar.records.find(record=>record.id===item.recordId)
@@ -1049,6 +1076,8 @@ export default function App(){
             <button className="secondary compact" type="button" aria-label="Next visible commitments"
               onClick={()=>jumpAgenda(1)}>Next events <ChevronRight size={15}/></button>
           </nav>
+          <button className="secondary compact" type="button" aria-label="Review all saved overlaps"
+            onClick={()=>showOverlapInbox(selected)}><AlertTriangle size={15}/> Review overlaps</button>
           <button className="secondary compact" type="button" aria-label="Compare original agenda days"
             onClick={()=>showAgendaComparison(selected)}><CalendarDays size={15}/> Compare days</button>
           <button className="secondary compact" type="button" onClick={saveDisplayedAgenda} aria-label="Download visible agenda CSV"><Download size={14}/> Download visible agenda CSV</button>
@@ -1261,6 +1290,9 @@ export default function App(){
         {activeRecord?.sourceTimeZone&&!active.allDay&&<p className="details-event-zone"><strong>Imported source timezone:</strong> {activeRecord.sourceTimeZone} · {zoneWall(active.start,activeRecord.sourceTimeZone)} – {zoneWall(active.end,activeRecord.sourceTimeZone)} (read only)</p>}
         {activeRecord?.timeZone&&!active.allDay&&<p className="details-event-zone"><strong>Event time zone:</strong> {activeRecord.timeZone} · {zoneWall(active.start,activeRecord.timeZone)}–{zoneWall(active.end,activeRecord.timeZone).slice(11)} (device: {deviceTimeZone()})</p>}
         <div className="details-compare-actions">
+        <button type="button" className="secondary compact"
+          onClick={()=>showOverlapInbox(active.allDay?active.date:localDate(new Date(active.start)))}>
+          Review overlaps</button>
         {returnToComparison&&<button type="button" className="secondary compact"
           onClick={()=>{setActive(null);setAgendaCompareOpen(true);setReturnToComparison(false)}}>
           Return to day comparison</button>}
@@ -1366,6 +1398,9 @@ export default function App(){
       <p className="fine-print">Read-only local snapshot; not live sync. Unsupported RRULE masters are skipped with warnings. Neither method modifies Google, Folio, KLIPS or personal events.</p>
       <footer className="editor-actions"><button className="secondary" onClick={closeIcsReview}>Cancel</button><button className="primary" onClick={applyImport} disabled={!importReview?.result}>Apply reviewed changes</button></footer>
     </section></div>}
+    {overlapInboxOpen&&<OverlapInbox state={calendar} initialDate={overlapInboxDate}
+      hiddenSources={hiddenImportedCalendars}
+      onOpen={inspectOverlapParticipant} onClose={()=>setOverlapInboxOpen(false)}/>}
     {agendaCompareOpen&&<AgendaCompareDialog records={visible}
       first={compareFirst} second={compareSecond}
       onFirst={setCompareFirst} onSecond={setCompareSecond}

@@ -866,3 +866,44 @@ source-authentic cross-day identity, overlap context and direct original
 record navigation for dense schedules. Original C1–C40 behavior, CAS,
 backups/checkpoints, recovered drafts, C37 consented subscriptions and
 C38/C39 Hub read-only handoff remain unchanged.
+
+
+## C42 — Original saved-calendar Overlap Inbox
+
+C42 adds **Review overlaps** to the main List/Agenda and event-details
+views. This is not the existing event editor's draft collision preview,
+another free-slot scheduler or a copied calendar. The inbox looks at the
+actual original saved calendar source over an explicitly chosen 7-, 14-
+or 30-day window. It materializes the canonical personal/ICS recurrences,
+then identifies real pairwise intersections of UTC timed intervals without
+double-counting a pair that crosses a midnight boundary. Events marked
+TRANSP:TRANSPARENT are visible in Calendar but are not treated as busy
+timed conflicts. All-day occurrences are separately counted, not
+mistaken for a finite timed collision.
+
+Unlike visible-source-only List and C41 day comparison, the Overlap Inbox
+always includes **every original stored commitment** in its collision
+authority, including imported sources that the user has hidden from
+normal calendar views. Hidden imported event titles and source names
+are not rendered until a deliberate **Reveal hidden imported source
+details** toggle is selected inside the review. Navigation to a hidden
+imported event is disabled until those details are revealed. Revealing
+does not modify the source-visibility preference or saved event data.
+
+The review displays original event/series, imported provenance and
+IANA source timezone where applicable, with an explicit pairwise UTC
+overlap window and bounded paging (up to 12 pairs at once and 1,000
+pairs per window). For each appointment, **Inspect original** returns
+to the existing native details view, or **Adjust personal time** opens
+the original C19+ guarded single-occurrence time-adjustment workflow;
+imported ICS appointments remain read-only. Every action re-reads the
+canonical local store and verifies the exact original provider UID,
+record ID, occurrence key, title and UTC start/end, rejecting stale
+cross-tab states. No proposal is saved automatically, and original
+C34 drafts, C35/C36 UTC/IANA/DST, C37 subscription rights, C38–C39
+read-only Hub handoff, C40 trail, C41 comparison and guarded CAS/backups
+remain untouched.
+
+C43 priority: evaluate executable C42 acceptance results first; then
+implement a genuinely distinct calendar usability workflow, not a
+duplicated overlap inbox or a release-qualification-only phase.

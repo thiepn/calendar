@@ -4456,6 +4456,107 @@ async function exerciseC41MobileHiddenSourceCompareAndExactReturn(){
   await context.close()
 }
 
+
+async function exerciseC42DesktopHiddenSourceActualOverlapAndAdjustmentHandoff(){
+  const context=await browser.newContext({viewport:{width:1440,height:900},
+    timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const event={
+    id:'c42-original-personal',title:'C42 personal appointment',description:'Private memo',
+    location:'',source:'personal',allDay:false,timeZone:'Europe/Berlin',
+    start:'2026-11-11T09:00:00.000Z',end:'2026-11-11T10:00:00.000Z',
+    updatedAt:'2026-10-20T07:00:00.000Z'
+  }
+  const imported={...event,id:'c42-hidden-import',title:'C42 private imported course',
+    source:'ics',sourceCalendar:'C42 private campus',sourceKey:'C42 private campus|real-uid',
+    timeZone:undefined,sourceTimeZone:'Europe/Berlin',
+    start:'2026-11-11T09:30:00.000Z',end:'2026-11-11T10:30:00.000Z'}
+  const free={...imported,id:'c42-imported-free',title:'C42 free transparent source',
+    sourceKey:'C42 private campus|free-uid',transparent:true,
+    start:'2026-11-11T09:20:00.000Z',end:'2026-11-11T10:10:00.000Z'}
+  await page.evaluate(rows=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records:rows})),[event,imported,free])
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-11')
+  await page.getByRole('button',{name:'Manage sources'}).click()
+  const manage=page.getByRole('dialog',{name:'Calendar data management'})
+  await manage.getByLabel('Show C42 private campus on calendar').uncheck()
+  await manage.getByRole('button',{name:'Close sources'}).click()
+  await page.locator('.view-switch button').filter({hasText:'List'}).click()
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  await page.getByRole('button',{name:'Review all saved overlaps'}).click()
+  let inbox=page.getByRole('dialog',{name:'Saved calendar overlap inbox'})
+  await inbox.waitFor()
+  assert.match(await inbox.innerText(),/1 timed overlaps/)
+  assert.match(await inbox.innerText(),/1 include hidden imports/)
+  assert.equal(await inbox.getByText('C42 private imported course').count(),0)
+  assert.equal(await inbox.getByText('C42 free transparent source').count(),0)
+  await inbox.getByLabel('Reveal hidden imported source details').check()
+  assert.match(await inbox.innerText(),/C42 private imported course/)
+  assert.equal(await inbox.getByText('C42 free transparent source').count(),0)
+  await inbox.getByRole('button',{name:'Inspect C42 private imported course'}).click()
+  const details=page.getByRole('dialog',{name:'Event details'})
+  await details.waitFor()
+  assert.match(await details.innerText(),/IMPORTED SNAPSHOT/)
+  assert.match(await details.innerText(),/C42 private imported course/)
+  await details.getByRole('button',{name:'Close event'}).click()
+  await page.getByRole('button',{name:'Review all saved overlaps'}).click()
+  inbox=page.getByRole('dialog',{name:'Saved calendar overlap inbox'})
+  await inbox.getByRole('button',{name:'Adjust personal time'}).click()
+  const adjustment=page.getByRole('dialog',{name:'Confirm time adjustment'})
+  await adjustment.waitFor()
+  assert.match(await adjustment.innerText(),/C42 personal appointment/)
+  await adjustment.getByRole('button',{name:'Cancel adjustment'}).click()
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C42_DESKTOP_HIDDEN_IMPORT_PRIVACY_REAL_OVERLAP_ADJUST_ORIGINAL_NO_WRITES_PASS')
+  await context.close()
+}
+async function exerciseC42MobileDenseOverlapPagesAndDateWindows(){
+  const context=await browser.newContext({viewport:{width:390,height:844},
+    isMobile:true,hasTouch:true,timezoneId:'Europe/Berlin',locale:'en-GB'})
+  const page=await context.newPage(),errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.goto(url,{waitUntil:'networkidle'})
+  const original=Array.from({length:6},(_,i)=>({
+    id:'c42-dense-'+i,title:'C42 original '+i,description:'',location:'',
+    source:'personal',allDay:false,
+    start:'2026-11-11T09:00:00.000Z',end:'2026-11-11T10:00:00.000Z',
+    updatedAt:'2026-10-20T07:00:00.000Z'
+  }))
+  await page.evaluate(rows=>localStorage.setItem('thiepn.calendar.local.v1',
+    JSON.stringify({schemaVersion:1,records:rows})),original)
+  await page.reload({waitUntil:'networkidle'})
+  await page.getByLabel('Jump to date').fill('2026-11-11')
+  await page.locator('.view-switch button').filter({hasText:'List'}).click()
+  const before=await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1'))
+  await page.getByRole('button',{name:'Review all saved overlaps'}).click()
+  const inbox=page.getByRole('dialog',{name:'Saved calendar overlap inbox'})
+  await inbox.waitFor()
+  assert.match(await inbox.innerText(),/15 timed overlaps/)
+  await inbox.getByRole('button',{name:'Next overlaps'}).click()
+  assert.match(await inbox.innerText(),/13–15 of 15/)
+  const size=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:innerWidth}))
+  assert.ok(size.scroll<=size.width+2,'C42 mobile review overflow')
+  await inbox.getByRole('button',{name:'Inspect C42 original 4'}).first().click()
+  const detail=page.getByRole('dialog',{name:'Event details'})
+  await detail.waitFor()
+  assert.match(await detail.innerText(),/C42 original 4/)
+  await detail.getByRole('button',{name:'Close event'}).click()
+  await page.getByRole('button',{name:'Review all saved overlaps'}).click()
+  const again=page.getByRole('dialog',{name:'Saved calendar overlap inbox'})
+  await again.getByLabel('Overlap inbox range').selectOption('7')
+  await again.getByRole('button',{name:'Next period'}).click()
+  assert.match(await again.innerText(),/0 timed overlaps/)
+  await again.getByRole('button',{name:'Return to Calendar'}).click()
+  assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+  assert.equal(errors.length,0,errors.join('; '))
+  console.log('BROWSER_C42_MOBILE_DENSE_OVERLAP_PAGES_EXISTING_EVENT_RETURN_NO_WRITES_PASS')
+  await context.close()
+}
+
 let failed=false
 try{
   await ready()
@@ -4543,6 +4644,8 @@ try{
   await exerciseC40MobileHiddenImportedSourcePagedTrail()
   await exerciseC41DesktopDenseSourceAuthenticCompareReturn()
   await exerciseC41MobileHiddenSourceCompareAndExactReturn()
+  await exerciseC42DesktopHiddenSourceActualOverlapAndAdjustmentHandoff()
+  await exerciseC42MobileDenseOverlapPagesAndDateWindows()
   console.log('CHROMIUM_DESKTOP_MOBILE_PASS')
 }catch(error){
   failed=true
