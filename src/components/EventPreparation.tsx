@@ -74,8 +74,7 @@ export function EventPreparation({state,anchor,onPrepare,onClose,externalError}:
         <input type="checkbox" checked={blockAllDay} onChange={e=>setBlockAllDay(e.target.checked)}/>
         Exclude days with all-day commitments
       </label>
-      {externalError&&<p role="alert" className="error">{externalError}</p>}
-      {error&&<p role="alert" className="error">{error}</p>}
+      {(externalError||error)&&<p role="alert" className="error">{externalError||error}</p>}
       {plan&&<>
         <p className="preparation-summary" role="status">
           {plan.shortfall===0?
