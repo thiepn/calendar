@@ -4744,6 +4744,9 @@ async function exerciseC42MobileRecurringPreparationStaleOwnerAndNoWrites(){
   await editor.getByRole('button',{name:'Cancel'}).click()
   await editor.waitFor({state:'detached'})
   assert.equal(await page.evaluate(()=>localStorage.getItem('thiepn.calendar.local.v1')),before)
+  // A preparation draft intentionally navigates to its own earlier date.
+  // Return to the unchanged original occurrence before testing stale-owner review.
+  await page.getByLabel('Jump to date').fill('2026-11-18')
   await page.locator('.timeline-block').filter({hasText:'C42 mobile recurring original'}).first().click()
   await page.getByRole('dialog',{name:'Event details'}).getByRole('button',{
     name:'Plan preparation before this event'}).click()
